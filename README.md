@@ -12,7 +12,7 @@ sudo apt-get install python3 python3-venv python3-pip -y
 
 - Execute Ruby code
 ```bash
-python filename.py
+python3 filename.py
 ```
 
 ## Used Text Editor:
