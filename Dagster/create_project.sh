@@ -1,8 +1,8 @@
 #!/bin/sh
 
 # Run:
-# chmod +x dagster-installation.sh
-# sudo ./dagster-installation.sh
+# chmod +x create_project.sh
+# sudo ./create_project.sh
 
 project_name=tutorial-project # Environment variable
 
@@ -14,7 +14,4 @@ pip install dagster dagit
 dagster project scaffold --name $project_name
 
 # Open the project folder
-cd project_name
-
-# Run the project in dev mode
-dagster dev
+cd $project_name
