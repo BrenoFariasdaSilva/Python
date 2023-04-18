@@ -4,13 +4,17 @@
 # chmod +x dagster-installation.sh
 # sudo ./dagster-installation.sh
 
-pip install dagster dagit requests pandas matplotlib wordcloud dagster_duckdb dagster_duckdb_pandas
+project_name=tutorial-project # Environment variable
+
+pip install dagster dagit
+
+# Create var with the name of the project to be created
 
 # Create a new project
-dagster project scaffold --name tutorial-project
+dagster project scaffold --name $project_name
 
 # Open the project folder
-cd tutorial-project
+cd project_name
 
 # Run the project in dev mode
 dagster dev
