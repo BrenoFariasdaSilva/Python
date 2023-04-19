@@ -19,10 +19,9 @@ Feel free to contribute and send suggestions.
 		```
 
 ## Run Python code:
-* Manually:
-	```bash
-	python3 filename_here
-	```
+```bash
+python3 filename_here
+```
 
 ## Used Text Editor:
 * Visual Studio Code:
