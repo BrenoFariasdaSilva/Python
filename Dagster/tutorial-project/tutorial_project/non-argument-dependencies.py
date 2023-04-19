@@ -1,5 +1,8 @@
 from dagster import asset
 
+def execute_query(query: str) -> None:
+    print(f"Executing query: {query}")
+
 @asset
 def upstream_asset() -> None:
     execute_query("CREATE TABLE sugary_cereals AS SELECT * FROM cereals")
