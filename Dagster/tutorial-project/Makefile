@@ -1,2 +1,3 @@
 run:
+	clear
 	dagster dev
