@@ -35,3 +35,9 @@ echo deb [arch=amd64 signed-by=/usr/share/keyrings/vscode.gpg] https://packages.
 sudo apt update -y
 sudo apt install code -y
 ```
+
+## Contributing
+Code improvement recommendations are very welcome, but keep in mind that many exercises will be very simple, with a lot of room for improvement, after all here is all the history of my learning progress.
+
+## License
+[MIT](https://choosealicense.com/licenses/mit/)
