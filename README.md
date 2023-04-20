@@ -20,7 +20,7 @@ Feel free to contribute and send suggestions.
 
 ## Run Python code:
 ```bash
-python3 filename_here
+python3 filename_here.py
 ```
 
 ## Text Editor - Visual Studio Code:
