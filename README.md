@@ -20,7 +20,8 @@ Feel free to contribute and send suggestions.
 
 ## Run Python code:
 ```bash
-python3 ./{ProgramName}.py # Example: python3 ./main.py 
+python3 ./{ProgramName}.py
+# Example: python3 ./main.py 
 ```
 
 ## Text Editor - Visual Studio Code:
