@@ -4,8 +4,18 @@
 
 </div>
 
+<div align="center">
+  
+---
+
 This repo is made with the objective of showing the Python related codes i have written. \
 Feel free to contribute and send suggestions.
+  
+---
+
+</div>
+
+
 
 ## Installation:
 * Python Language:
