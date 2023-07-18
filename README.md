@@ -25,6 +25,14 @@ Feel free to contribute and send suggestions.
 
 </div>
 
+## Table of Contents
+- [Python. ](#python-)
+	- [Table of Contents](#table-of-contents)
+	- [Installation:](#installation)
+	- [Run Python code:](#run-python-code)
+	- [Text Editor - Visual Studio Code:](#text-editor---visual-studio-code)
+	- [Contributing](#contributing)
+	- [License](#license)
 
 ## Installation:
 * Python Language:
