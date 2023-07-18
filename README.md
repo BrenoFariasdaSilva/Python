@@ -15,7 +15,9 @@ Feel free to contribute and send suggestions.
 
 </div>
 
-
+<p align="center">
+  <img src="https://wakatime.com/badge/github/BrenoFariasdaSilva/Python.svg" alt="wakatime" />
+</p>
 
 ## Installation:
 * Python Language:
