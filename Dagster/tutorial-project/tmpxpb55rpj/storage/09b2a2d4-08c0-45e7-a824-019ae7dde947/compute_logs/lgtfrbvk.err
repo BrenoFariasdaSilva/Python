@@ -1,7 +1,0 @@
-[32m2023-04-18 11:03:14 -0300[0m - dagster - [34mDEBUG[0m - __ASSET_JOB - 09b2a2d4-08c0-45e7-a824-019ae7dde947 - 88615 - LOGS_CAPTURED - Started capturing logs in process (pid: 88615).
-[32m2023-04-18 11:03:14 -0300[0m - dagster - [34mDEBUG[0m - __ASSET_JOB - 09b2a2d4-08c0-45e7-a824-019ae7dde947 - 88615 - topstory_ids - STEP_START - Started execution of step "topstory_ids".
-[32m2023-04-18 11:03:14 -0300[0m - dagster - [34mDEBUG[0m - __ASSET_JOB - 09b2a2d4-08c0-45e7-a824-019ae7dde947 - 88615 - topstory_ids - STEP_OUTPUT - Yielded output "result" of type "Any". (Type check passed).
-[32m2023-04-18 11:03:14 -0300[0m - dagster - [34mDEBUG[0m - __ASSET_JOB - 09b2a2d4-08c0-45e7-a824-019ae7dde947 - topstory_ids - Writing file at: /home/brenofarias/Documents/My Files/Sem Backup/DataWay/Dagster/Dagster-tutorial/tutorial-project/tmpxpb55rpj/storage/topstory_ids
-[32m2023-04-18 11:03:14 -0300[0m - dagster - [34mDEBUG[0m - __ASSET_JOB - 09b2a2d4-08c0-45e7-a824-019ae7dde947 - 88615 - topstory_ids - ASSET_MATERIALIZATION - Materialized value topstory_ids.
-[32m2023-04-18 11:03:14 -0300[0m - dagster - [34mDEBUG[0m - __ASSET_JOB - 09b2a2d4-08c0-45e7-a824-019ae7dde947 - 88615 - topstory_ids - HANDLED_OUTPUT - Handled output "result" using IO manager "io_manager"
-[32m2023-04-18 11:03:14 -0300[0m - dagster - [34mDEBUG[0m - __ASSET_JOB - 09b2a2d4-08c0-45e7-a824-019ae7dde947 - 88615 - topstory_ids - STEP_SUCCESS - Finished execution of step "topstory_ids" in 464ms.
