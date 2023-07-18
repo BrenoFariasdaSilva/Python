@@ -1,4 +1,4 @@
-# Python <img src="https://github.com/devicons/devicon/blob/master/icons/python/python-original.svg"  width="3%" height="3%">
+# [Python.](https://github.com/BrenoFariasdaSilva/Python) <img src="https://github.com/devicons/devicon/blob/master/icons/python/python-original.svg"  width="3%" height="3%">
 This repo is made with the objective of showing the Python related codes i have written. \
 Feel free to contribute and send suggestions.
 
