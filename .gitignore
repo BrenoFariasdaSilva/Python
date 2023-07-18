@@ -128,5 +128,8 @@ dmypy.json
 # Pyre type checker
 .pyre/
 
+# Temp Folders
+/tmp*/
+
 # Dagster tmp folder
 Dagster/tmp*/
