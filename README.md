@@ -19,6 +19,13 @@ Feel free to contribute and send suggestions.
   <img src="https://wakatime.com/badge/github/BrenoFariasdaSilva/Python.svg" alt="wakatime" />
 </p>
 
+<div align="center">
+  
+![RepoBeats Statistics](https://repobeats.axiom.co/api/embed/5907a919937c0e8c81a9c3f0c4ca39c044ba14b0.svg "Repobeats analytics image")
+
+</div>
+
+
 ## Installation:
 * Python Language:
 
