@@ -53,7 +53,6 @@ def rename_movies_with_subtitles(path_input):
 	# for file_name in file_list:
 	# 	file_format = getFileFormat(file_list, i - 1)
 
-
 def main():
 	print("Welcome to the file renamer!")
 	while True:
