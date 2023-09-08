@@ -34,8 +34,7 @@ Feel free to contribute and send suggestions.
 - [Python. ](#python-)
 	- [Table of Contents](#table-of-contents)
 	- [Installation:](#installation)
-	- [Run Python code:](#run-python-code)
-	- [Text Editor - Visual Studio Code:](#text-editor---visual-studio-code)
+	- [Run Python Code:](#run-python-code)
 	- [Contributing](#contributing)
 	- [License](#license)
 
@@ -62,7 +61,7 @@ Feel free to contribute and send suggestions.
 		sudo ./install.sh
 		```
 
-## Run Python code:
+## Run Python Code:
 ```bash
 python3 ./{ProgramName}.py
 # Example: python3 ./main.py 
