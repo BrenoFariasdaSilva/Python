@@ -136,3 +136,5 @@ Dagster/tmp*/
 
 # Non Repetitive Combinations folder
 Non\ Repetitive\ Combinations/non_repetitive_combinations.txt
+
+.DS_Store
