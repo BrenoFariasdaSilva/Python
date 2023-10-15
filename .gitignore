@@ -138,3 +138,6 @@ Dagster/tmp*/
 Non\ Repetitive\ Combinations/non_repetitive_combinations.txt
 
 .DS_Store
+
+# Bill Folder
+Credit\ Card\ Bill/Bills/*
