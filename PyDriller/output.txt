@@ -1,2 +1,0 @@
-Filename: src/main/java/org/apache/commons/lang3/StringUtils.java
-Commit Message: [LANG-1681] Fix some FieldUtils Javadocs #1047
