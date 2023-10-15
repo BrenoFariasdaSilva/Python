@@ -1,4 +1,5 @@
 import pandas as pd # Pandas is used to read and write the CSV files
+import os # For checking if the file exists
 from colorama import Style # For coloring the terminal
 
 # Macros:
@@ -7,6 +8,26 @@ class backgroundColors: # Colors for the terminal
 	GREEN = "\033[92m" # Green
 	YELLOW = "\033[93m" # Yellow
 	RED = "\033[91m" # Red
+
+# Constants:
+INPUT_CSV_FOLDER = "Bills" # The folder where the CSV files are located
+INPUT_CSV_FILENAME = "debits.csv" # The CSV file to be read
+INPUT_CSV_FILE = f"{INPUT_CSV_FOLDER}/{INPUT_CSV_FILENAME}" # The CSV file to be read
+OUTPUT_CSV_FILENAME = "debits_sum.csv" # The CSV file to be written
+OUTPUT_CSV_FILE = f"{INPUT_CSV_FOLDER}/{OUTPUT_CSV_FILENAME}" # The CSV file to be written
+
+# @brief: This function verifies if the /Bills folder exists, if not, it creates it.
+# @param: None
+# @return: None
+def verify_bills_folder():
+	if not os.path.isdir(f"{INPUT_CSV_FOLDER}"):
+		os.mkdir(f"{INPUT_CSV_FOLDER}")
+
+# @brief: This function verifies if the debits csv file exists.
+# @param: file_name is the name of the file to be verified
+# @return: True if the file exists, False otherwise
+def debits_csv_exists(file_name):
+	return os.path.isfile(f"{file_name}")
 
 # @brief: This function converts a string with the format "R$ 1,00" to a float
 # @param: reais is a string with the format "R$ 1,00"
@@ -18,8 +39,16 @@ def reais_to_float(reais):
 # @param: None
 # @return: None
 def main():
+	# Verify if the "Bills" folder exists
+	verify_bills_folder()
+
+	# Verify if the "debits.csv" file exists
+	if not debits_csv_exists(f"{INPUT_CSV_FILE}"):
+		print(f"{backgroundColors.RED}The file {backgroundColors.CYAN}\"{INPUT_CSV_FILE}\"{backgroundColors.RED} does not exist inside the {backgroundColors.CYAN}\"{INPUT_CSV_FOLDER}\"{backgroundColors.RED} folder.{Style.RESET_ALL}")
+		exit(1)
+	
 	# Read the CSV file using the ";" delimiter
-	df = pd.read_csv("debits.csv", delimiter=";")
+	df = pd.read_csv(f"{INPUT_CSV_FILE}", sep=";")
 
 	# Remove any row in the "Valor" column starting with "R$ -"
 	df = df[~df["Valor"].str.startswith("R$ -")]
@@ -40,7 +69,7 @@ def main():
 	df["Sum"] = df["Sum"].round(3)
 
 	# Write the DataFrame with comma separator
-	df.to_csv("debits_sum.csv", sep=",", index=False)
+	df.to_csv(f"{OUTPUT_CSV_FILE}", sep=",", index=False)
 
 	# Print the total sum of the "Valor" column
 	print(f"{backgroundColors.GREEN}Total sum of the \"Valor\" column: {backgroundColors.CYAN}R$ {df['Valor'].sum():.2f}{backgroundColors.GREEN}.{Style.RESET_ALL}")
