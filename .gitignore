@@ -141,3 +141,26 @@ Non\ Repetitive\ Combinations/non_repetitive_combinations.txt
 
 # Bill Folder
 Credit\ Card\ Bill/Bills/*
+
+# Ignore every file inside PyDriller specified folders
+/PyDriller/ck_metrics
+/PyDriller/compressed
+/PyDriller/diffs
+/PyDriller/junk
+/PyDriller/metrics_data
+/PyDriller/metrics_evolution
+/PyDriller/metrics_predictions
+/PyDriller/metrics_statistics
+/PyDriller/progress
+/PyDriller/tmp
+PyDriller/repositories
+
+# Ignore RefactoringMiner/RefactoringMiner folder
+/RefactoringMiner/RefactoringMiner
+/RefactoringMiner/repositories/
+/RefactoringMiner/json_files/
+
+# Ignore any 7z or tar.gz or zip file
+*.7z
+*.tar.gz
+*.zip
