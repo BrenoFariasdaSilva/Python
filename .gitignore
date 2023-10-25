@@ -164,3 +164,5 @@ PyDriller/repositories
 *.7z
 *.tar.gz
 *.zip
+
+URLs\ List\ Filter/*.txt
