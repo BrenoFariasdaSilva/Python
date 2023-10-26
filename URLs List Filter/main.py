@@ -1,3 +1,12 @@
+from colorama import Style # For coloring the terminal
+
+# Macros:
+class backgroundColors: # Colors for the terminal
+	CYAN = "\033[96m" # Cyan
+	GREEN = "\033[92m" # Green
+	YELLOW = "\033[93m" # Yellow
+	RED = "\033[91m" # Red
+
 INPUT_FILE = "urls_list.txt" # Input file with the URLs
 OUTPUT_FILE = "urls_list.txt" # Output file with the sorted and cleaned URLs
 
@@ -34,11 +43,13 @@ def show_repeated_substrings(url_substring_counts):
 	# Filter and display the repeated substrings
 	repeated_substrings = {substring: count for substring, count in url_substring_counts.items() if count > 1}
 	for substring, count in repeated_substrings.items():
-		print(f"Substring: {substring}, Count: {count}")
+		print(f"{backgroundColors.GREEN}Substring: {backgroundColors.CYAN}{substring}{backgroundColors.GREEN}, Count: {backgroundColors.CYAN}{count}{Style.RESET_ALL}")
 	return repeated_substrings
 
 # Description: This is the main function.
 def main():
+	print(f"{backgroundColors.GREEN}This program reads a file with a list of URLs, remove the empty lines and the new line characters, sort the URLs by the substring after the last slash until the end of the URL, extract the substring between the second and the last slash, count the repeated substrings and display them.{Style.RESET_ALL}")
+
 	# Dictionary to store the extracted substrings and their counts
 	url_substring_counts = {}
 
@@ -53,6 +64,8 @@ def main():
 
 	# Filter and display the repeated substrings
 	show_repeated_substrings(url_substring_counts)
+
+	print(f"{backgroundColors.GREEN}Program finished.{Style.RESET_ALL}")
 
 # Description: This is the standard boilerplate that calls the main function.
 if __name__ == "__main__":
