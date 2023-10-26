@@ -11,11 +11,11 @@ INPUT_FILE = "urls_list.txt" # Input file with the URLs
 OUTPUT_FILE = "urls_list.txt" # Output file with the sorted and cleaned URLs
 
 # Description: This function reads a file with a list of URLs, remove the empty lines and the new line characters,
-# sort the URLs by the substring after the last slash until the end of the URL 
 def sort_and_clean_urls():
 	with open(INPUT_FILE, "r") as file: # Open the file with the URLs
 		lines = file.readlines() # Read the lines of the file
 		lines = [line.strip() for line in lines if line.strip()] # Remove the empty lines and the new line characters
+		lines = [line[:line.rfind("/") + 1] + line[line.rfind("/") + 1:].title() for line in lines]
 		lines.sort(key=lambda line: line[line.rfind("/") + 1:]) # Sort the URLs by the substring after the last slash until the end of the URL
 
 	return lines # Return the sorted and cleaned URLs
