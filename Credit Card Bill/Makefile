@@ -1,4 +1,4 @@
-all: dependencies run
+all: run
 
 run:
 	clear; python3 ./main.py
