@@ -58,6 +58,7 @@ def main():
 
 	# Convert the "Data" column to datetime objects assuming the format is "dd/mm/yyyy"
 	df["Data"] = pd.to_datetime(df["Data"], format="%d/%m/%Y")
+	df["Data"] = df["Data"].dt.strftime('%m/%d/%Y')
 
 	# Sort the DataFrame by the "Data" column in ascending order
 	df = df.sort_values(by="Data")
