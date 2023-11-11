@@ -1,6 +1,4 @@
-# ToDo: Implement logic for the possibility of a srt file be in the folder
-
-import os
+import os # For walking through the directory tree
 from colorama import Style # For coloring the terminal
 
 # Macros:
@@ -11,72 +9,64 @@ class backgroundColors: # Colors for the terminal
 	RED = "\033[91m" # Red
 	CLEAR_TERMINAL = "\033[H\033[J" # Clear the terminal
 
-movies_extensions = ["mp4", "mkv", "avi", "mov"]
-subtitles_extension = ["srt"]
+# Constants:
+MOVIES_FILE_FORMAT = ["avi", "mkv", "mov", "mp4"] # The extensions of the movies
+SUBTITLES_FILE_FORMAT = ["srt"] # The extensions of the subtitles
 
-def getFileFormat(file_list, i):
-	file_format = file_list[i][file_list[i].rfind(".") + 1:]
-	return file_format
+# This function will return the file format
+def getFileFormat(file):
+	return file[file.rfind(".") + 1:] # Return the file format
 
-def find_same_name_files(file_list):
-	same_name_files = []
-	for file_name in file_list:
-		if file_name[:file_name.rfind(".")] in file_list:
-			same_name_files.append(file_name)
+# This function will return the file name without the extension
+def getFileNameWithoutExtension(file):
+	return file[:file.rfind(".")] # Return the file name without the extension
 
-	return same_name_files
+# This function will rename the movies and the subtitles that have the same name but different extensions with the same number and different extensions
+def rename_movies(file_list):
+	number_of_files = len(file_list) # Get the number of files in the file list
+	i = 0
+	file_order = 1
 
-def rename_movie_files(path_input):
-	# r"" is used to escape the backslashes
-	file_list = os.listdir(r"" + path_input)
-	saved_path = os.getcwd()  # Get the current working directory
-	# Change the current working directory to the path_input
-	os.chdir(r"" + path_input)
+	# Loop from 0 to the number of files in the file list
+	while i < number_of_files:
+		print(f"{backgroundColors.YELLOW}File number: {file_order}{Style.RESET_ALL}") # Print the file number
+		current_file_format = getFileFormat(file_list[i]) # Get the current file format
 
-	i = 1
-	for file_name in file_list:
-		file_format = getFileFormat(file_list, i - 1)  # Get the file format
-		if i < 10:
-			# Rename the file using a 0 before the number if it's less than 10
-			os.rename(file_name, "0" + str(i) + "." + file_format)
-		else:
-			# Rename the file using i as the number
-			os.rename(file_name, str(i) + "." + file_format)
-		i += 1
+		file_number = f"0{file_order}" if file_order < 10 else f"{file_order}" # If the file number is less than 10, add a 0 before the number
 
-	# Change the current working directory back to the original path
-	os.chdir(saved_path)
+		# If the current file and the next file have the same name but different extensions
+		if ((i != number_of_files - 1) and (getFileNameWithoutExtension(file_list[i]) == getFileNameWithoutExtension(file_list[i + 1]) and (getFileFormat(file_list[i]) != getFileFormat(file_list[i + 1])))):
+			# os.rename(file_list[i], f"{file_number}.{current_file_format}")
+			# os.rename(file_list[i + 1], f"{file_number}.{getFileFormat(file_list[i + 1])}")
+			print(f"  {backgroundColors.CYAN}{file_list[i]}{backgroundColors.GREEN} -> {backgroundColors.CYAN}{file_number}.{current_file_format}{Style.RESET_ALL}")
+			print(f"  {backgroundColors.CYAN}{file_list[i + 1]}{backgroundColors.GREEN} -> {backgroundColors.CYAN}{file_number}.{getFileFormat(file_list[i + 1])}{Style.RESET_ALL}")
+			i += 2
+		else: # If the next file has a different name
+			# os.rename(file_list[i], f"{file_number}.{current_file_format}")
+			print(f"  {backgroundColors.CYAN}{file_list[i]}{backgroundColors.GREEN} -> {backgroundColors.CYAN}{file_number}.{current_file_format}{Style.RESET_ALL}")
+			i += 1
+		file_order += 1
 
-def rename_movies_with_subtitles(path_input):
-	file_list = os.listdir(r"" + path_input)
-	saved_path = os.getcwd() 
-	os.chdir(r"" + path_input)
-
-	same_name_files = find_same_name_files(file_list)
-
-	print("The files with the same name are: ")
-	print(same_name_files)
-
-	# now search for the movie file and the srt file with the name in the same_name_files list and rename them with the same number
-	# i = 1
-	# for file_name in file_list:
-	# 	file_format = getFileFormat(file_list, i - 1)
-
+# This is the main function
 def main():
-	print("Welcome to the file renamer!")
-	while True:
-		print("Enter the path to the folder: ")
-		path_input = input()
-		if os.path.exists(path_input):
-			break
-		else:
-			print("The path doesn't exist!")
+	print(f"{backgroundColors.GREEN}Welcome to the {backgroundColors.CYAN}File Renamer{backgroundColors.GREEN}!{Style.RESET_ALL}", end="\n\n")
 
-	file_list = os.listdir(r"" + path_input)
-	if find_same_name_files(file_list):
-		rename_movies_with_subtitles(path_input)
-	else:
-		rename_movie_files(path_input)
+	current_path = os.getcwd() # Get the current working directory
+	file_list = os.listdir(rf"{current_path}") # Get the files in the current_path
+	
+	# Filter the files_list to only include the movies and the subtitles
+	file_list = [file for file in file_list if getFileFormat(file) in MOVIES_FILE_FORMAT or getFileFormat(file) in SUBTITLES_FILE_FORMAT]
+	file_list.sort() # Sort the file_list alphabetically
 
+	# If there are no files in the current_path
+	if len(file_list) == 0:
+		print(f"{backgroundColors.RED}There are no files in this directory!{Style.RESET_ALL}")
+		return # Return
+	
+	rename_movies(file_list) # Rename the movies
+
+	print(f"\n{backgroundColors.GREEN}Finished renaming the files!{Style.RESET_ALL}")
+
+# This is the standard boilerplate that calls the main() function.
 if __name__ == '__main__':
-    main()
+	main() # Call the main function
