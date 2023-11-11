@@ -18,17 +18,17 @@ IGNORE_FOLDERS = ["BusTracker", "UTFome"]
 def search_executable_files(path):
 	# Iterate over all the files in directory
 	for root, dirs, files in os.walk(path):
-			for file in files: # Iterate over all the files in the directory
-				full_path = os.path.join(root, file) # Get the full path of the file
+		for file in files: # Iterate over all the files in the directory
+			full_path = os.path.join(root, file) # Get the full path of the file
 
-				# Verify if any of the ignore folders are in the full path
-				if any(ignore_folder in full_path for ignore_folder in IGNORE_FOLDERS):
-					continue # Ignore the folder
-				# Verify if any of the exception files are in the full path
-				elif any(exception_file in full_path for exception_file in EXCEPTION_FILES):
-					continue # Ignore the file
+			# Verify if any of the ignore folders are in the full path
+			if any(ignore_folder in full_path for ignore_folder in IGNORE_FOLDERS):
+				continue # Ignore the folder
+			# Verify if any of the exception files are in the full path
+			elif any(exception_file in full_path for exception_file in EXCEPTION_FILES):
+				continue # Ignore the file
 
-				file_remover(full_path) # Delete the file if it is an executable file
+			file_remover(full_path) # Delete the file if it is an executable file
 
 # This function will delete the file
 def file_remover(full_path):
