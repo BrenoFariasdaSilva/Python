@@ -1,28 +1,50 @@
-# Create a program that ask for path input
-# and then get all the folders in the path and save it in a list
-# and then print the number of duplicates deleted and the name of the duplicated folders
+import os # For walking through the directory tree
+from colorama import Style # For coloring the terminal
 
-# Status: Uncompleted 
-import os
+# Macros:
+class backgroundColors: # Colors for the terminal
+	CYAN = "\033[96m" # Cyan
+	GREEN = "\033[92m" # Green
+	YELLOW = "\033[93m" # Yellow
+	RED = "\033[91m" # Red
+	CLEAR_TERMINAL = "\033[H\033[J" # Clear the terminal
+   
+# This function will get all the directories names in the path
+def get_directories(path):
+	directories_list = [] # List of all the directories
 
+	# Iterate over all the files in directory
+	for root, dirs, files in os.walk(path):
+		for directory in dirs: # Iterate over all the directories in the directory
+			directories_list.append(directory) # Add the directory to the list
+
+	return directories_list # Return the list
+
+# This function will verify if there are duplicates in the list
+def search_duplicates(directories_list):
+	list_size = len(directories_list) - len(set(directories_list)) # Get the number of duplicates
+
+	current_index = 0 # Current index of the list
+	duplicates = 0 # Number of duplicates
+
+	while current_index < list_size:
+		if directories_list[current_index] == directories_list[current_index + 1] and current_index + 1 < list_size:
+			print(f"{backgroundColors.GREEN}Duplicate: {backgroundColors.CYAN}{directories_list[current_index]}{Style.RESET_ALL}")
+
+		current_index += 1 # Increment the current index
+
+	if duplicates == 0:
+		print(f"{backgroundColors.CYAN}No duplicates found!{Style.RESET_ALL}")
+	
+# This is the main function
 def main():
-   path = input("Enter the path: ")
-   
-   if os.path.exists(path):
-      get_files(path)
-   
-def get_files(path):
-	# get all the files in the path and save it in a list
-	# and then check if there are duplicates
-	files = os.listdir(path)
-	check_duplicates(files)
+	print(f"{backgroundColors.GREEN}Welcome to the {backgroundColors.CYAN}Duplicated Directories Finder{backgroundColors.GREEN}!{Style.RESET_ALL}") # Print a welcome message
 
-def check_duplicates(files):
-	duplicates = 0
-	for file in files:
-		if files.count(file) > 1:
-			duplicates += 1
-			print(file)
+	path = os.getcwd() # Get the current working directory
+	directories_list = get_directories(path) # Get all the files in the path
+	directories_list.sort() # Sort the list
+	search_duplicates(directories_list) # List all the files in the directory
    
+# This is the standard boilerplate that calls the main() function.
 if __name__ == "__main__":
-	main()
+   main() # Call the main function
