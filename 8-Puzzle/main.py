@@ -9,9 +9,11 @@ class backgroundColors: # Colors for the terminal
 	RED = "\033[91m" # Red
 	CLEAR_TERMINAL = "\033[H\033[J" # Clear the terminal
 
-# Define the goal state and initial state as 2D lists
-goal_state = [[1, 2, 3], [4, 5, 6], [7, 8, 0]] # 0 represents the empty space
-initial_state = [[1, 0, 3], [4, 2, 5], [7, 8, 6]] # Initial state
+# Constants:
+GOAL_STATE = [[1, 2, 3], [4, 5, 6], [7, 8, 0]] # Goal state. 0 represents the empty tile
+INITIAL_STATE = [[1, 0, 3], [4, 2, 5], [7, 8, 6]] # Initial state
+MOVES = [(0, 1), (1, 0), (0, -1), (-1, 0)] # All of the possible moves
+MOVE_NAMES = ["right", "down", "left", "up"] # Names of the moves
 
 # Define a class to represent the puzzle state
 class PuzzleState:
@@ -34,12 +36,9 @@ class PuzzleState:
 					h += abs(i - goal_row) + abs(j - goal_col) # Add the Manhattan distance to the heuristic
 		return h # Return the heuristic
 
+	# Define a function to compare two states
 	def __lt__(self, other): 
 		return self.f < other.f # Compare the f values of the states
-
-# Define possible moves
-moves = [(0, 1), (1, 0), (0, -1), (-1, 0)]
-move_names = ["right", "down", "left", "up"]
 
 # Define a function to find possible moves from a given state
 # Input: state (2D list)
@@ -53,7 +52,7 @@ def find_possible_moves(state):
 				break # Break out of the loop
 	
 	possible_moves = [] # List of possible moves
-	for move, move_name in zip(moves, move_names): # For each move
+	for move, move_name in zip(MOVES, MOVE_NAMES): # For each move
 		new_row, new_col = empty_row + move[0], empty_col + move[1] # Find the new row and column of the empty tile
 		if 0 <= new_row < 3 and 0 <= new_col < 3: # If the new row and column are valid
 			possible_moves.append(move_name) # Add the move to the list of possible moves
@@ -96,7 +95,7 @@ def solve_8_puzzle(initial_state):
 	# While the priority queue is not empty
 	while open_list:
 		current_node = heapq.heappop(open_list) # Pop the node with the lowest f value
-		if current_node.state == goal_state: # If the current state is the goal state
+		if current_node.state == GOAL_STATE: # If the current state is the goal state
 			return current_node # Return the current node
 		
 		# Print the current state
@@ -132,13 +131,21 @@ def print_solution(solution_node):
 		print(f"{backgroundColors.GREEN}Move: {move}{Style.RESET_ALL}") # Print the move
 		print(f"{backgroundColors.YELLOW}------------------{Style.RESET_ALL}")
 
-# Solve the 8-puzzle problem
-solution_node = solve_8_puzzle(initial_state)
+# This is the main function
+def main():
+	print(f"{backgroundColors.GREEN}Welcome to the {backgroundColors.CYAN}8-Puzzle Solver{backgroundColors.GREEN}!{Style.RESET_ALL}") # Print a welcome message
 
-# Print the solution
-if solution_node:
-	print(f"{backgroundColors.GREEN}Solution found in {solution_node.g} moves!{Style.RESET_ALL}")
-	print(f"{backgroundColors.GREEN}Initial state: {Style.RESET_ALL}")
-	print_solution(solution_node)
-else:
-	print(f"{backgroundColors.RED}Solution not found!{Style.RESET_ALL}")
+	# Solve the 8-puzzle problem
+	solution_node = solve_8_puzzle(INITIAL_STATE)
+
+	# Print the solution
+	if solution_node:
+		print(f"{backgroundColors.GREEN}Solution found in {solution_node.g} moves!{Style.RESET_ALL}")
+		print(f"{backgroundColors.GREEN}Initial state: {Style.RESET_ALL}")
+		print_solution(solution_node)
+	else:
+		print(f"{backgroundColors.RED}Solution not found!{Style.RESET_ALL}")
+
+# This is the standard boilerplate that calls the main() function.
+if __name__ == "__main__":
+	main() # Call the main function
