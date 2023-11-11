@@ -36,12 +36,12 @@ To run the 8-puzzle solver, follow these steps:
 2. **Install Dependencies:**
 You need to install the `colorama` library, which is used for terminal coloring. You can install it using pip:
 	```bash
-		pip install colorama
+		make dependencies
 	```
 
 3. **Run the Code:**
    ```bash
-		clear; python3 main.py
+		make run
 	```
 
 
