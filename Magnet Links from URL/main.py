@@ -10,16 +10,16 @@ class backgroundColors: # Colors for the terminal
 	YELLOW = "\033[93m" # Yellow
 	RED = "\033[91m" # Red
 
-INPUT_FILENAME = "URLs_list.txt"  # Name of the text file containing the URLs
-OUTPUT_FILENAME = "magnet_links.csv"  # Name of the CSV file to write the magnet links to
+INPUT_FILENAME = "URLs_list.txt" # Name of the text file containing the URLs
+OUTPUT_FILENAME = "magnet_links.csv" # Name of the CSV file to write the magnet links to
 
-# Description: Open a file and return the URLs
+# This function open a file and return the URLs
 def open_file(filename, mode):
 	with open(filename, mode) as file: # Open the file in read mode
 		urls = [line.strip() for line in file.readlines()] # Read all lines and remove trailing whitespaces
 	return urls # Return the URLs
 
-# Description: Process the URLs, extract magnet links and write them to a CSV file
+# This function process the URLs, extract magnet links and write them to a CSV file
 def process_urls(urls):
 	# Iterate through the URLs and extract magnet links
 	for url in urls:
@@ -30,8 +30,9 @@ def process_urls(urls):
 			for i, magnet_link in enumerate(magnet_links):
 				if i > 0:
 					print(f"{backgroundColors.GREEN}{i+1}º{backgroundColors.CYAN}{magnet_link}{Style.RESET_ALL}")
+					# TODO:Save the magnet links to a CSV file
 
-# Description: Function to extract magnet links from a given URL
+# This function extract magnet links from a given URL
 def extract_magnet_links(url):
 	try:
 		# Send an HTTP GET request to the URL
@@ -58,7 +59,7 @@ def extract_magnet_links(url):
 		print(f"{backgroundColors.RED}An error occurred while processing {backgroundColors.CYAN}{url}{backgroundColors.RED}: {backgroundColors.CYAN}{str(e)}{Style.RESET_ALL}")
 		return [] # Return an empty list
 
-# Description: This is the main function
+# This is the main function
 def main():
 	# Open the file in read mode
 	urls = open_file(INPUT_FILENAME, "r")
