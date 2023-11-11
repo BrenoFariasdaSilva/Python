@@ -1,18 +1,32 @@
-# create a program that ask for a path.
-# Inside that path, the program will enter every folder and subfolder and will search for a file and will delete it.
+import os # Import the os module
+from colorama import Style # For coloring the terminal
 
-import os 
+# Macros:
+class backgroundColors: # Colors for the terminal
+	CYAN = "\033[96m" # Cyan
+	GREEN = "\033[92m" # Green
+	YELLOW = "\033[93m" # Yellow
+	RED = "\033[91m" # Red
 
-def deleteDesktopIni(path, filename):
+REMOVE_FILES = ["desktop.ini", ".DS_Store"] # Files to be removed
+
+# This function deletes the desktop.ini file
+def deleteFiles(path):
+	counter = 0 # Counter of files removed
+	# Walk through the path
 	for folderName, subfolders, filenames in os.walk(path):
-		for filename in filenames:
-			if filename == 'desktop.ini':
-					os.remove(os.path.join(folderName, filename))
+		for filename in filenames: # For each filename in the filenames
+			if filename in REMOVE_FILES: # If the filename is in the REMOVE_FILES
+				counter += 1 # Increment the counter
+				complete_filename = os.path.join(folderName, filename) # Complete filename
+				print(f"{backgroundColors.GREEN}Deleting: {backgroundColors.CYAN}{counter}{backgroundColors.GREEN}º - {backgroundColors.CYAN}{complete_filename}{Style.RESET_ALL}")
+				os.remove(os.path.join(folderName, filename)) # Remove the file
 		
+# This function is the main function
 def main():
-	path = input('Enter the path: ')
-	filename = input('Enter the filename: ')
-	deleteDesktopIni(path, filename)
+	path = os.getcwd() # Get the current working directory
+	deleteFiles(path) # Delete the files in REMOVE_FILES
   
+# This is the standard boilerplate that calls the main() function
 if __name__ == '__main__':
-	main()
+	main() # Call the main() function
