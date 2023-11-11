@@ -9,15 +9,21 @@ class backgroundColors: # Colors for the terminal
 	RED = "\033[91m" # Red
 	CLEAR_TERMINAL = "\033[H\033[J" # Clear the terminal
 
+# Constants:
+SEARCH_STRINGS = [".DS_Store"] # Strings to search for in the Gitignore file
+TARGET_FILE = ".gitignore" # Name of the file to search for
+
 # @brief: Finds all the Gitignore files in the current directory and its subdirectories
 # @param directory: The directory to search in
 # @return: A list of all the Gitignore files found
 def find_gitignore_files(directory):
-	gitignore_files = []
-	for root, _, files in os.walk(directory):
-		if '.gitignore' in files:
-			gitignore_files.append(os.path.join(root, '.gitignore'))
-	return gitignore_files
+	gitignore_files = [] # List to store the Gitignore files
+
+	for root, _, files in os.walk(directory): # Walk through the directory tree
+		if TARGET_FILE in files: # Check if the Gitignore file is present in the current directory
+			gitignore_files.append(os.path.join(root, TARGET_FILE)) # Add the Gitignore file to the list
+
+	return gitignore_files # Return the list of Gitignore files
 
 # @brief: Updates the Gitignore file
 # @param file_path: The path to the Gitignore file
@@ -25,15 +31,15 @@ def find_gitignore_files(directory):
 # @return: None
 def update_gitignore(file_path, relative_path):
 	# Read the Gitignore file
-	with open(file_path, 'r') as f:
+	with open(file_path, "r") as f:
 		lines = f.readlines() # Read all the lines
 
-	# Check if ".DS_Store" is not already present in the Gitignore file
-	if not any(line.strip() == ".DS_Store" for line in lines):
-		# lines.append(".DS_Store\n")
-		# with open(file_path, 'w') as f:
-		# 	# f.writelines(lines)
-		print(f"{backgroundColors.CYAN}.DS_Store{backgroundColors.GREEN} added to {backgroundColors.CYAN}{relative_path}{Style.RESET_ALL}")
+	for line in lines: # Iterate through all the lines
+		for search_string in SEARCH_STRINGS: # Iterate through all the search strings
+			if search_string not in line: # Check if the search string is not present in the Gitignore file
+				with open(file_path, "a") as f: # Open the Gitignore file in append mode
+					f.write(f"{search_string}\n") # Add the search string to the Gitignore file
+				print(f"{backgroundColors.GREEN}Added {backgroundColors.CYAN}{search_string}{backgroundColors.GREEN} to {backgroundColors.CYAN}{relative_path}{Style.RESET_ALL}")
 
 # @brief: The main function
 # @param: None
@@ -44,12 +50,12 @@ def main():
 
 	# Check if there are any Gitignore files 
 	if not gitignore_files:
-		print(f"{backgroundColors.RED}No {backgroundColors.CYAN}.gitignore files found {backgroundColors.RED}in the {backgroundColors.CYAN}{current_directory}{backgroundColors.RED} directory or its subdirectories.{Style.RESET_ALL}")
+		print(f"{backgroundColors.RED}No {backgroundColors.CYAN}{TARGET_FILE} files found {backgroundColors.RED}in the {backgroundColors.CYAN}{current_directory}{backgroundColors.RED} directory or its subdirectories.{Style.RESET_ALL}")
 	else:
 		# Update all the Gitignore files
 		for gitignore_file in gitignore_files:
 			relative_path = os.path.relpath(gitignore_file, current_directory)
-			update_gitignore(gitignore_file, relative_path)
+			update_gitignore(gitignore_file, relative_path) # Update the Gitignore file
 
 # @brief: This is the entry point of the program
 if __name__ == "__main__":
