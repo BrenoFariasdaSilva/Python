@@ -10,12 +10,12 @@ class backgroundColors: # Colors for the terminal
 	RED = "\033[91m" # Red
 
 # Macros:
-movies_type = ["Dual", "Dublado", "Nacional", "Legendado", "English"]
+movies_type = ["Dual", "Dublado", "English", "Legendado", "Nacional"]
 
 # This function verifies if there is any misplaced file
 def misplaced_folder(path_input):
 	initial_path = os.getcwd() # Get the current working directory
-	folder_list = os.listdir(rf"{path_input}")  # List of folders in the path_input and rf is used to escape the backslashes
+	folder_list = os.listdir(rf"{path_input}") # List of folders in the path_input and rf is used to escape the backslashes
  
 	found = False # If there is any misplaced file
 
