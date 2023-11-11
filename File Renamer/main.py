@@ -1,6 +1,15 @@
 # ToDo: Implement logic for the possibility of a srt file be in the folder
 
 import os
+from colorama import Style # For coloring the terminal
+
+# Macros:
+class backgroundColors: # Colors for the terminal
+	CYAN = "\033[96m" # Cyan
+	GREEN = "\033[92m" # Green
+	YELLOW = "\033[93m" # Yellow
+	RED = "\033[91m" # Red
+	CLEAR_TERMINAL = "\033[H\033[J" # Clear the terminal
 
 movies_extensions = ["mp4", "mkv", "avi", "mov"]
 subtitles_extension = ["srt"]
