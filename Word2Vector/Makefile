@@ -5,3 +5,4 @@ run:
 
 dependencies:
 	pip install -r requirements.txt
+	pip install tqdm
