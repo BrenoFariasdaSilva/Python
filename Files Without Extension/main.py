@@ -1,4 +1,13 @@
 import os # Import the os module
+from colorama import Style # For coloring the terminal
+
+# Macros:
+class backgroundColors: # Colors for the terminal
+	CYAN = "\033[96m" # Cyan
+	GREEN = "\033[92m" # Green
+	YELLOW = "\033[93m" # Yellow
+	RED = "\033[91m" # Red
+	CLEAR_TERMINAL = "\033[H\033[J" # Clear the terminal
 
 # List of folders to ignore
 ignore_folders = ["docs", ".git", "makefile", "my softwares", "node_modules", ".tmp"]
