@@ -6,6 +6,7 @@ class backgroundColors: # Colors for the terminal
 	GREEN = "\033[92m" # Green
 	YELLOW = "\033[93m" # Yellow
 	RED = "\033[91m" # Red
+	CLEAR_TERMINAL = "\033[H\033[J" # Clear the terminal
 
 INPUT_FILE = "urls_list.txt" # Input file with the URLs
 OUTPUT_FILE = "urls_list.txt" # Output file with the sorted and cleaned URLs

@@ -9,6 +9,7 @@ class backgroundColors: # Colors for the terminal
 	GREEN = "\033[92m" # Green
 	YELLOW = "\033[93m" # Yellow
 	RED = "\033[91m" # Red
+	CLEAR_TERMINAL = "\033[H\033[J" # Clear the terminal
 
 INPUT_FILENAME = "URLs_list.txt" # Name of the text file containing the URLs
 OUTPUT_FILENAME = "magnet_urls.csv" # Name of the CSV file to write the magnet links to

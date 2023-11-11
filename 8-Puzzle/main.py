@@ -7,6 +7,7 @@ class backgroundColors: # Colors for the terminal
 	GREEN = "\033[92m" # Green
 	YELLOW = "\033[93m" # Yellow
 	RED = "\033[91m" # Red
+	CLEAR_TERMINAL = "\033[H\033[J" # Clear the terminal
 
 # Define the goal state and initial state as 2D lists
 goal_state = [[1, 2, 3], [4, 5, 6], [7, 8, 0]] # 0 represents the empty space

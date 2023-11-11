@@ -7,6 +7,7 @@ class backgroundColors: # Colors for the terminal
 	GREEN = "\033[92m" # Green
 	YELLOW = "\033[93m" # Yellow
 	RED = "\033[91m" # Red
+	CLEAR_TERMINAL = "\033[H\033[J" # Clear the terminal
 
 # @brief: Finds all the Gitignore files in the current directory and its subdirectories
 # @param directory: The directory to search in
