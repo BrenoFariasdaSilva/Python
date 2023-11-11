@@ -1,4 +1,4 @@
-from itertools import combinations # For generating combinations
+from itertools import combinations # Import the combinations function from the itertools module
 from colorama import Style # For coloring the terminal
 
 # Macros:
@@ -7,42 +7,62 @@ class backgroundColors: # Colors for the terminal
 	GREEN = "\033[92m" # Green
 	YELLOW = "\033[93m" # Yellow
 	RED = "\033[91m" # Red
-
-# List of attributes
-attributes = [
-    "Age",
-    "Gender",
-    "Height",
-    "Weight",
-    "Hair Color",
-    "Eye Color",
-    "Skin Tone",
-    "Ethnicity",
-    "Nationality",
-    "Income",
-    "QI",
-    "Occupation",
+    
+# Constants:
+ATTRIBUTES = [
+   "Age",
+   "Gender",
+   "Height",
+   "Weight",
+   "Hair Color",
+   "Eye Color",
+   "Skin Tone",
+   "Ethnicity",
+   "Nationality",
+   "Income",
+   "QI",
+   "Occupation",
 ]
 
-# Print the attributes list
-print(f"{backgroundColors.GREEN}Attributes: {backgroundColors.CYAN}{len(attributes)}{Style.RESET_ALL}")
-print(f"{backgroundColors.CYAN}{attributes}{Style.RESET_ALL}")
+# This function outputs the attributes
+def show_attributes(attributes):
+   print(f"{backgroundColors.GREEN}Attributes: {backgroundColors.CYAN}{len(attributes)}{Style.RESET_ALL}")
+   print(f"{backgroundColors.CYAN}{attributes}{Style.RESET_ALL}")
 
-# Generate non-repetitive combinations
-non_repetitive_combinations = [] # List of non-repetitive combinations
+# This function generates the non repetitive combinations
+def generate_combinations(attributes):
+   non_repetitive_combinations = [] # Non repetitive combinations
+   # Loop through the range of 1 to the length of the attributes + 1
+   for r in range(1, len(attributes) + 1):
+      # Extend the non_repetitive_combinations with the combinations of the attributes and r
+      non_repetitive_combinations.extend(combinations(attributes, r))
+   
+   # Convert the combinations to a list
+   non_repetitive_combinations = [list(combination) for combination in non_repetitive_combinations]
 
-# Loop the number of attributes, increasing the number of attributes per combination
-for r in range(1, len(attributes) + 1): 
-    # Extend (add) the combinations to the list of non-repetitive combinations
-    non_repetitive_combinations.extend(combinations(attributes, r))
+   return non_repetitive_combinations # Return the non repetitive combinations
 
-# Convert the combinations to lists for readability
-non_repetitive_combinations = [list(combination) for combination in non_repetitive_combinations]
+# This function saves the combinations to a file
+def save_combinations_to_file(combinations, filename="non_repetitive_combinations.txt"):
+   # Open the file
+   with open(filename, "w") as file:
+      for combination in combinations: # For each combination in the combinations
+         file.write(f"{combination}\n") # Write the combination to the file
 
+# This is the main function
+def main():
+   # Show the attributes
+   show_attributes(ATTRIBUTES)
 
-# Save the combinations to a file
-with open("non_repetitive_combinations.txt", "w") as file:
-    for combination in non_repetitive_combinations:
-        file.write(f"{combination}\n")
+   # Generate the non repetitive combinations
+   non_repetitive_combinations = generate_combinations(ATTRIBUTES)
 
-print(f"{backgroundColors.GREEN}Completed the generation of {backgroundColors.CYAN}{len(non_repetitive_combinations)}{backgroundColors.GREEN} combinations!{Style.RESET_ALL}")
+   # Save the non repetitive combinations to a file
+   save_combinations_to_file(non_repetitive_combinations)
+
+   # Print the number of combinations
+   print(f"{backgroundColors.GREEN}Completed the generation of {backgroundColors.CYAN}{len(non_repetitive_combinations)}{backgroundColors.GREEN} combinations!{Style.RESET_ALL}")
+
+# This is the standard boilerplate that calls the main() function
+if __name__ == "__main__":
+   main() # Call the main() function
