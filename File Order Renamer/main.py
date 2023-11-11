@@ -24,8 +24,8 @@ def getFileNameWithoutExtension(file):
 # This function will rename the movies and the subtitles that have the same name but different extensions with the same number and different extensions
 def rename_movies(file_list):
 	number_of_files = len(file_list) # Get the number of files in the file list
-	i = 0
-	file_order = 1
+	i = 0 # The index of the current file
+	file_order = 1 # The order of the file
 
 	# Loop from 0 to the number of files in the file list
 	while i < number_of_files:
@@ -36,16 +36,17 @@ def rename_movies(file_list):
 
 		# If the current file and the next file have the same name but different extensions
 		if ((i != number_of_files - 1) and (getFileNameWithoutExtension(file_list[i]) == getFileNameWithoutExtension(file_list[i + 1]) and (getFileFormat(file_list[i]) != getFileFormat(file_list[i + 1])))):
-			# os.rename(file_list[i], f"{file_number}.{current_file_format}")
-			# os.rename(file_list[i + 1], f"{file_number}.{getFileFormat(file_list[i + 1])}")
 			print(f"  {backgroundColors.CYAN}{file_list[i]}{backgroundColors.GREEN} -> {backgroundColors.CYAN}{file_number}.{current_file_format}{Style.RESET_ALL}")
 			print(f"  {backgroundColors.CYAN}{file_list[i + 1]}{backgroundColors.GREEN} -> {backgroundColors.CYAN}{file_number}.{getFileFormat(file_list[i + 1])}{Style.RESET_ALL}")
-			i += 2
+			os.rename(file_list[i], f"{file_number}.{current_file_format}")
+			os.rename(file_list[i + 1], f"{file_number}.{getFileFormat(file_list[i + 1])}")
+			i += 2 # Increment i by 2, as we have renamed 2 files
 		else: # If the next file has a different name
-			# os.rename(file_list[i], f"{file_number}.{current_file_format}")
 			print(f"  {backgroundColors.CYAN}{file_list[i]}{backgroundColors.GREEN} -> {backgroundColors.CYAN}{file_number}.{current_file_format}{Style.RESET_ALL}")
-			i += 1
-		file_order += 1
+			os.rename(file_list[i], f"{file_number}.{current_file_format}")
+			i += 1 # Increment i by 1, as we have renamed 1 file
+
+		file_order += 1 # Increment the file order by 1
 
 # This is the main function
 def main():
@@ -61,9 +62,8 @@ def main():
 	# If there are no files in the current_path
 	if len(file_list) == 0:
 		print(f"{backgroundColors.RED}There are no files in this directory!{Style.RESET_ALL}")
-		return # Return
-	
-	rename_movies(file_list) # Rename the movies
+	else:
+		rename_movies(file_list) # Rename the movies
 
 	print(f"\n{backgroundColors.GREEN}Finished renaming the files!{Style.RESET_ALL}")
 
