@@ -17,9 +17,8 @@ OUTPUT_FILENAME = "magnet_urls.csv" # Name of the CSV file to write the magnet l
 def create_csv(filename):
 	with open(filename, "w") as csv: # Open the file in write mode
 		csv.writer("Counter, Magnet Links, Size\n") # Write the header of the CSV file
-		# Get the csv writer object
-		csv_object = csv.writer(csv)
-	return csv_object
+		csv_object = csv.writer(csv) # Get the csv writer object
+	return csv_object # Return the csv writer object
 
 # This function open a file and return the URLs
 def open_file(filename, mode):
@@ -33,10 +32,10 @@ def process_urls(urls, magnets_csv):
 	for url in urls:
 		print(f"{backgroundColors.YELLOW}Processing {backgroundColors.CYAN}{url}{Style.RESET_ALL}")
 		magnet_links = extract_magnet_links(url) # Extract magnet links from the URL
-		if magnet_links:
+		if magnet_links: # Check if magnet links were found
 			print(f"{backgroundColors.GREEN} Magnet links from {backgroundColors.CYAN}{url}{backgroundColors.GREEN}:{Style.RESET_ALL}")
-			for i, magnet_link in enumerate(magnet_links):
-				if i > 0:
+			for i, magnet_link in enumerate(magnet_links): # Iterate through the magnet links
+				if i > 0: # Check if it is not the first magnet link
 					print(f"{backgroundColors.GREEN}{i+1}º{backgroundColors.CYAN}{magnet_link}{Style.RESET_ALL}")
 					magnets_csv.writerow([i+1, magnet_link, ""]) # Write the magnet link to the CSV file
 
@@ -54,10 +53,10 @@ def extract_magnet_links(url):
 			magnet_links = [] # List to store the magnet links
 			# Find all href tags and extract magnet links using a regular expression
 			for a in soup.find_all("a", href=True):
-					href = a["href"]
-					magnet_match = re.search(r"magnet:\?xt=urn:[a-z0-9:]+", href)
+					href = a["href"] # Get the href attribute
+					magnet_match = re.search(r"magnet:\?xt=urn:[a-z0-9:]+", href) # Search for magnet links
 					if magnet_match:
-						magnet_links.append(magnet_match.group())
+						magnet_links.append(magnet_match.group()) # Add the magnet link to the list
 
 			return magnet_links # Return the magnet links
 		else: # If the request was not successful
