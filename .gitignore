@@ -166,6 +166,8 @@ PyDriller/repositories
 *.zip
 
 URLs\ List\ Filter/*.txt
+URLs\ List\ Filter/*.csv
 Magnet\ Links\ from\ URL/*.txt
+Magnet\ Links\ from\ URL/*.csv
 
 Files\ Without\ Extension/*.txt
