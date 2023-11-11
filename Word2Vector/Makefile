@@ -4,5 +4,4 @@ run:
 	clear; python3 ./word2vec.py
 
 dependencies:
-	pip install -r requirements.txt
-	pip install tqdm
+	pip install colorama gensim nltk tqdm 
