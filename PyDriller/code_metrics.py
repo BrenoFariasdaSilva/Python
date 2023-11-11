@@ -42,7 +42,7 @@ RELATIVE_PROGRESS_DIRECTORY_PATH = "/progress" # The relative path of the progre
 RELATIVE_REPOSITORIES_DIRECTORY_PATH = "/repositories" # The relative path of the directory that contains the repositories
 
 # Default values:
-DEFAULT_REPOSITORIES = {"commons-lang": "https://github.com/apache/commons-lang", "jabref": "https://github.com/JabRef/jabref", "kafka": "https://github.com/apache/kafka", "zookeeper": "https://github.com/apache/zookeeper"} # The default repositories to be analyzed
+DEFAULT_REPOSITORIES = {"jabref": "https://github.com/JabRef/jabref"} # The default repositories to be analyzed
 COMMITS_NUMBER = {"commons-lang": 8000, "jabref": 20000, "kafka": 12000, "zookeeper": 3000} # The number of commits of each repository
 ITERATIONS_DURATION = {"commons-lang": 4, "jabref": 20, "kafka": 18, "zookeeper": 12} # The duration of the iterations for each repository
 FULL_CK_METRICS_DIRECTORY_PATH = START_PATH + RELATIVE_CK_METRICS_DIRECTORY_PATH # The full path of the directory that contains the CK generated files
@@ -114,7 +114,7 @@ def update_repository(repository_name):
    repository_directory_path = f"{FULL_REPOSITORIES_DIRECTORY_PATH}/{repository_name}" # The path to the repository directory
    os.chdir(repository_directory_path) # Change the current working directory to the repository directory
    
-   # Create a thread to update the repository located in RELATIVE_REPOSITORY_DIRECTORY + '/' + repository_name
+   # Create a thread to update the repository located in RELATIVE_REPOSITORY_DIRECTORY + "/" + repository_name
    update_thread = subprocess.Popen(["git", "pull"], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
    update_thread.wait() # Wait for the thread to finish
    os.chdir(START_PATH) # Change the current working directory to the default one
@@ -240,35 +240,40 @@ def show_execution_time(first_iteration_duration, elapsed_time, number_of_commit
 # @brief: This function gets the last execution progress of the repository
 # @param: repository_name: Name of the repository to be analyzed
 # @param: saved_progress_file: Name of the file that contains the saved progress
+# @param: number_of_commits: Number of commits to be analyzed
 # @return: The commit hashes and the last commit
-def get_last_execution_progress(repository_name, saved_progress_file):
+def get_last_execution_progress(repository_name, saved_progress_file, number_of_commits):
    commit_hashes = [] # The commit hashes list
    last_commit_number = 0 # The last commit number
 
    # Check if there is a saved progress file
    if os.path.exists(saved_progress_file):
-      with open(saved_progress_file, 'r') as progress_file:
+      with open(saved_progress_file, "r") as progress_file:
          lines = progress_file.readlines()
          # remove the last two lines
          lines = lines[:-2]
          # Clear the saved progress file
-         with open(saved_progress_file, 'w') as progress_file:
+         with open(saved_progress_file, "w") as progress_file:
             progress_file.write("Commit Number,Commit Hash,Commit Message,Commit Date\n")
          # If it only has one line, then it is just the header
          if len(lines) > 3:
-            last_commit_number = int(lines[-1].split(',')[0])
+            last_commit_number = int(lines[-1].split(",")[0])
             last_commit_hash = 0
-            with open(saved_progress_file, 'w') as progress_file:
+            with open(saved_progress_file, "w") as progress_file:
                for line in lines:
                   progress_file.write(line)
             # Fill the commit_hashes list with the commits that were already processed
             for line in lines[1:]:
-               current_tuple = (line.split(',')[1], line.split(',')[2], line.split(',')[3])
-               last_commit_hash = line.split(',')[1]
+               current_tuple = (line.split(",")[1], line.split(",")[2], line.split(",")[3])
+               last_commit_hash = line.split(",")[1]
                commit_hashes.append(current_tuple)
-            print(f"{backgroundColors.GREEN}Resuming the execution of the {backgroundColors.CYAN}{repository_name}{backgroundColors.GREEN} repository from commit {backgroundColors.CYAN}{last_commit_number}º {last_commit_hash}{backgroundColors.GREEN}.{Style.RESET_ALL}")
+            percentage_progress = round((last_commit_number / number_of_commits) * 100, 2)
+            print(f"{backgroundColors.GREEN}{backgroundColors.CYAN}{repository_name.capitalize()}{backgroundColors.GREEN} stopped executing in {backgroundColors.CYAN}{percentage_progress}%{backgroundColors.GREEN} of it's progress in the {backgroundColors.CYAN}{last_commit_number}º{backgroundColors.GREEN} commit: {backgroundColors.CYAN}{last_commit_hash}{backgroundColors.GREEN}.{Style.RESET_ALL}")
+            execution_time = f"Estimated time for running the remaining iterations in {backgroundColors.CYAN}{repository_name}{backgroundColors.GREEN}: {Style.RESET_ALL}"
+            output_time(execution_time, round((ITERATIONS_DURATION[repository_name] * (number_of_commits - last_commit_number)), 2))
+            
    else: # If there is no saved progress file, create one and write the header
-      with open(saved_progress_file, 'w') as progress_file:
+      with open(saved_progress_file, "w") as progress_file:
          progress_file.write("Commit Number,Commit Hash,Commit Message,Commit Date\n")
 
    return commit_hashes, last_commit_number
@@ -303,17 +308,17 @@ def traverse_repository(repository_name, repository_url, number_of_commits):
    saved_progress_file = f"{FULL_PROGRESS_DIRECTORY_PATH}/{repository_name}-progress.csv"
 
    # Get the last execution progress of the repository
-   commit_hashes, last_commit = get_last_execution_progress(repository_name, saved_progress_file)
+   commit_hashes, last_commit = get_last_execution_progress(repository_name, saved_progress_file, number_of_commits)
 
    # Create a progress bar with the total number of commits
-   with tqdm(total=number_of_commits-last_commit, unit=f" {backgroundColors.CYAN}{repository_name}{backgroundColors.GREEN} commits{Style.RESET_ALL}") as pbar:
+   with tqdm(total=number_of_commits-last_commit, unit=f" {backgroundColors.CYAN}{repository_name}{backgroundColors.GREEN} commits{Style.RESET_ALL}", unit_scale=True) as pbar:
       for commit in Repository(repository_url).traverse_commits():
          if i < last_commit:
             i += 1
             pbar.update(1)
             continue
          # Store the commit hash, commit message and commit date in one line of the list, separated by commas
-         current_tuple = (f"{i}-{commit.hash}", commit.msg.split('\n')[0], commit.committer_date)
+         current_tuple = (f"{i}-{commit.hash}", commit.msg.split("\n")[0], commit.committer_date)
          commit_hashes.append(current_tuple)
 
          # Save the diff of the modified files of the current commit
@@ -342,7 +347,7 @@ def traverse_repository(repository_name, repository_url, number_of_commits):
             first_iteration_duration = time.time() - start_time # Calculate the duration of the first iteration
 
          # Append the commit hash, commit message and commit date to the progress file
-         with open(saved_progress_file, 'a') as progress_file:
+         with open(saved_progress_file, "a") as progress_file:
             progress_file.write(f"{i},{commit.hash},{current_tuple[1]},{current_tuple[2]}\n")
 
          i += 1
@@ -362,7 +367,7 @@ def traverse_repository(repository_name, repository_url, number_of_commits):
 # @return: None
 def write_commit_hashes_to_csv(repository_name, commit_hashes):
    file_path = f"{FULL_CK_METRICS_DIRECTORY_PATH}/{repository_name}-commits_list{CSV_FILE_EXTENSION}"
-   with open(file_path, "w", newline='') as csv_file:
+   with open(file_path, "w", newline="") as csv_file:
       writer = csv.writer(csv_file)
       # Write the header
       writer.writerow(["Commit Hash", "Commit Message", "Commit Date"])
@@ -404,5 +409,5 @@ def main():
    process_repositories_concurrently()
 
 # Directly run the main function if the script is executed
-if __name__ == '__main__':
+if __name__ == "__main__":
    main() # Run the main function
