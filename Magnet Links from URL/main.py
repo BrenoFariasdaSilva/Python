@@ -4,7 +4,7 @@ import re # Import the regular expression library
 from colorama import Style # For coloring the terminal
 
 # Macros:
-class backgroundColors: # Colors for the terminal
+class BackgroundColors: # Colors for the terminal
 	CYAN = "\033[96m" # Cyan
 	GREEN = "\033[92m" # Green
 	YELLOW = "\033[93m" # Yellow
@@ -34,13 +34,13 @@ def open_file(filename, mode):
 def process_urls(urls, magnets_csv):
 	# Iterate through the URLs and extract magnet links
 	for url in urls:
-		print(f"{backgroundColors.YELLOW}Processing {backgroundColors.CYAN}{url}{Style.RESET_ALL}")
+		print(f"{BackgroundColors.YELLOW}Processing {BackgroundColors.CYAN}{url}{Style.RESET_ALL}")
 		magnet_links = extract_magnet_links(url) # Extract magnet links from the URL
 		if magnet_links: # Check if magnet links were found
-			print(f"{backgroundColors.GREEN} Magnet links from {backgroundColors.CYAN}{url}{backgroundColors.GREEN}:{Style.RESET_ALL}")
+			print(f"{BackgroundColors.GREEN} Magnet links from {BackgroundColors.CYAN}{url}{BackgroundColors.GREEN}:{Style.RESET_ALL}")
 			for i, magnet_link in enumerate(magnet_links): # Iterate through the magnet links
 				if i > 0: # Check if it is not the first magnet link
-					print(f"{backgroundColors.GREEN}{i+1}º{backgroundColors.CYAN}{magnet_link}{Style.RESET_ALL}")
+					print(f"{BackgroundColors.GREEN}{i+1}º{BackgroundColors.CYAN}{magnet_link}{Style.RESET_ALL}")
 					magnets_csv.writerow([i+1, magnet_link, ""]) # Write the magnet link to the CSV file
 
 # This function extract magnet links from a given URL
@@ -64,10 +64,10 @@ def extract_magnet_links(url):
 
 			return magnet_links # Return the magnet links
 		else: # If the request was not successful
-			print(f"{backgroundColors.RED}Failed to retrieve content from {backgroundColors.CYAN}{url}{backgroundColors.RED}. Status code: {backgroundColors.CYAN}{response.status_code}{Style.RESET_ALL}")
+			print(f"{BackgroundColors.RED}Failed to retrieve content from {BackgroundColors.CYAN}{url}{BackgroundColors.RED}. Status code: {BackgroundColors.CYAN}{response.status_code}{Style.RESET_ALL}")
 			return [] # Return an empty list
 	except Exception as e: # If an error occurred
-		print(f"{backgroundColors.RED}An error occurred while processing {backgroundColors.CYAN}{url}{backgroundColors.RED}: {backgroundColors.CYAN}{str(e)}{Style.RESET_ALL}")
+		print(f"{BackgroundColors.RED}An error occurred while processing {BackgroundColors.CYAN}{url}{BackgroundColors.RED}: {BackgroundColors.CYAN}{str(e)}{Style.RESET_ALL}")
 		return [] # Return an empty list
 
 # This is the main function

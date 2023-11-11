@@ -3,7 +3,7 @@ from collections import defaultdict # Import defaultdict to store the filenames
 from colorama import Style # For coloring the terminal
 
 # Macros:
-class backgroundColors: # Colors for the terminal
+class BackgroundColors: # Colors for the terminal
    CYAN = "\033[96m" # Cyan
    GREEN = "\033[92m" # Green
    YELLOW = "\033[93m" # Yellow
@@ -38,20 +38,20 @@ def main():
 
    # Show the duplicate files
    if duplicate_files:
-      print(f"{backgroundColors.GREEN}Duplicate files found:{Style.RESET_ALL}")
+      print(f"{BackgroundColors.GREEN}Duplicate files found:{Style.RESET_ALL}")
       for filename, paths in duplicate_files.items(): # Loop through the duplicate files
-         print(f"{backgroundColors.GREEN}File: {backgroundColors.CYAN}{filename}{Style.RESET_ALL}")
+         print(f"{BackgroundColors.GREEN}File: {BackgroundColors.CYAN}{filename}{Style.RESET_ALL}")
          for path in paths: # Loop through the paths of the file
-            print(f"{backgroundColors.GREEN}  - {backgroundColors.CYAN}{path}{Style.RESET_ALL}")
+            print(f"{BackgroundColors.GREEN}  - {BackgroundColors.CYAN}{path}{Style.RESET_ALL}")
          print(f"")
          
    if DELETE_DUPLICATES: # Delete the duplicate files
       for filename, paths in duplicate_files.items():
          for path in paths[1:]: # Delete all but the first file
             os.remove(path) # Delete the file
-         print(f"{backgroundColors.YELLOW}Deleted {backgroundColors.CYAN}{len(paths)-1}{backgroundColors.GREEN} copies of {backgroundColors.CYAN}{filename}{backgroundColors.GREEN}.{Style.RESET_ALL}")
+         print(f"{BackgroundColors.YELLOW}Deleted {BackgroundColors.CYAN}{len(paths)-1}{BackgroundColors.GREEN} copies of {BackgroundColors.CYAN}{filename}{BackgroundColors.GREEN}.{Style.RESET_ALL}")
    else:
-      print(f"{backgroundColors.GREEN}No duplicate files found in the current directory.{Style.RESET_ALL}")
+      print(f"{BackgroundColors.GREEN}No duplicate files found in the current directory.{Style.RESET_ALL}")
 
 # This is the standard boilerplate that calls the main() function.
 if __name__ == "__main__":

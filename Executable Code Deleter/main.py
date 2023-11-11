@@ -2,7 +2,7 @@ import os # For walking through the directory tree
 from colorama import Style # For coloring the terminal
 
 # Macros:
-class backgroundColors: # Colors for the terminal
+class BackgroundColors: # Colors for the terminal
 	CYAN = "\033[96m" # Cyan
 	GREEN = "\033[92m" # Green
 	YELLOW = "\033[93m" # Yellow
@@ -38,7 +38,7 @@ def file_remover(full_path):
 
 	# Verify if the file extension is in the executable extensions
 	if file_extension in EXECUTABLE_EXTENSIONS:
-		print(f"{backgroundColors.CYAN}Deleted {backgroundColors.CYAN}{full_path}{Style.RESET_ALL}") # Print the file path
+		print(f"{BackgroundColors.CYAN}Deleted {BackgroundColors.CYAN}{full_path}{Style.RESET_ALL}") # Print the file path
 		os.remove(full_path) # Delete the file
    
 # This is the main function

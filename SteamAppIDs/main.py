@@ -3,7 +3,7 @@
 from colorama import Style # For coloring the terminal
 
 # Macros:
-class backgroundColors: # Colors for the terminal
+class BackgroundColors: # Colors for the terminal
    CYAN = "\033[96m" # Cyan
    GREEN = "\033[92m" # Green
    YELLOW = "\033[93m" # Yellow
@@ -66,9 +66,9 @@ def main():
 
    # Print the total games found
    if total_games_found > 0:
-      print(f"{backgroundColors.GREEN}Total Games Found: {backgroundColors.CYAN}{total_games_found}{Style.RESET_ALL}")
+      print(f"{BackgroundColors.GREEN}Total Games Found: {BackgroundColors.CYAN}{total_games_found}{Style.RESET_ALL}")
    else:
-      print(f"{backgroundColors.GREEN}No games found in the provided URL file.{Style.RESET_ALL}")
+      print(f"{BackgroundColors.GREEN}No games found in the provided URL file.{Style.RESET_ALL}")
 
 # This is the standard boilerplate that calls the main() function.
 if __name__ == '__main__':

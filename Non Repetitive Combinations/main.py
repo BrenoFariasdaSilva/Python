@@ -2,7 +2,7 @@ from itertools import combinations # Import the combinations function from the i
 from colorama import Style # For coloring the terminal
 
 # Macros:
-class backgroundColors: # Colors for the terminal
+class BackgroundColors: # Colors for the terminal
    CYAN = "\033[96m" # Cyan
    GREEN = "\033[92m" # Green
    YELLOW = "\033[93m" # Yellow
@@ -29,8 +29,8 @@ ATTRIBUTES = [
 
 # This function outputs the attributes
 def show_attributes(attributes):
-   print(f"{backgroundColors.GREEN}Attributes: {backgroundColors.CYAN}{len(attributes)}{Style.RESET_ALL}")
-   print(f"{backgroundColors.CYAN}{attributes}{Style.RESET_ALL}")
+   print(f"{BackgroundColors.GREEN}Attributes: {BackgroundColors.CYAN}{len(attributes)}{Style.RESET_ALL}")
+   print(f"{BackgroundColors.CYAN}{attributes}{Style.RESET_ALL}")
 
 # This function generates the non repetitive combinations
 def generate_combinations(attributes):
@@ -64,7 +64,7 @@ def main():
    save_combinations_to_file(non_repetitive_combinations)
 
    # Print the number of combinations
-   print(f"{backgroundColors.GREEN}Completed the generation of {backgroundColors.CYAN}{len(non_repetitive_combinations)}{backgroundColors.GREEN} combinations!{Style.RESET_ALL}")
+   print(f"{BackgroundColors.GREEN}Completed the generation of {BackgroundColors.CYAN}{len(non_repetitive_combinations)}{BackgroundColors.GREEN} combinations!{Style.RESET_ALL}")
 
 # This is the standard boilerplate that calls the main() function
 if __name__ == "__main__":

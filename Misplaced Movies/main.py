@@ -3,7 +3,7 @@ import time # For sleeping
 from colorama import Style # For coloring the terminal
 
 # Macros:
-class backgroundColors: # Colors for the terminal
+class BackgroundColors: # Colors for the terminal
 	CYAN = "\033[96m" # Cyan
 	GREEN = "\033[92m" # Green
 	YELLOW = "\033[93m" # Yellow
@@ -35,7 +35,7 @@ def misplaced_folder(path_input):
 		# Verify if there is any misplaced file
 		for file_name in file_list:
 			if folder_name not in file_name: # If the folder name is not in the file name
-				print(f"{backgroundColors.CYAN}{file_name}{backgroundColors.GREEN} is misplaced in {backgroundColors.CYAN}{path_input}\{folder_name}{Style.RESET_ALL}")
+				print(f"{BackgroundColors.CYAN}{file_name}{BackgroundColors.GREEN} is misplaced in {BackgroundColors.CYAN}{path_input}\{folder_name}{Style.RESET_ALL}")
 				os.rename(file_name, f"{path_input}/{file_name}") # Move the file to the path_input
 				found = True # There is a misplaced file
 				while not os.path.exists(f"{path_input}/{file_name}"):
@@ -79,13 +79,13 @@ def move_files(path_input):
 
 # This function shows the result
 def show_result(number_of_files):
-	print(f"{backgroundColors.GREEN}Total of files moved: {backgroundColors.CYAN}{sum(number_of_files)}{Style.RESET_ALL}")
+	print(f"{BackgroundColors.GREEN}Total of files moved: {BackgroundColors.CYAN}{sum(number_of_files)}{Style.RESET_ALL}")
 	for i in range(len(movies_type)):
-		print(f"{backgroundColors.GREEN}Total of {backgroundColors.CYAN}{movies_type[i]}{backgroundColors.GREEN} files moved: {backgroundColors.CYAN}{number_of_files[i]}{Style.RESET_ALL}")
+		print(f"{BackgroundColors.GREEN}Total of {BackgroundColors.CYAN}{movies_type[i]}{BackgroundColors.GREEN} files moved: {BackgroundColors.CYAN}{number_of_files[i]}{Style.RESET_ALL}")
 
 # This is the main function	
 def main():
-	path_input = input(f"{backgroundColors.GREEN}Enter the path of the folder: {Style.RESET_ALL}") # Get the path of the folder
+	path_input = input(f"{BackgroundColors.GREEN}Enter the path of the folder: {Style.RESET_ALL}") # Get the path of the folder
 	misplaced_folder(path_input) # Verify if there is any misplaced file
 	number_of_files = move_files(path_input) # Move the files
 	show_result(number_of_files) # Show the result

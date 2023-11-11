@@ -3,7 +3,7 @@ import os # For checking if the file exists
 from colorama import Style # For coloring the terminal
 
 # Macros:
-class backgroundColors: # Colors for the terminal
+class BackgroundColors: # Colors for the terminal
 	CYAN = "\033[96m" # Cyan
 	GREEN = "\033[92m" # Green
 	YELLOW = "\033[93m" # Yellow
@@ -47,7 +47,7 @@ def main():
 
 	# Verify if the "debits.csv" file exists
 	if not debits_csv_exists(f"{INPUT_CSV_FILE}"):
-		print(f"{backgroundColors.RED}The file {backgroundColors.CYAN}\"{INPUT_CSV_FILE}\"{backgroundColors.RED} does not exist inside the {backgroundColors.CYAN}\"{INPUT_CSV_FOLDER}\"{backgroundColors.RED} folder.{Style.RESET_ALL}")
+		print(f"{BackgroundColors.RED}The file {BackgroundColors.CYAN}\"{INPUT_CSV_FILE}\"{BackgroundColors.RED} does not exist inside the {BackgroundColors.CYAN}\"{INPUT_CSV_FOLDER}\"{BackgroundColors.RED} folder.{Style.RESET_ALL}")
 		exit(1)
 	
 	# Read the CSV file using the ";" delimiter
@@ -76,7 +76,7 @@ def main():
 	df.to_csv(f"{OUTPUT_CSV_FILE}", sep=",", index=False)
 
 	# Print the total sum of the "Valor" column
-	print(f"{backgroundColors.GREEN}Total sum of the \"Valor\" column: {backgroundColors.CYAN}R$ {df['Valor'].sum():.2f}{backgroundColors.GREEN}.{Style.RESET_ALL}")
+	print(f"{BackgroundColors.GREEN}Total sum of the \"Valor\" column: {BackgroundColors.CYAN}R$ {df['Valor'].sum():.2f}{BackgroundColors.GREEN}.{Style.RESET_ALL}")
  
 # @brief: This is the standard boilerplate that calls the main() function.
 if __name__ == "__main__":

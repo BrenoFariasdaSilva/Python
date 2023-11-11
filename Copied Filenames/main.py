@@ -3,7 +3,7 @@ import re # Import the re module for regular expressions
 from colorama import Style # For coloring the terminal
 
 # Macros:
-class backgroundColors: # Colors for the terminal
+class BackgroundColors: # Colors for the terminal
 	CYAN = "\033[96m" # Cyan
 	GREEN = "\033[92m" # Green
 	YELLOW = "\033[93m" # Yellow
@@ -32,7 +32,7 @@ def get_copied_filenames(files):
 	for filename in files: # Loop through the files
 		# Verify if the filename has the copy parenthesis or the searched string
 		if is_copy_filename(filename):
-			print(f"{backgroundColors.CYAN}{filename}{backgroundColors.GREEN} is a duplicate.{Style.RESET_ALL}")
+			print(f"{BackgroundColors.CYAN}{filename}{BackgroundColors.GREEN} is a duplicate.{Style.RESET_ALL}")
 
 # This is the main function
 def main():

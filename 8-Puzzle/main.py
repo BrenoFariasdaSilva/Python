@@ -2,7 +2,7 @@ import heapq # For priority queue
 from colorama import Style # For coloring the terminal
 
 # Macros:
-class backgroundColors: # Colors for the terminal
+class BackgroundColors: # Colors for the terminal
 	CYAN = "\033[96m" # Cyan
 	GREEN = "\033[92m" # Green
 	YELLOW = "\033[93m" # Yellow
@@ -129,24 +129,24 @@ def print_solution(solution_node):
 	for state, move in path: # For each state and move
 		for row in state: # For each row
 			# change the background color of the terminal
-			print(f"{backgroundColors.CYAN}{' '.join(map(str, row))}{Style.RESET_ALL}")
-		print(f"{backgroundColors.GREEN}Move: {move}{Style.RESET_ALL}") # Print the move
-		print(f"{backgroundColors.YELLOW}------------------{Style.RESET_ALL}")
+			print(f"{BackgroundColors.CYAN}{' '.join(map(str, row))}{Style.RESET_ALL}")
+		print(f"{BackgroundColors.GREEN}Move: {move}{Style.RESET_ALL}") # Print the move
+		print(f"{BackgroundColors.YELLOW}------------------{Style.RESET_ALL}")
 
 # This is the main function
 def main():
-	print(f"{backgroundColors.GREEN}Welcome to the {backgroundColors.CYAN}8-Puzzle Solver{backgroundColors.GREEN}!{Style.RESET_ALL}") # Print a welcome message
+	print(f"{BackgroundColors.GREEN}Welcome to the {BackgroundColors.CYAN}8-Puzzle Solver{BackgroundColors.GREEN}!{Style.RESET_ALL}") # Print a welcome message
 
 	# Solve the 8-puzzle problem
 	solution_node = solve_8_puzzle(INITIAL_STATE)
 
 	# Print the solution
 	if solution_node:
-		print(f"{backgroundColors.GREEN}Solution found in {solution_node.g} moves!{Style.RESET_ALL}")
-		print(f"{backgroundColors.GREEN}Initial state: {Style.RESET_ALL}")
+		print(f"{BackgroundColors.GREEN}Solution found in {solution_node.g} moves!{Style.RESET_ALL}")
+		print(f"{BackgroundColors.GREEN}Initial state: {Style.RESET_ALL}")
 		print_solution(solution_node)
 	else:
-		print(f"{backgroundColors.RED}Solution not found!{Style.RESET_ALL}")
+		print(f"{BackgroundColors.RED}Solution not found!{Style.RESET_ALL}")
 
 # This is the standard boilerplate that calls the main() function.
 if __name__ == "__main__":

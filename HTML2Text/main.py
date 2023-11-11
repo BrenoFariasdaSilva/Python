@@ -3,7 +3,7 @@ from urllib.request import urlopen # For open the url
 from colorama import Style # For coloring the terminal
 
 # Macros:
-class backgroundColors: # Colors for the terminal
+class BackgroundColors: # Colors for the terminal
 	CYAN = "\033[96m" # Cyan
 	GREEN = "\033[92m" # Green
 	YELLOW = "\033[93m" # Yellow
@@ -14,20 +14,20 @@ class backgroundColors: # Colors for the terminal
 
 # This function get the url from the user input
 def user_input():
-	print(f"{backgroundColors.GREEN}Choose type of input:{Style.RESET_ALL}")
-	print(f"{backgroundColors.GREEN}1. Paste URL here{Style.RESET_ALL}")
-	print(f"{backgroundColors.GREEN}2. Insert URL on code{Style.RESET_ALL}")
+	print(f"{BackgroundColors.GREEN}Choose type of input:{Style.RESET_ALL}")
+	print(f"{BackgroundColors.GREEN}1. Paste URL here{Style.RESET_ALL}")
+	print(f"{BackgroundColors.GREEN}2. Insert URL on code{Style.RESET_ALL}")
  
 	url = "https://www.google.com" # Default url
-	option = int(input(f"{backgroundColors.GREEN}Selected Input: {Style.RESET_ALL}")) # Get the option from the user input
+	option = int(input(f"{BackgroundColors.GREEN}Selected Input: {Style.RESET_ALL}")) # Get the option from the user input
 	
 	# Check if the option is valid
 	while option != 1 and option != 2:
-		print(f"{backgroundColors.YELLOW}Invalid option. Try again.{Style.RESET_ALL}")
+		print(f"{BackgroundColors.YELLOW}Invalid option. Try again.{Style.RESET_ALL}")
   
   	# Check the option
 	if option == 1:
-		url = input(f"{backgroundColors.GREEN}Enter a URL: {Style.RESET_ALL}")
+		url = input(f"{BackgroundColors.GREEN}Enter a URL: {Style.RESET_ALL}")
 	elif option == 2: # If you choose the option "2" you need to change the url variable on the next line
 		url = "https://github.com/BrenoFariasdaSilva/Word2Vector"
 
@@ -60,9 +60,9 @@ def main():
 	substring = search_string(text_as_string)
  
 	# Command to clear the terminal
-	print(f"{backgroundColors.CLEAR_TERMINAL}")
+	print(f"{BackgroundColors.CLEAR_TERMINAL}")
  
-	print(f"{backgroundColors.CYAN}{substring}{Style.RESET_ALL}") # Print the Substring
+	print(f"{BackgroundColors.CYAN}{substring}{Style.RESET_ALL}") # Print the Substring
 
 # This is the standard boilerplate that calls the main() function.
 if __name__ == "__main__":

@@ -2,7 +2,7 @@ import os # For walking through the directory tree
 from colorama import Style # For coloring the terminal
 
 # Macros:
-class backgroundColors: # Colors for the terminal
+class BackgroundColors: # Colors for the terminal
 	CYAN = "\033[96m" # Cyan
 	GREEN = "\033[92m" # Green
 	YELLOW = "\033[93m" # Yellow
@@ -31,16 +31,16 @@ def search_duplicates(directories_list):
 
 	while current_index < list_size:
 		if directories_list[current_index] == directories_list[current_index + 1] and current_index + 1 < list_size:
-			print(f"{backgroundColors.GREEN}Duplicate: {backgroundColors.CYAN}{directories_list[current_index]}{Style.RESET_ALL}")
+			print(f"{BackgroundColors.GREEN}Duplicate: {BackgroundColors.CYAN}{directories_list[current_index]}{Style.RESET_ALL}")
 
 		current_index += 1 # Increment the current index
 
 	if duplicates == 0:
-		print(f"{backgroundColors.CYAN}No duplicates found!{Style.RESET_ALL}")
+		print(f"{BackgroundColors.CYAN}No duplicates found!{Style.RESET_ALL}")
 	
 # This is the main function
 def main():
-	print(f"{backgroundColors.GREEN}Welcome to the {backgroundColors.CYAN}Duplicated Directories Finder{backgroundColors.GREEN}!{Style.RESET_ALL}") # Print a welcome message
+	print(f"{BackgroundColors.GREEN}Welcome to the {BackgroundColors.CYAN}Duplicated Directories Finder{BackgroundColors.GREEN}!{Style.RESET_ALL}") # Print a welcome message
 
 	path = os.getcwd() # Get the current working directory
 	directories_list = get_directories(path) # Get all the files in the path

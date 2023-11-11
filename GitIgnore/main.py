@@ -2,7 +2,7 @@ import os # For walking through the directory tree
 from colorama import Style # For coloring the terminal
 
 # Macros:
-class backgroundColors: # Colors for the terminal
+class BackgroundColors: # Colors for the terminal
 	CYAN = "\033[96m" # Cyan
 	GREEN = "\033[92m" # Green
 	YELLOW = "\033[93m" # Yellow
@@ -41,7 +41,7 @@ def update_gitignore(file_path, relative_path):
 			if search_string not in line: # Check if the search string is not present in the Gitignore file
 				with open(file_path, "a") as f: # Open the Gitignore file in append mode
 					f.write(f"{search_string}\n") # Add the search string to the Gitignore file
-				print(f"{backgroundColors.GREEN}Added {backgroundColors.CYAN}{search_string}{backgroundColors.GREEN} to {backgroundColors.CYAN}{relative_path}{Style.RESET_ALL}")
+				print(f"{BackgroundColors.GREEN}Added {BackgroundColors.CYAN}{search_string}{BackgroundColors.GREEN} to {BackgroundColors.CYAN}{relative_path}{Style.RESET_ALL}")
 
 # @brief: The main function
 # @param: None
@@ -52,7 +52,7 @@ def main():
 
 	# Check if there are any Gitignore files 
 	if not gitignore_files:
-		print(f"{backgroundColors.RED}No {backgroundColors.CYAN}{TARGET_FILE} files found {backgroundColors.RED}in the {backgroundColors.CYAN}{current_directory}{backgroundColors.RED} directory or its subdirectories.{Style.RESET_ALL}")
+		print(f"{BackgroundColors.RED}No {BackgroundColors.CYAN}{TARGET_FILE} files found {BackgroundColors.RED}in the {BackgroundColors.CYAN}{current_directory}{BackgroundColors.RED} directory or its subdirectories.{Style.RESET_ALL}")
 	else:
 		# Update all the Gitignore files
 		for gitignore_file in gitignore_files:

@@ -2,7 +2,7 @@ import os # Import the os module for interacting with the operating system
 from colorama import Style # For coloring the terminal
 
 # Macros:
-class backgroundColors: # Colors for the terminal
+class BackgroundColors: # Colors for the terminal
 	CYAN = "\033[96m" # Cyan
 	GREEN = "\033[92m" # Green
 	YELLOW = "\033[93m" # Yellow
@@ -15,7 +15,7 @@ class backgroundColors: # Colors for the terminal
 def main():
 	while True: 
 		# Ask user to enter paths to verify
-		path = input(f"{backgroundColors.GREEN}Enter path to verify: {Style.RESET_ALL}")
+		path = input(f"{BackgroundColors.GREEN}Enter path to verify: {Style.RESET_ALL}")
 		if path == "exit":
 			break # Break the loop
 
@@ -27,10 +27,10 @@ def main():
 
 		# Print the path, subfolders and files
 		if len(subfolders) > 0:
-			print(f"{backgroundColors.GREEN}Folder: {backgroundColors.CYAN}{folder_name}{Style.RESET_ALL}")
-			print(f"{backgroundColors.GREEN}Subfolders: {backgroundColors.CYAN}{subfolders}{Style.RESET_ALL}")
-			print(f"{backgroundColors.GREEN}Files: {backgroundColors.CYAN}{filenames}{Style.RESET_ALL}")
-			print(f"{backgroundColors.GREEN}")
+			print(f"{BackgroundColors.GREEN}Folder: {BackgroundColors.CYAN}{folder_name}{Style.RESET_ALL}")
+			print(f"{BackgroundColors.GREEN}Subfolders: {BackgroundColors.CYAN}{subfolders}{Style.RESET_ALL}")
+			print(f"{BackgroundColors.GREEN}Files: {BackgroundColors.CYAN}{filenames}{Style.RESET_ALL}")
+			print(f"{BackgroundColors.GREEN}")
 
 # This is the standard boilerplate that calls the main() function.
 if __name__ == '__main__':

@@ -2,7 +2,7 @@ import os # For walking through the directory tree
 from colorama import Style # For coloring the terminal
 
 # Macros:
-class backgroundColors: # Colors for the terminal
+class BackgroundColors: # Colors for the terminal
 	CYAN = "\033[96m" # Cyan
 	GREEN = "\033[92m" # Green
 	YELLOW = "\033[93m" # Yellow
@@ -34,14 +34,14 @@ def main():
  
 	# Get the paths
 	for i in range(2):
-		path = input(f"{backgroundColors.GREEN}Enter path: {Style.RESET_ALL}") # Get the path
+		path = input(f"{BackgroundColors.GREEN}Enter path: {Style.RESET_ALL}") # Get the path
 		paths.append(path) # Add the path to the list
   
 	# Get the difference between the folders
 	diff_folders = diff(paths)
  
 	# Print the difference
-	[ print(f"{backgroundColors.CYAN}{diff_folders[i]}{backgroundColors.GREEN}: not in {backgroundColors.CYAN}{paths[2]}{Style.RESET_ALL}") for i in range(len(diff_folders)) ]
+	[ print(f"{BackgroundColors.CYAN}{diff_folders[i]}{BackgroundColors.GREEN}: not in {BackgroundColors.CYAN}{paths[2]}{Style.RESET_ALL}") for i in range(len(diff_folders)) ]
 
 # This is the standard boilerplate that calls the main() function.
 if __name__ == '__main__':

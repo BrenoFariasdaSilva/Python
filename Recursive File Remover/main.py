@@ -2,7 +2,7 @@ import os # Import the os module
 from colorama import Style # For coloring the terminal
 
 # Macros:
-class backgroundColors: # Colors for the terminal
+class BackgroundColors: # Colors for the terminal
 	CYAN = "\033[96m" # Cyan
 	GREEN = "\033[92m" # Green
 	YELLOW = "\033[93m" # Yellow
@@ -23,7 +23,7 @@ def deleteFiles(path):
 			if filename in REMOVE_FILES: # If the filename is in the REMOVE_FILES
 				counter += 1 # Increment the counter
 				complete_filename = os.path.join(folderName, filename) # Complete filename
-				print(f"{backgroundColors.GREEN}Deleting: {backgroundColors.CYAN}{counter}{backgroundColors.GREEN}º - {backgroundColors.CYAN}{complete_filename}{Style.RESET_ALL}")
+				print(f"{BackgroundColors.GREEN}Deleting: {BackgroundColors.CYAN}{counter}{BackgroundColors.GREEN}º - {BackgroundColors.CYAN}{complete_filename}{Style.RESET_ALL}")
 				os.remove(os.path.join(folderName, filename)) # Remove the file
 		
 # This function is the main function
