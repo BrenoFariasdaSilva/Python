@@ -46,7 +46,7 @@ def misplaced_folder(path_input):
 # This function verifies if the folders exist and create them if they don't
 def verify_folder(path_input):
 	for folder_name in movies_type: # For each folder name in the movies type
-		if not os.path.exists(path_input + "/" + folder_name): # If the folder doesn't exist
+		if not os.path.exists(f"{path_input}/{folder_name}"): # If the folder doesn't exist
 			os.mkdir(f"{path_input}/{folder_name}") # Create the folder
 
 def move_files(path_input):
