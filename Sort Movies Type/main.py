@@ -1,74 +1,92 @@
-import os
-import time
+import os # Import the os module for interacting with the operating system
+import time # For sleeping
+from colorama import Style # For coloring the terminal
 
+# Macros:
+class backgroundColors: # Colors for the terminal
+	CYAN = "\033[96m" # Cyan
+	GREEN = "\033[92m" # Green
+	YELLOW = "\033[93m" # Yellow
+	RED = "\033[91m" # Red
+
+# Macros:
 movies_type = ["Dual", "Dublado", "Nacional", "Legendado", "English"]
 
-# ToDo: Implement logic that the files are in "sort" folder, and the script will move them to the correct folder (Dual, Dublado, Nacional, Legendado) which is a folder back
-# ToDo: Implement logic that delete folder if there is no files in it.
-
+# This function verifies if there is any misplaced file
 def misplaced_folder(path_input):
-	initial_path = os.getcwd()
-	folder_list = os.listdir(r"" + path_input)
+	initial_path = os.getcwd() # Get the current working directory
+	folder_list = os.listdir(rf"{path_input}")  # List of folders in the path_input and rf is used to escape the backslashes
  
-	found = False
+	found = False # If there is any misplaced file
 
+	# Verify if there is any misplaced file
 	for folder_name in folder_list:
-		if folder_name not in movies_type:
-			continue
+		if folder_name not in movies_type: # If the folder name is not in the movies type
+			continue # Continue to the next iteration
 
-		os.chdir(path_input + "/" + folder_name)
-		file_list = os.listdir(r"" + path_input + "/" + folder_name)
+		# Change the current working directory to the folder name
+		os.chdir(f"{path_input}/{folder_name}")
+		# List of files in the folder name and rf is used to escape the backslashes
+		file_list = os.listdir(rf"{path_input}/{folder_name}")
   
+		# Verify if there is any misplaced file
 		for file_name in file_list:
-			if folder_name not in file_name:
-				print(file_name + " is misplaced" + " in " + path_input + "\\" + folder_name)
-				os.rename(file_name, path_input + "/" + file_name)
-				found = True
-				while not os.path.exists(path_input + "/" + file_name):
-					time.sleep(1.0)
-		
-	if found:
-		print()
-	os.chdir(initial_path)
- 
+			if folder_name not in file_name: # If the folder name is not in the file name
+				print(f"{backgroundColors.CYAN}{file_name}{backgroundColors.GREEN} is misplaced in {backgroundColors.CYAN}{path_input}\{folder_name}{Style.RESET_ALL}")
+				os.rename(file_name, f"{path_input}/{file_name}") # Move the file to the path_input
+				found = True # There is a misplaced file
+				while not os.path.exists(f"{path_input}/{file_name}"):
+					time.sleep(1.0) # Sleep for 1 second
+	
+	if found: # If there is a misplaced file
+		print() # Print a new line
+	os.chdir(initial_path) # Change the current working directory back to the original path
+
+# This function verifies if the folders exist and create them if they don't
 def verify_folder(path_input):
-	for folder_name in movies_type:
-		if not os.path.exists(path_input + "/" + folder_name):
-			os.mkdir(path_input + "/" + folder_name)
+	for folder_name in movies_type: # For each folder name in the movies type
+		if not os.path.exists(path_input + "/" + folder_name): # If the folder doesn't exist
+			os.mkdir(f"{path_input}/{folder_name}") # Create the folder
 
 def move_files(path_input):
-	file_list = os.listdir(r"" + path_input) # r"" is used to escape the backslashes
+	file_list = os.listdir(rf"{path_input}") # r"" is used to escape the backslashes
 	saved_path = os.getcwd() # Get the current working directory
 	os.chdir(r"" + path_input) # Change the current working directory to the path_input
  
-	verify_folder(path_input)
+	verify_folder(path_input) # Verify if the folders exist and create them if they don't
  
 	number_of_files = [0, 0, 0, 0, 0] # Related to the movies type, in that case, Dual, Dublado, Nacional, Legendado and English
  
+	# Move the files
 	for file_name in file_list:
-		if file_name in movies_type:
-			continue
+		if file_name in movies_type: # If the file name is in the movies type
+			continue # Continue to the next iteration
+
+		# Verify if the file name is in the movies type
 		for i in range(len(movies_type)):
-			if movies_type[i] in file_name:
-				os.rename(file_name, path_input + "/" + movies_type[i] + "/" + file_name)
-				while not os.path.exists(path_input + "/" + movies_type[i] + "/" + file_name):
-					time.sleep(1.0)
-				number_of_files[i] += 1
-				break
+			if movies_type[i] in file_name: # If the movies type is in the file name
+				os.rename(file_name, f"{path_input}/{movies_type[i]}/{file_name}") # Move the file to the movies type
+				while not os.path.exists(f"{path_input}/{movies_type[i]}/{file_name}"): # While the file doesn't exist
+					time.sleep(1.0) # Sleep for 1 second
+				number_of_files[i] += 1 # Increment the number of files
+				break # Break the loop
 	 
 	os.chdir(saved_path) # Change the current working directory back to the original path
-	return number_of_files
+	return number_of_files # Return the number of files
 
-def result(number_of_files):
-	print(f"Total of files moved: {sum(number_of_files)}")
+# This function shows the result
+def show_result(number_of_files):
+	print(f"{backgroundColors.GREEN}Total of files moved: {backgroundColors.CYAN}{sum(number_of_files)}{Style.RESET_ALL}")
 	for i in range(len(movies_type)):
-		print(f"Total of {movies_type[i]} files moved: {number_of_files[i]}")
-	
+		print(f"{backgroundColors.GREEN}Total of {backgroundColors.CYAN}{movies_type[i]}{backgroundColors.GREEN} files moved: {backgroundColors.CYAN}{number_of_files[i]}{Style.RESET_ALL}")
+
+# This is the main function	
 def main():
-	path_input = input("Enter the path of the folder: ")
-	misplaced_folder(path_input)
-	number_of_files = move_files(path_input)
-	result(number_of_files)
-	
+	path_input = input(f"{backgroundColors.GREEN}Enter the path of the folder: {Style.RESET_ALL}") # Get the path of the folder
+	misplaced_folder(path_input) # Verify if there is any misplaced file
+	number_of_files = move_files(path_input) # Move the files
+	show_result(number_of_files) # Show the result
+
+# This is the standard boilerplate that calls the main() function.	
 if __name__ == '__main__':
-	main()
+	main() # Call the main() function
