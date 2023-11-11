@@ -11,7 +11,15 @@ class backgroundColors: # Colors for the terminal
 	RED = "\033[91m" # Red
 
 INPUT_FILENAME = "URLs_list.txt" # Name of the text file containing the URLs
-OUTPUT_FILENAME = "magnet_links.csv" # Name of the CSV file to write the magnet links to
+OUTPUT_FILENAME = "magnet_urls.csv" # Name of the CSV file to write the magnet links to
+
+# This function creates a CSV file and returns it
+def create_csv(filename):
+	with open(filename, "w") as csv: # Open the file in write mode
+		csv.writer("Counter, Magnet Links, Size\n") # Write the header of the CSV file
+		# Get the csv writer object
+		csv_object = csv.writer(csv)
+	return csv_object
 
 # This function open a file and return the URLs
 def open_file(filename, mode):
@@ -20,7 +28,7 @@ def open_file(filename, mode):
 	return urls # Return the URLs
 
 # This function process the URLs, extract magnet links and write them to a CSV file
-def process_urls(urls):
+def process_urls(urls, magnets_csv):
 	# Iterate through the URLs and extract magnet links
 	for url in urls:
 		print(f"{backgroundColors.YELLOW}Processing {backgroundColors.CYAN}{url}{Style.RESET_ALL}")
@@ -30,7 +38,7 @@ def process_urls(urls):
 			for i, magnet_link in enumerate(magnet_links):
 				if i > 0:
 					print(f"{backgroundColors.GREEN}{i+1}º{backgroundColors.CYAN}{magnet_link}{Style.RESET_ALL}")
-					# TODO:Save the magnet links to a CSV file
+					magnets_csv.writerow([i+1, magnet_link, ""]) # Write the magnet link to the CSV file
 
 # This function extract magnet links from a given URL
 def extract_magnet_links(url):
@@ -64,8 +72,11 @@ def main():
 	# Open the file in read mode
 	urls = open_file(INPUT_FILENAME, "r")
 
+	# Create CSV file
+	magnets_csv = create_csv(OUTPUT_FILENAME)
+
 	# Process the URLs, extract magnet links and write them to a CSV file
-	process_urls(urls)
+	process_urls(urls, magnets_csv)
 	 
 # This is the standard boilerplate that calls the main() function.
 if __name__ == "__main__":
