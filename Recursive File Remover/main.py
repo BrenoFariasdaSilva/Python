@@ -7,8 +7,11 @@ class backgroundColors: # Colors for the terminal
 	GREEN = "\033[92m" # Green
 	YELLOW = "\033[93m" # Yellow
 	RED = "\033[91m" # Red
+	BOLD = "\033[1m" # Bold
+	UNDERLINE = "\033[4m" # Underline
 	CLEAR_TERMINAL = "\033[H\033[J" # Clear the terminal
 
+# Constants:
 REMOVE_FILES = ["desktop.ini", ".DS_Store"] # Files to be removed
 
 # This function deletes the desktop.ini file
