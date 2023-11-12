@@ -66,11 +66,11 @@ def main():
    number_of_files = len(filenames) # Get the number of files
 
    if number_of_files > 0: # If there are files that contain the specified strings
-      print(f"{BackgroundColors.GREEN}Found the following {BackgroundColors.BOLD}{BackgroundColors.CYAN}{number_of_files}{BackgroundColors.GREEN} files: {Style.RESET_ALL}")
+      print(f"{BackgroundColors.GREEN}Found the following {BackgroundColors.BOLD}{BackgroundColors.CYAN}{number_of_files}{Style.RESET_ALL}{BackgroundColors.GREEN} files: {Style.RESET_ALL}")
       for filename in filenames: # For each filename
          print(f"{BackgroundColors.BOLD}{BackgroundColors.CYAN}{filename}{Style.RESET_ALL}")
    else: # If there are no files that contain the specified strings
-      print(f"{BackgroundColors.BOLD}{BackgroundColors.RED}No files contain the {BackgroundColors.CYAN}included string{BackgroundColors.RED}.{Style.RESET_ALL}")
+      print(f"{BackgroundColors.GREEN}No files were found according to the specified strings.{Style.RESET_ALL}")
 
    print(f"{BackgroundColors.BOLD}{BackgroundColors.GREEN}Execution Complete!{Style.RESET_ALL}")
 
