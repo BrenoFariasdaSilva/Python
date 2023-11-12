@@ -14,13 +14,10 @@ class BackgroundColors: # Colors for the terminal
    CLEAR_TERMINAL = "\033[H\033[J" # Clear the terminal
 
 # Sound Constants:
-# The sound commands for each operating system
 SOUND_COMMANDS = {"Darwin": "afplay", "Linux": "aplay", "Windows": "start"}
 SOUND_FILE = "./.assets/NotificationSound.wav" # The path to the sound file
 
-# @brief: This function defines the command to play a sound when the program finishes
-# @param: None
-# @return: None
+# This function defines the command to play a sound when the program finishes
 def play_sound():
    if os.path.exists(SOUND_FILE):
       if platform.system() in SOUND_COMMANDS: # if the platform.system() is in the SOUND_COMMANDS dictionary
