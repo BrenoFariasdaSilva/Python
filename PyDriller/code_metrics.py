@@ -410,7 +410,7 @@ def main():
    print(f"{BackgroundColors.GREEN}The files that this script will generate are the {BackgroundColors.CYAN}ck metrics files, the commit hashes list file and the diffs of each commit{BackgroundColors.GREEN}.{Style.RESET_ALL}")
    
    process_repositories_concurrently()
-
-# Directly run the main function if the script is executed
-if __name__ == "__main__":
-   main() # Run the main function
+		
+# This is the standard boilerplate that calls the main() function.
+if __name__ == '__main__':
+   main() # Call the main function
