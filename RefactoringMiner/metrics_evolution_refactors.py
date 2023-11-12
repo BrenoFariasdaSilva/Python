@@ -245,6 +245,6 @@ def main():
    # Process the repository
    process_repository(DEFAULT_REPOSITORY, DEFAULT_REPOSITORIES[DEFAULT_REPOSITORY])
     
-# Directly run the main function if the script is executed
+# This is the standard boilerplate that calls the main() function.
 if __name__ == '__main__':
-   main() # Run the main function
+   main() # Call the main function
