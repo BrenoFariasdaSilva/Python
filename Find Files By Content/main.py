@@ -19,7 +19,8 @@ SOUND_FILE = "./.assets/NotificationSound.wav" # The path to the sound file
 
 # Constants:
 NON_INCLUDED_STRING = "# This is the standard boilerplate that calls the main() function"
-INCLUDED_STRING = "def main():"
+INCLUDED_STRING = '''if __name__ == "__main__":
+	main()'''
 FILE_FORMATS = [".py"] # The file formats to search for
 
 # Functions:
@@ -75,5 +76,5 @@ def main():
    print(f"{BackgroundColors.BOLD}{BackgroundColors.GREEN}Execution Complete!{Style.RESET_ALL}")
 
 # This is the standard boilerplate that calls the main() function.
-if __name__ == '__main__':
+if __name__ == "__main__":
 	main() # Call the main function
