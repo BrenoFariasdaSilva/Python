@@ -52,5 +52,6 @@ def main():
 	else:
 		print(f"{count} files without extension found in {directory_path}")
 
+# This is the standard boilerplate that calls the main() function.
 if __name__ == "__main__":
 	main() # Call the main function
