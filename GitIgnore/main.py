@@ -59,6 +59,6 @@ def main():
 			relative_path = os.path.relpath(gitignore_file, current_directory)
 			update_gitignore(gitignore_file, relative_path) # Update the Gitignore file
 
-# @brief: This is the entry point of the program
-if __name__ == "__main__":
+# This is the standard boilerplate that calls the main() function
+if __name__ == '__main__':
 	main() # Call the main function
