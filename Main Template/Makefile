@@ -4,4 +4,4 @@ run:
 	clear; time python3 ./main.py
 
 depencencies:
-	pip install atexit colorama
+	pip install colorama
