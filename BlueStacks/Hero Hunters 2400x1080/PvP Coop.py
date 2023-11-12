@@ -92,7 +92,7 @@ coords = {
         'y' : 0.92962963
     },
     'btnPVPFreePlay' : {
-        'x' : 0.29,  # Modifiquei mais para a direita para evitar de abrir o piggy bank
+        'x' : 0.29, # Modifiquei mais para a direita para evitar de abrir o piggy bank
         'y' : 0.511111111
     },
     'btnOpenPVPCrate' : {
