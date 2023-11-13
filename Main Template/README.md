@@ -36,10 +36,15 @@ Project-Description.
 	- [Requirements](#requirements)
 	- [Setup](#setup)
 			- [Clone the repository:](#clone-the-repository)
+			- [Dependencies:](#dependencies)
+			- [Dataset - Optional:](#dataset---optional)
+	- [Usage](#usage)
 	- [Results - Optional](#results---optional)
+	- [Contributing - Optional](#contributing---optional)
 	- [License](#license)
-	- [Acknowledgments - Optional](#acknowledgments---optional)
-
+		- [Apache License 2.0](#apache-license-20)
+		- [Creative Commons Zero v1.0 Universal](#creative-commons-zero-v10-universal)
+		- [MIT License](#mit-license)
 
 ## Introduction
 
@@ -50,29 +55,27 @@ Detailed project description.
 Bullet points of the requirements.
 
 ## Setup
-This steps explain how to setup the project.
-
 #### Clone the repository:
 1. Clone the repository with the following command:
 
-   ```bash
-   git clone https://github.com/BrenoFariasdaSilva/Repository-Name.git
-   cd Repository-Name
-	```
+```bash
+git clone https://github.com/BrenoFariasdaSilva/Repository-Name.git
+cd Repository-Name
+```
 
 #### Dependencies:
 1. Install the project dependencies with the following command:
 
-	```bash
-	make dependencies
-	```
+```bash
+make dependencies
+```
 
 #### Dataset - Optional:
 1. Download the dataset from WEBSITE-HERE and place it in this project directory `(/Repository-Name)` and run the following command:
 
-	```bash
-	make dataset
-	```
+```bash
+make dataset
+```
 
 ## Usage
 
@@ -86,8 +89,16 @@ make run
 
 Discuss the results obtained in the project.
 
+## Contributing - Optional
+Code improvement recommendations are very welcome. In order to contribute, follow the steps below:
+
 ## License
 
-This project is licensed under the LICENSE-HERE License - see the [LICENSE](LICENSE) file for details.
+### Apache License 2.0
+This project is licensed under the [Apache License 2.0](LICENSE), which allows you to use, modify, distribute, and sublicense this code, even for commercial purposes, as long as you include the original copyright notice and attribute you as the original author for the repository. See the [LICENSE](LICENSE) file for more details.
 
-## Acknowledgments - Optional
+### Creative Commons Zero v1.0 Universal
+This project is licensed under the [Creative Commons Zero v1.0 Universal](LICENSE), which means you are free to use, modify, and distribute the code. See the [LICENSE](LICENSE) file for more details.
+
+### MIT License
+This project is licensed under the LICENSE-HERE License - see the [LICENSE](LICENSE) file for details.
