@@ -1,5 +1,6 @@
 import os # For walking through the directory tree
 from colorama import Style # For coloring the terminal
+from tqdm import tqdm # For the progress bar
 
 # Macros:
 class BackgroundColors: # Colors for the terminal
@@ -16,7 +17,7 @@ def get_directories(path):
 	directories_list = [] # List of all the directories
 
 	# Iterate over all the files in directory
-	for root, dirs, files in os.walk(path):
+	for root, dirs, files in tqdm(os.walk(path), desc="Processing files", unit="file"):
 		for directory in dirs: # Iterate over all the directories in the directory
 			directories_list.append(directory) # Add the directory to the list
 
@@ -46,6 +47,8 @@ def main():
 	directories_list = get_directories(path) # Get all the files in the path
 	directories_list.sort() # Sort the list
 	search_duplicates(directories_list) # List all the files in the directory
+
+	print(f"{BackgroundColors.BOLD}{BackgroundColors.GREEN}Execution finished.{Style.RESET_ALL}") # Print the end of the execution
    
 # This is the standard boilerplate that calls the main() function.
 if __name__ == "__main__":
