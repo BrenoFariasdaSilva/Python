@@ -1,5 +1,6 @@
 import os # Import the os module for traversing the directory
 import re # Import the re module for regular expressions
+from tqdm import tqdm # For the progress bar
 from colorama import Style # For coloring the terminal
 
 # Macros:
@@ -29,16 +30,20 @@ def is_copy_filename(filename):
 
 # Function to verify if there are duplicates
 def get_copied_filenames(files):
-	for filename in files: # Loop through the files
+	for filename in tqdm(files, desc="Processing files", unit="file"): # Loop through the files
 		# Verify if the filename has the copy parenthesis or the searched string
 		if is_copy_filename(filename):
 			print(f"{BackgroundColors.CYAN}{filename}{BackgroundColors.GREEN} is a duplicate.{Style.RESET_ALL}")
 
 # This is the main function
 def main():
+	print(f"{BackgroundColors.CLEAR_TERMINAL}{BackgroundColors.BOLD}{BackgroundColors.GREEN}Welcome to {BackgroundColors.CYAN}Copied Filenames{BackgroundColors.GREEN}!{Style.RESET_ALL}")
+	
 	current_path = os.getcwd() # Get the current path
 	files = os.listdir(current_path) # Get all the files in the path
 	get_copied_filenames(files) # Verify for duplicates
+
+	print(f"{BackgroundColors.BOLD}{BackgroundColors.GREEN}Execution finished.{Style.RESET_ALL}")
 
 # This is the standard boilerplate that calls the main() function.
 if __name__ == "__main__":

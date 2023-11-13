@@ -4,4 +4,4 @@ run:
 	clear; time python3 ./main.py
 
 dependencies:
-	pip install colorama
+	pip install colorama tqdm
