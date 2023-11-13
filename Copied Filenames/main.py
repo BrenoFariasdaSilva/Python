@@ -1,7 +1,7 @@
 import os # Import the os module for traversing the directory
 import re # Import the re module for regular expressions
-from tqdm import tqdm # For the progress bar
 from colorama import Style # For coloring the terminal
+from tqdm import tqdm # For the progress bar
 
 # Macros:
 class BackgroundColors: # Colors for the terminal
