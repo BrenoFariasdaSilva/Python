@@ -42,6 +42,8 @@ def reais_to_float(reais):
 # @param: None
 # @return: None
 def main():
+	print(f"{BackgroundColors.CLEAR_TERMINAL}{BackgroundColors.BOLD}{BackgroundColors.GREEN}Welcome to {BackgroundColors.CYAN}Credit Card Bill{BackgroundColors.GREEN}!{Style.RESET_ALL}")
+	
 	# Verify if the "Bills" folder exists
 	verify_bills_folder()
 
