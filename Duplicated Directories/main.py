@@ -41,7 +41,7 @@ def search_duplicates(directories_list):
 	
 # This is the main function
 def main():
-	print(f"{BackgroundColors.GREEN}Welcome to the {BackgroundColors.CYAN}Duplicated Directories Finder{BackgroundColors.GREEN}!{Style.RESET_ALL}") # Print a welcome message
+	print(f"{BackgroundColors.CLEAR_TERMINAL}{BackgroundColors.BOLD}{BackgroundColors.GREEN}Welcome to the {BackgroundColors.CYAN}Duplicated Directories Finder{BackgroundColors.GREEN}!{Style.RESET_ALL}") # Print a welcome message
 
 	path = os.getcwd() # Get the current working directory
 	directories_list = get_directories(path) # Get all the files in the path
