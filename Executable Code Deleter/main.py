@@ -1,5 +1,6 @@
 import os # For walking through the directory tree
 from colorama import Style # For coloring the terminal
+from tqdm import tqdm # For the progress bar
 
 # Macros:
 class BackgroundColors: # Colors for the terminal
@@ -19,7 +20,7 @@ IGNORE_FOLDERS = ["BusTracker", "UTFome"]
 # This function will search for executable files in the directory
 def search_executable_files(path):
 	# Iterate over all the files in directory
-	for root, dirs, files in os.walk(path):
+	for root, dirs, files in tqdm(os.walk(path), desc="Processing files", unit="file"):
 		for file in files: # Iterate over all the files in the directory
 			full_path = os.path.join(root, file) # Get the full path of the file
 
@@ -43,11 +44,15 @@ def file_remover(full_path):
    
 # This is the main function
 def main():
+	print(f"{BackgroundColors.CLEAR_TERMINAL}{BackgroundColors.BOLD}{BackgroundColors.GREEN}Welcome to the {BackgroundColors.CYAN}Executable Code Deleter{BackgroundColors.GREEN}!{Style.RESET_ALL}") # Print a welcome message
+
 	path = os.getcwd() # Get the current working directory
  
 	# Check if path is a directory
 	if os.path.isdir(path):
 		search_executable_files(path) # List all the files in the directory
+
+	print(f"{BackgroundColors.BOLD}{BackgroundColors.GREEN}Execution finished.{Style.RESET_ALL}") # Print the end of the execution
 
 # This is the standard boilerplate that calls the main() function.
 if __name__ == "__main__":
