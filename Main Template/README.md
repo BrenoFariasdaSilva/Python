@@ -35,16 +35,17 @@ Project-Description.
 	- [Introduction](#introduction)
 	- [Requirements](#requirements)
 	- [Setup](#setup)
-			- [Clone the repository:](#clone-the-repository)
-			- [Dependencies:](#dependencies)
-			- [Dataset - Optional:](#dataset---optional)
+		- [Clone the repository](#clone-the-repository)
+		- [Dependencies](#dependencies)
+		- [Dataset - Optional](#dataset---optional)
 	- [Usage](#usage)
 	- [Results - Optional](#results---optional)
-	- [Contributing - Optional](#contributing---optional)
+	- [Contributing](#contributing)
 	- [License](#license)
 		- [Apache License 2.0](#apache-license-20)
 		- [Creative Commons Zero v1.0 Universal](#creative-commons-zero-v10-universal)
 		- [MIT License](#mit-license)
+
 
 ## Introduction
 
@@ -55,7 +56,8 @@ Detailed project description.
 Bullet points of the requirements.
 
 ## Setup
-#### Clone the repository:
+
+### Clone the repository
 1. Clone the repository with the following command:
 
 ```bash
@@ -63,14 +65,14 @@ git clone https://github.com/BrenoFariasdaSilva/Repository-Name.git
 cd Repository-Name
 ```
 
-#### Dependencies:
+### Dependencies
 1. Install the project dependencies with the following command:
 
 ```bash
 make dependencies
 ```
 
-#### Dataset - Optional:
+### Dataset - Optional
 1. Download the dataset from WEBSITE-HERE and place it in this project directory `(/Repository-Name)` and run the following command:
 
 ```bash
@@ -89,7 +91,7 @@ make run
 
 Discuss the results obtained in the project.
 
-## Contributing - Optional
+## Contributing
 Code improvement recommendations are very welcome. In order to contribute, follow the steps below:
 
 ## License
