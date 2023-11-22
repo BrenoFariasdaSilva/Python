@@ -174,3 +174,10 @@ Magnet\ Links\ from\ URL/*.txt
 Magnet\ Links\ from\ URL/*.csv
 
 Files\ Without\ Extension/*.txt
+
+# Ignore the Data Directories
+*/dataset/
+*/Dados/
+*/Data/
+*/Dataset/
+*/Results/
