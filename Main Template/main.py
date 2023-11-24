@@ -15,7 +15,7 @@ class BackgroundColors: # Colors for the terminal
 
 # Sound Constants:
 SOUND_COMMANDS = {"Darwin": "afplay", "Linux": "aplay", "Windows": "start"}
-SOUND_FILE = "./.assets/NotificationSound.wav" # The path to the sound file
+SOUND_FILE = "./.assets/Sounds/NotificationSound.wav" # The path to the sound file
 
 # This function defines the command to play a sound when the program finishes
 def play_sound():
