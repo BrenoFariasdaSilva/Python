@@ -10,8 +10,8 @@ class BackgroundColors: # Colors for the terminal
 	UNDERLINE = "\033[4m" # Underline
 	CLEAR_TERMINAL = "\033[H\033[J" # Clear the terminal
 
-INPUT_FILE = "urls_list.txt" # Input file with the URLs
-OUTPUT_FILE = "urls_list.txt" # Output file with the sorted and cleaned URLs
+INPUT_FILE = "URLs.txt" # Input file with the URLs
+OUTPUT_FILE = "URLs.txt" # Output file with the sorted and cleaned URLs
 
 # Description: This function reads a file with a list of URLs, remove the empty lines and the new line characters,
 def sort_and_clean_urls():
