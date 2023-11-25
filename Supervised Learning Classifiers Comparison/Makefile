@@ -4,5 +4,5 @@ run:
 	clear; time python3 ./main.py
 
 dependencies:
-	pip install colorama collection numpy scikit-learn tqdm
+	pip install colorama numpy scikit-learn
 	pip install --upgrade threadpoolctl

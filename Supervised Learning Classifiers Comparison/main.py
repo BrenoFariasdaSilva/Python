@@ -3,14 +3,10 @@ import numpy as np # For the data manipulation
 import os # For running a command in the terminal
 import platform # For getting the operating system name
 import time # For the timer
-import tqdm # For the progress bar
-from collections import Counter # For the majority voting
 from colorama import Style # For coloring the terminal
-from itertools import combinations # For the combinations
 from sklearn import svm # For the SVM classifier
 from sklearn import tree # For the decision tree classifier
 from sklearn.ensemble import RandomForestClassifier # For the random forest classifier
-from sklearn.metrics import accuracy_score # For the accuracy score
 from sklearn.metrics import classification_report # For the classification report
 from sklearn.metrics import confusion_matrix # For the confusion matrix
 from sklearn.model_selection import GridSearchCV # For the grid search
@@ -40,6 +36,7 @@ INPUT_FILES = ["./dataset/digits/training/5x5-normalized-pixel_count.txt", "./da
 # Output Constants:
 SHOW_CONFUSION_MATRIX = False # If True, show the confusion matrix
 SHOW_CLASSIFICATION_REPORT = False # If True, show the classification report
+SHOW_DATASET_INFORMATION = True # If True, show the dataset information
 
 # Classifiers Constants:
 CLASSIFIERS = {
@@ -47,7 +44,7 @@ CLASSIFIERS = {
    "Decision Tree": "grid_search_decision_tree",
    "Support Vector Machine": "grid_search_support_vector_machine",
    "Multilayer Perceptron": "grid_search_multilayer_perceptron",
-   "Random Forest": "grid_search_random_forest", 
+   "Random Forest": "grid_search_random_forest",
    "Naive Bayes": "grid_search_naive_bayes",
 }
 
@@ -67,20 +64,50 @@ def play_sound():
 # Register the function to play a sound when the program finishes
 atexit.register(play_sound)
 
+# This function prints if the dataset is balanced or not
+def dataset_balance(train_labels, test_labels):
+   # Calculate the number of samples per class in the training and test sets
+   qtd_labels_per_class_train = [np.count_nonzero(train_labels == label) for label in np.unique(train_labels)]
+   qtd_labels_per_class_test = [np.count_nonzero(test_labels == label) for label in np.unique(test_labels)]
+   if qtd_labels_per_class_train == qtd_labels_per_class_test:
+      print(f"{BackgroundColors.GREEN}The dataset is {BackgroundColors.CYAN}balanced{BackgroundColors.GREEN}, as there are same amounts of samples per class.{Style.RESET_ALL}", end="\n\n")
+   else:
+      print(f"{BackgroundColors.GREEN}The dataset is {BackgroundColors.RED}not balanced{BackgroundColors.GREEN}, as there are different amounts of samples per class.{Style.RESET_ALL}", end="\n\n")
+
+
+# This function prints the dataset information
+def print_dataset_information(train_features, train_labels, test_features):
+   print(f"{BackgroundColors.GREEN}Number of features: {BackgroundColors.CYAN}{train_features.shape[1]}{Style.RESET_ALL}")
+   print(f"{BackgroundColors.GREEN}Number of training instances: {BackgroundColors.CYAN}{train_features.shape[0]}{Style.RESET_ALL}")
+   print(f"{BackgroundColors.GREEN}Number of test instances: {BackgroundColors.CYAN}{test_features.shape[0]}{Style.RESET_ALL}")
+   print(f"{BackgroundColors.GREEN}Number of classes: {BackgroundColors.CYAN}{len(np.unique(train_labels))}{Style.RESET_ALL}")
+
 # This function loads the data from the dataset files and returns the training and test sets
 def load_data():
    print(f"{BackgroundColors.BOLD}{BackgroundColors.YELLOW}Remember to remove the header line from the dataset files. They should be in the format: {BackgroundColors.CYAN}label feature1 feature2 ... featureN{Style.RESET_ALL}")
    print(f"\n{BackgroundColors.GREEN}Loading data...{Style.RESET_ALL}")
    tr = np.loadtxt(f"{INPUT_FILES[0]}") # Load the training data
    ts = np.loadtxt(f"{INPUT_FILES[1]}") # Load the test data
-   train_label = tr[:, 0] # The first column is the label
-   test_label = ts[:, 0] # The first column is the label
-   train_features_values = tr[:, 1:] # The second column to the last is the feature vector
-   test_features_values = ts[:, 1:] # The second column to the last is the feature vector
-   return train_features_values, train_label, test_features_values, test_label # Return the data
+   train_labels = tr[:, 0] # The first column is the label
+   test_labels = ts[:, 0] # The first column is the label
+   train_features = tr[:, 1:] # The second column to the last is the feature vector
+   test_features = ts[:, 1:] # The second column to the last is the feature vector
+   return train_features, train_labels, test_features, test_labels # Return the data
+
+# This fuction run every classifier
+def run_classifiers(train_features, train_labels, test_features, test_labels):
+   classifiers_execution = {} # Dictionary to store the classifiers execution time
+
+   # Loop through the classifiers
+   for classifier, function in CLASSIFIERS.items():
+      # Run the classifier
+      classifiers_execution[classifier] = globals()[function]
+      classifiers_execution[classifier] = classifiers_execution[classifier](train_features, train_labels, test_features, test_labels)
+
+   return classifiers_execution # Return the classifiers execution time
 
 # This function creates a k-NN classifier and prints the classification report
-def grid_search_k_nearest_neighbors(train_features_values, train_label, test_features_values, test_label):
+def grid_search_k_nearest_neighbors(train_features, train_labels, test_features, test_labels):
    # Define the parameter grid for the grid search
    param_grid = {
       "metric": ["euclidean", "manhattan", "minkowski"], # Distance metric to use.
@@ -93,32 +120,32 @@ def grid_search_k_nearest_neighbors(train_features_values, train_label, test_fea
    grid_search = GridSearchCV(knn, param_grid, scoring="accuracy", cv=CROSS_VALIDATION, n_jobs=-1)
 
    start_time = time.time() # Start the timer
-   grid_search.fit(train_features_values, train_label) # Train the classifier with grid search
+   grid_search.fit(train_features, train_labels) # Train the classifier with grid search
 
    # Get the best model from the grid search
    best_knn = grid_search.best_estimator_
 
    # Predict the test set using the best model
-   y_pred = best_knn.predict(test_features_values)
+   y_pred = best_knn.predict(test_features)
    execution_time = time.time() - start_time # Calculate the execution time
 
    # Calculate the accuracy
-   accuracy = best_knn.score(test_features_values, test_label)
+   accuracy = best_knn.score(test_features, test_labels)
 
    # Get the best parameters from the grid search
    best_params = grid_search.best_params_
 
    if SHOW_CLASSIFICATION_REPORT: # Show the classification report if it is set to True
-      print(f"{classification_report(test_label, y_pred)}{Style.RESET_ALL}") # Print the classification report
+      print(f"{BackgroundColors.GREEN} Classification Report for K-Nearest Neighbors:\n{BackgroundColors.CYAN}{classification_report(test_labels, y_pred)}{Style.RESET_ALL}", end="\n")
 
    if SHOW_CONFUSION_MATRIX: # Show the confusion matrix if it is set to True
-      conf_matrix = confusion_matrix(test_label, y_pred) # Calculate the confusion matrix
-      print(f"{BackgroundColors.GREEN}K-Nearest Neighbors Confusion Matrix:\n{BackgroundColors.CYAN}{conf_matrix}{Style.RESET_ALL}") # Print the confusion matrix
+      conf_matrix = confusion_matrix(test_labels, y_pred) # Calculate the confusion matrix
+      print(f"{BackgroundColors.GREEN}K-Nearest Neighbors Confusion Matrix:\n{BackgroundColors.CYAN}{conf_matrix}{Style.RESET_ALL}", end="\n\n") # Print the confusion matrix
    
    return accuracy, y_pred, {"Best Parameters": best_params, "Execution Time": f"{execution_time:.5f} Seconds"} # Return the Accuracy and the Parameters
 
 # This function creates a Decision Tree classifier with grid search and prints the classification report
-def grid_search_decision_tree(train_features_values, train_label, test_features_values, test_label):
+def grid_search_decision_tree(train_features, train_labels, test_features, test_labels):
    # Define the parameter grid for the grid search
    param_grid = {
       "criterion": ["gini", "entropy"], # The function to measure the quality of a split.
@@ -127,41 +154,41 @@ def grid_search_decision_tree(train_features_values, train_label, test_features_
    }
 
    # Instantiate the Decision Tree classifier
-   clf = tree.DecisionTreeClassifier()
+   dt = tree.DecisionTreeClassifier()
 
    # Instantiate GridSearchCV
-   grid_search = GridSearchCV(clf, param_grid, scoring="accuracy", cv=CROSS_VALIDATION, n_jobs=-1)
+   grid_search = GridSearchCV(dt, param_grid, scoring="accuracy", cv=CROSS_VALIDATION, n_jobs=-1)
 
    start_time = time.time() # Start the timer
-   grid_search.fit(train_features_values, train_label) # Train the classifier with grid search
+   grid_search.fit(train_features, train_labels) # Train the classifier with grid search
 
    # Get the best model from the grid search
    best_clf = grid_search.best_estimator_
 
    # Predict the test set using the best model
-   y_pred = best_clf.predict(test_features_values)
+   y_pred = best_clf.predict(test_features)
    execution_time = time.time() - start_time # Calculate the execution time
 
    # Calculate the accuracy
-   accuracy = best_clf.score(test_features_values, test_label)
+   accuracy = best_clf.score(test_features, test_labels)
 
    # Get the best parameters from the grid search
    best_params = grid_search.best_params_
 
    if SHOW_CLASSIFICATION_REPORT: # Show the classification report if it is set to True
-      print(f"{classification_report(test_label, y_pred)}{Style.RESET_ALL}")
+      print(f"{BackgroundColors.GREEN}Decision Tree Classification Report for Decision Tree:\n{BackgroundColors.CYAN}{classification_report(test_labels, y_pred)}{Style.RESET_ALL}", end="\n")
    
    if SHOW_CONFUSION_MATRIX: # Show the confusion matrix if it is set to True
-      conf_matrix = confusion_matrix(test_label, y_pred) 
-      print(f"{BackgroundColors.GREEN}Decision Tree Confusion Matrix:\n{BackgroundColors.CYAN}{conf_matrix}{Style.RESET_ALL}")
+      conf_matrix = confusion_matrix(test_labels, y_pred) 
+      print(f"{BackgroundColors.GREEN}Decision Tree Confusion Matrix:\n{BackgroundColors.CYAN}{conf_matrix}{Style.RESET_ALL}", end="\n\n")
 
    return accuracy, y_pred, {"Best Parameters": best_params, "Execution Time": f"{execution_time:.5f} Seconds"} # Return the Accuracy and the Parameters
 
 # This function creates a SVM classifier with grid search and prints the classification report
-def grid_search_support_vector_machine(train_features_values, train_label, test_features_values, test_label):
-   srv = svm.SVC(probability=True) # Instantiate the classifier with probability
+def grid_search_support_vector_machine(train_features, train_labels, test_features, test_labels):
+   svm_clf = svm.SVC(probability=True) # Instantiate the classifier with probability
    ss = StandardScaler() # Instantiate the standard scaler
-   pipeline = Pipeline([("scaler", ss), ("svm", srv)]) # Instantiate the pipeline
+   pipeline = Pipeline([("scaler", ss), ("svm", svm_clf)]) # Instantiate the pipeline
 
    # Define the parameters for the grid search
    param_grid = {
@@ -173,24 +200,24 @@ def grid_search_support_vector_machine(train_features_values, train_label, test_
    # Perform Grid Search
    grid = GridSearchCV(pipeline, param_grid, scoring="accuracy", cv=CROSS_VALIDATION, verbose=0, n_jobs=-1)
    start_time = time.time() # Start the timer
-   grid.fit(train_features_values, train_label) # Train the classifier
+   grid.fit(train_features, train_labels) # Train the classifier
 
    # Retrieve the best model
-   y_pred = grid.predict(test_features_values) # Predict the test set
+   y_pred = grid.predict(test_features) # Predict the test set
    execution_time = time.time() - start_time # Calculate the execution time
-   accuracy = grid.score(test_features_values, test_label) # Calculate the accuracy
+   accuracy = grid.score(test_features, test_labels) # Calculate the accuracy
 
    if SHOW_CLASSIFICATION_REPORT: # Show the classification report if it is set to True
-      print(f"{classification_report(test_label, y_pred)}{Style.RESET_ALL}")
+      print(f"{BackgroundColors.GREEN}Support Vector Machine Classification Report for Support Vector Machine:\n{BackgroundColors.CYAN}{classification_report(test_labels, y_pred)}{Style.RESET_ALL}", end="\n")
 
    if SHOW_CONFUSION_MATRIX: # Show the confusion matrix if it is set to True
-      conf_matrix = confusion_matrix(test_label, y_pred)
-      print(f"{BackgroundColors.GREEN}Support Vector Machine Confusion Matrix:\n{BackgroundColors.CYAN}{conf_matrix}{Style.RESET_ALL}")
+      conf_matrix = confusion_matrix(test_labels, y_pred)
+      print(f"{BackgroundColors.GREEN}Support Vector Machine Confusion Matrix:\n{BackgroundColors.CYAN}{conf_matrix}{Style.RESET_ALL}", end="\n\n")
 
-   return accuracy, y_pred, {"C": grid.best_params_["svm__C"], "Gamma": grid.best_params_["svm__gamma"], "Execution Time": f"{execution_time:.5f} Seconds"} # Return the Accuracy and the Parameters
+   return accuracy, y_pred, {"C": grid.best_params_["svm__C"], "Gamma": grid.best_params_["svm__gamma"], "Kernel": grid.best_params_["svm__kernel"], "Execution Time": f"{execution_time:.5f} Seconds"} # Return the Accuracy and the Parameters
 
 # This function creates a Multilayer Perceptron classifier and prints the classification report
-def grid_search_multilayer_perceptron(train_features_values, train_label, test_features_values, test_label):
+def grid_search_multilayer_perceptron(train_features, train_labels, test_features, test_labels):
    # Define the parameter grid for the grid search
    param_grid = {
       "alpha": [1e-5, 1e-4, 1e-3], # L2 penalty (regularization term) parameter.
@@ -199,38 +226,38 @@ def grid_search_multilayer_perceptron(train_features_values, train_label, test_f
    }
 
    # Instantiate the Multilayer Perceptron classifier
-   clf = MLPClassifier(random_state=1, max_iter=2000)
+   mlp = MLPClassifier(random_state=1, max_iter=2000)
 
    # Instantiate GridSearchCV
-   grid_search = GridSearchCV(clf, param_grid, scoring="accuracy", cv=CROSS_VALIDATION, n_jobs=-1)
+   grid_search = GridSearchCV(mlp, param_grid, scoring="accuracy", cv=CROSS_VALIDATION, n_jobs=-1)
 
    start_time = time.time() # Start the timer
-   grid_search.fit(train_features_values, train_label) # Train the classifier with grid search
+   grid_search.fit(train_features, train_labels) # Train the classifier with grid search
 
    # Get the best model from the grid search
    best_clf = grid_search.best_estimator_
 
    # Predict the test set using the best model
-   y_pred = best_clf.predict(test_features_values)
+   y_pred = best_clf.predict(test_features)
    execution_time = time.time() - start_time # Calculate the execution time
 
    # Calculate the accuracy
-   accuracy = best_clf.score(test_features_values, test_label)
+   accuracy = best_clf.score(test_features, test_labels)
 
    # Get the best parameters from the grid search
    best_params = grid_search.best_params_
 
    if SHOW_CLASSIFICATION_REPORT: # Show the classification report if it is set to True
-      print(f"{classification_report(test_label, y_pred)}{Style.RESET_ALL}") # Print the classification report
+      print(f"{BackgroundColors.GREEN}Multilayer Perceptron Classification Report for Multilayer Perceptron:\n{BackgroundColors.CYAN}{classification_report(test_labels, y_pred)}{Style.RESET_ALL}", end="\n") # Print the classification report
 
    if SHOW_CONFUSION_MATRIX: # Show the confusion matrix if it is set to True
-      conf_matrix = confusion_matrix(test_label, y_pred)
-      print(f"{BackgroundColors.GREEN}Multilayer Perceptron Confusion Matrix:\n{BackgroundColors.CYAN}{conf_matrix}{Style.RESET_ALL}") # Print the confusion matrix
+      conf_matrix = confusion_matrix(test_labels, y_pred)
+      print(f"{BackgroundColors.GREEN}Multilayer Perceptron Confusion Matrix:\n{BackgroundColors.CYAN}{conf_matrix}{Style.RESET_ALL}", end="\n\n") # Print the confusion matrix
 
    return accuracy, y_pred, {"Best Parameters": best_params, "Execution Time": f"{execution_time:.5f} Seconds"} # Return the Accuracy and the Parameters
 
 # This function creates a Random Forest classifier and prints the classification report
-def grid_search_random_forest(train_features_values, train_label, test_features_values, test_label):
+def grid_search_random_forest(train_features, train_labels, test_features, test_labels):
    # Define the parameter grid for the grid search
    param_grid = {
       "max_depth": [None, 10, 20, 30], # The maximum depth of the tree.
@@ -238,38 +265,38 @@ def grid_search_random_forest(train_features_values, train_label, test_features_
    }
 
    # Instantiate the Random Forest classifier
-   clf = RandomForestClassifier(random_state=1)
+   rf = RandomForestClassifier(random_state=1)
 
    # Instantiate GridSearchCV
-   grid_search = GridSearchCV(clf, param_grid, scoring="accuracy", cv=CROSS_VALIDATION, n_jobs=-1)
+   grid_search = GridSearchCV(rf, param_grid, scoring="accuracy", cv=CROSS_VALIDATION, n_jobs=-1)
 
    start_time = time.time() # Start the timer
-   grid_search.fit(train_features_values, train_label) # Train the classifier with grid search
+   grid_search.fit(train_features, train_labels) # Train the classifier with grid search
 
    # Get the best model from the grid search
    best_clf = grid_search.best_estimator_
 
    # Predict the test set using the best model
-   y_pred = best_clf.predict(test_features_values)
+   y_pred = best_clf.predict(test_features)
    execution_time = time.time() - start_time # Calculate the execution time
 
    # Calculate the accuracy
-   accuracy = best_clf.score(test_features_values, test_label)
+   accuracy = best_clf.score(test_features, test_labels)
 
    # Get the best parameters from the grid search
    best_params = grid_search.best_params_
 
    if SHOW_CLASSIFICATION_REPORT: # Show the classification report if it is set to True
-      print(f"{classification_report(test_label, y_pred)}{Style.RESET_ALL}") # Print the classification report
+      print(f"{BackgroundColors.GREEN}Random Forest Classification Report for Random Forest:\n{BackgroundColors.CYAN}{classification_report(test_labels, y_pred)}{Style.RESET_ALL}", end="\n") # Print the classification report
 
    if SHOW_CONFUSION_MATRIX: # Show the confusion matrix if it is set to True
-      conf_matrix = confusion_matrix(test_label, y_pred) # Calculate the confusion matrix
-      print(f"{BackgroundColors.GREEN}Random Forest Confusion Matrix:\n{BackgroundColors.CYAN}{conf_matrix}{Style.RESET_ALL}") # Print the confusion matrix
+      conf_matrix = confusion_matrix(test_labels, y_pred) # Calculate the confusion matrix
+      print(f"{BackgroundColors.GREEN}Random Forest Confusion Matrix:\n{BackgroundColors.CYAN}{conf_matrix}{Style.RESET_ALL}", end="\n\n") # Print the confusion matrix
 
    return accuracy, y_pred, {"Best Parameters": best_params, "Execution Time": f"{execution_time:.5f} Seconds"} # Return the Accuracy and the Parameters
 
 # This function trains the Naive Bayes classifier and prints the classification report
-def grid_search_naive_bayes(train_features_values, train_label, test_features_values, test_label):
+def grid_search_naive_bayes(train_features, train_labels, test_features, test_labels):
    # Define the parameters for the grid search
    param_grid = {
       "priors": [None, [0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1]], # Prior probabilities of the classes.
@@ -283,100 +310,19 @@ def grid_search_naive_bayes(train_features_values, train_label, test_features_va
    grid = GridSearchCV(nb, param_grid, scoring="accuracy", cv=CROSS_VALIDATION, verbose=0, n_jobs=-1)
 
    start_time = time.time() # Start the timer
-   grid.fit(train_features_values, train_label) # Train the classifier
-   y_pred = grid.predict(test_features_values) # Predict the test set
+   grid.fit(train_features, train_labels) # Train the classifier
+   y_pred = grid.predict(test_features) # Predict the test set
    execution_time = time.time() - start_time # Calculate the execution time
-   accuracy = grid.score(test_features_values, test_label) # Calculate the accuracy
+   accuracy = grid.score(test_features, test_labels) # Calculate the accuracy
 
    if SHOW_CLASSIFICATION_REPORT: # Show the classification report if it is set to True
-      print(f"{classification_report(test_label, y_pred)}{Style.RESET_ALL}")
+      print(f"{BackgroundColors.GREEN}Naive Bayes Classification Report for Naive Bayes:\n{BackgroundColors.CYAN}{classification_report(test_labels, y_pred)}{Style.RESET_ALL}", end="\n")
 
    if SHOW_CONFUSION_MATRIX: # Show the confusion matrix if it is set to True
-      conf_matrix = confusion_matrix(test_label, y_pred) # Calculate the confusion matrix
-      print(f"{BackgroundColors.GREEN}Naive Bayes Confusion Matrix:\n{BackgroundColors.CYAN}{conf_matrix}{Style.RESET_ALL}") # Print the confusion matrix
+      conf_matrix = confusion_matrix(test_labels, y_pred) # Calculate the confusion matrix
+      print(f"{BackgroundColors.GREEN}Naive Bayes Confusion Matrix:\n{BackgroundColors.CYAN}{conf_matrix}{Style.RESET_ALL}", end="\n\n") # Print the confusion matrix
 
-   return accuracy, y_pred, {"Var Smoothing": grid.best_params_["var_smoothing"], "Execution Time": f"{execution_time:.5f} Seconds"} # Return the Accuracy and the Parameters
-
-# This function trains and evaluates a classifier
-def train_and_evaluate_classifier(classifier_function, train_features, train_labels, test_features, test_labels):
-   classifier_function = globals()[classifier_function] # Use globals() to get the function object from its name
-   accuracy, y_pred, parameters = classifier_function(train_features, train_labels, test_features, test_labels) # Train the classifier and get the accuracy, predictions and parameters
-   return accuracy, y_pred, parameters # Return the accuracy, predictions and parameters
-
-# This function gets the number of iterations for the progress bar
-def get_progress_bar_iterations(classifiers):
-   iterations = 0 # Initialize the iterations variable
-   for classifiers_quantity in range(1, len(classifiers) + 1):
-      for classifier_combination in combinations(classifiers.keys(), classifiers_quantity):
-         for i in range(1, len(classifier_combination) + 1):
-            iterations += 1
-   return iterations # Return the iterations
-
-# This function finds the best combination of classifiers
-def find_best_combination(classifiers, train_features, train_labels, test_features, test_labels):
-   # Initialize the best combination dictionary
-   best_combination = {
-      "Classifiers": None,
-      "Execution Time": 0.0,
-      "Majority Vote Accuracy": 0.0,
-   }
-
-   # Create progress bar
-   with tqdm.tqdm(total=get_progress_bar_iterations(classifiers), desc=f"{BackgroundColors.GREEN}Finding Best Combination{Style.RESET_ALL}", bar_format="{l_bar}{bar:20}{r_bar}{bar:-20b}") as pbar:
-      # Loop through the number of classifiers
-      for classifiers_quantity in range(1, len(classifiers) + 1):
-         # Loop through the combinations
-         for classifier_combination in combinations(classifiers.keys(), classifiers_quantity):
-            classifiers_execution = {}
-            classifiers_predictions = {}
-
-            start_time = time.time() # Start the timer
-            
-            # Loop through the classifiers
-            for classifier_name in classifier_combination:
-               classifier_function = classifiers[classifier_name] # Get the classifier function
-               # Train and evaluate the classifier
-               accuracy, y_pred, parameters = train_and_evaluate_classifier(classifier_function, train_features, train_labels, test_features, test_labels)
-               execution_time = time.time() - start_time # Calculate the execution time
-
-               classifiers_execution[classifier_name] = (accuracy, parameters) # Add the classifier execution to the dictionary
-               classifiers_predictions[classifier_name] = y_pred # Add the classifier predictions to the dictionary
-
-            # Calculate majority vote predictions for the classifiers
-            majority_vote_predictions_result = majority_vote_predictions(classifiers_predictions)
-            majority_vote_accuracy = accuracy_score(test_labels, majority_vote_predictions_result)
-
-            # If the majority vote accuracy is greater than the best combination accuracy, update the best combination
-            if majority_vote_accuracy > best_combination["Majority Vote Accuracy"]:
-               best_combination["Classifiers"] = classifier_combination # Update the best combination
-               best_combination["Majority Vote Accuracy"] = majority_vote_accuracy # Update the best combination accuracy
-               best_combination["Execution Time"] = execution_time
-
-            pbar.update(1) # Update the progress bar
-
-   return best_combination # Return the best combination dictionary
-
-# This function trains the selected classifiers
-def train_selected_classifiers(classifiers, selected_classifiers, train_features, train_labels, test_features, test_labels):
-   classifiers_execution = {} # Initialize the classifiers execution dictionary
-   classifiers_predictions = {} # Initialize the classifiers predictions dictionary
-
-   # Create progress bar that shows the training progress and the current classifier
-   with tqdm.tqdm(total=len(selected_classifiers), desc=f"{BackgroundColors.GREEN}Training Classifiers{Style.RESET_ALL}", bar_format="{l_bar}{bar:20}{r_bar}{bar:-20b}") as pbar:
-      # Loop through the selected classifiers
-      for classifier_name in selected_classifiers:
-         classifier_function = classifiers[classifier_name] # Get the classifier function
-         accuracy, y_pred, parameters = train_and_evaluate_classifier(classifier_function, train_features, train_labels, test_features, test_labels) # Train and evaluate the classifier
-         classifiers_execution[classifier_name] = (accuracy, parameters) # Add the classifier execution to the dictionary
-         classifiers_predictions[classifier_name] = y_pred # Add the classifier predictions to the dictionary
-
-   return classifiers_execution, classifiers_predictions # Return the classifiers execution and predictions dictionaries
-
-# This function performs majority voting on the classifiers predictions
-def majority_vote_predictions(classifiers_predictions):
-   transposed_predictions = list(map(list, zip(*classifiers_predictions.values()))) # Transpose the predictions
-   final_predictions = [Counter(instance_predictions).most_common(1)[0][0] for instance_predictions in transposed_predictions] # Calculate the majority vote predictions
-   return final_predictions # Return the majority vote predictions
+   return accuracy, y_pred, {"Var Smoothing": grid.best_params_["var_smoothing"], "Priors": grid.best_params_["priors"], "Execution Time": f"{execution_time:.5f} Seconds"} # Return the Accuracy and the Parameters
 
 # This function sort the classifiers by accuracy
 def sort_classifiers_execution(classifiers_execution):
@@ -390,29 +336,30 @@ def print_classifiers_execution(sorted_classifiers_execution):
    # loop through the classifiers name, accuracy and parameters
    for classifier, accuracy in sorted_classifiers_execution.items():
       print(f"{BackgroundColors.GREEN}{classifier}: {BackgroundColors.CYAN}{accuracy[0]*100:.2f}%{Style.RESET_ALL}")
-      for parameter, value in accuracy[1].items():
+      for parameter, value in accuracy[2].items():
          print(f"{BackgroundColors.GREEN}{parameter}: {BackgroundColors.CYAN}{value}{Style.RESET_ALL}")
       print(f"{Style.RESET_ALL}")
+
 
 # This is the main function. It calls the other functions, building the project workflow
 def main():
    print(f"{BackgroundColors.CLEAR_TERMINAL}{BackgroundColors.BOLD}{BackgroundColors.GREEN}Welcome to the Artificial Intelligence Supervised Learning Algorithms Comparison Project!{Style.RESET_ALL}") # Print the welcome message
 
-   train_features, train_labels, test_features, test_labels = load_data() # Load the data
+   # Load the data
+   train_features, train_labels, test_features, test_labels = load_data()
 
-   # Find the best combination
-   best_combination = find_best_combination(CLASSIFIERS, train_features, train_labels, test_features, test_labels)
+   if SHOW_DATASET_INFORMATION: # Show the dataset information if it is set to True
+      print_dataset_information(train_features, train_labels, test_features) # Print the dataset information
+      dataset_balance(train_labels, test_labels) # Print if the dataset is balanced or not
+   
+   # Run the classifiers
+   classifiers_execution = run_classifiers(train_features, train_labels, test_features, test_labels)
 
-   # Train the selected classifiers from the best combination
-   selected_classifiers_execution, selected_classifiers_predictions = train_selected_classifiers(CLASSIFIERS, best_combination["Classifiers"], train_features, train_labels, test_features, test_labels)
+   # Sort the classifiers by execution time
+   sorted_classifiers_execution = sort_classifiers_execution(classifiers_execution)
 
-   # Add majority vote to the classifiers execution dictionary
-   selected_classifiers_execution["Majority Vote"] = (best_combination["Majority Vote Accuracy"], {"Best Combination": best_combination["Classifiers"], "Execution Time": f"{best_combination['Execution Time']:.5f} Seconds"})
-
-   # Sort the classifiers by accuracy
-   selected_classifiers_execution = sort_classifiers_execution(selected_classifiers_execution)
-
-   print_classifiers_execution(selected_classifiers_execution) # Print the classifiers accuracy, parameters and execution time
+   # Print the execution time
+   print_classifiers_execution(sorted_classifiers_execution)
 
    print(f"{BackgroundColors.BOLD}{BackgroundColors.GREEN}Thank you for using the Artificial Intelligence Supervised Learning Algorithms Comparison Project!{Style.RESET_ALL}") # Print the goodbye message
 
