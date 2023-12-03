@@ -87,6 +87,8 @@ def are_videos_similar(video_path1, video_path2):
       # Adjust the similarity threshold as needed based on your requirements
       similarity_threshold = 0.9
 
+      print(f"{BackgroundColors.BOLD}{BackgroundColors.GREEN}The similarity ratio is {BackgroundColors.CYAN}{similarity_ratio}{Style.RESET_ALL}")
+
       # Return True if the similarity ratio is greater than the similarity threshold
       return similarity_ratio >= similarity_threshold
 
