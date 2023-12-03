@@ -31,6 +31,14 @@ def play_sound():
 # Register the function to play a sound when the program finishes
 atexit.register(play_sound)
 
+# This function verifies if the file exists
+def file_exists(file):
+   if os.path.exists(file): # If the file exists
+      return True
+   else: # If the file does not exist
+      print(f"{BackgroundColors.RED}File {BackgroundColors.CYAN}{file}{BackgroundColors.RED} not found. Make sure the file exists.{Style.RESET_ALL}")
+      return False
+
 # This function verifies if two files are equal, by comparing their hashes
 def are_files_equal(first_file, second_file):
    first_hash = hashlib.md5()
@@ -55,6 +63,13 @@ def main():
 
    first_file = f""
    second_file = f""
+
+   if not file_exists(first_file): # If the first file does not exist
+      print(f"{BackgroundColors.RED}The first file {BackgroundColors.CYAN}{first_file}{BackgroundColors.RED} does not exist. Please try again.{Style.RESET_ALL}")
+      return
+   if not file_exists(second_file): # If the second file does not exist
+      print(f"{BackgroundColors.RED}The second file {BackgroundColors.CYAN}{second_file}{BackgroundColors.RED} does not exist. Please try again.{Style.RESET_ALL}")
+      return
 
    if are_files_equal(first_file, second_file): # If the files are equal
       print(f"{BackgroundColors.GREEN}The files {BackgroundColors.CYAN}{first_file}{BackgroundColors.GREEN} and {BackgroundColors.CYAN}{second_file}{BackgroundColors.GREEN} are {BackgroundColors.CYAN}equal{BackgroundColors.GREEN}.{Style.RESET_ALL}")
