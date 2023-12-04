@@ -29,3 +29,13 @@ desktop.ini
 *.csv
 *.xlsx
 .txt
+
+# Ignore any video files
+*.mkv
+*.mp4
+*.m4v
+*.avi
+*.mov
+*.flv
+*.wmv
+*.ts
