@@ -106,5 +106,5 @@ def main():
    print(f"{BackgroundColors.GREEN}All images extracted successfully!{Style.RESET_ALL}") # Print the success message
 
 # This is the standard boilerplate that calls the main() function.
-if __name__ == '__main__':
+if __name__ == "__main__":
 	main() # Call the main function

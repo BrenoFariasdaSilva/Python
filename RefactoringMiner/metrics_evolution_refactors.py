@@ -244,5 +244,5 @@ def main():
    process_repository(DEFAULT_REPOSITORY, DEFAULT_REPOSITORIES[DEFAULT_REPOSITORY])
     
 # This is the standard boilerplate that calls the main() function.
-if __name__ == '__main__':
+if __name__ == "__main__":
    main() # Call the main function

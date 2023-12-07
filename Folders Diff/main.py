@@ -44,5 +44,5 @@ def main():
 	[ print(f"{BackgroundColors.CYAN}{diff_folders[i]}{BackgroundColors.GREEN}: not in {BackgroundColors.CYAN}{paths[2]}{Style.RESET_ALL}") for i in range(len(diff_folders)) ]
 
 # This is the standard boilerplate that calls the main() function.
-if __name__ == '__main__':
+if __name__ == "__main__":
 	main() # Call the main function

@@ -214,5 +214,5 @@ def main():
    print(f"{BackgroundColors.GREEN}The {BackgroundColors.CYAN}refactors{BackgroundColors.GREEN} for the {BackgroundColors.CYAN}{list(repositories.keys())}{BackgroundColors.GREEN} repositories were generated.{Style.RESET_ALL}")
     		
 # This is the standard boilerplate that calls the main() function.
-if __name__ == '__main__':
+if __name__ == "__main__":
    main() # Call the main function

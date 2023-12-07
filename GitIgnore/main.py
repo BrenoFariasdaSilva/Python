@@ -60,5 +60,5 @@ def main():
 			update_gitignore(gitignore_file, relative_path) # Update the Gitignore file
 
 # This is the standard boilerplate that calls the main() function
-if __name__ == '__main__':
+if __name__ == "__main__":
 	main() # Call the main function
