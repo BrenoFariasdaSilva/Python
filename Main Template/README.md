@@ -106,7 +106,7 @@ This project is licensed under the [Apache License 2.0](LICENSE), which allows y
 
 ### Creative Commons Zero v1.0 Universal
 
-This project is licensed under the [Creative Commons Zero v1.0 Universal](LICENSE), which means you are free to use, modify, and distribute the code. See the [LICENSE](LICENSE) file for more details.
+This project is licensed under the [Creative Commons Zero v1.0 Universal](LICENSE), which means you are free to use, modify, and distribute the code, as long as you mention include the license and attribute you as the original author for the repository. See the [LICENSE](LICENSE) file for more details.
 
 ### MIT License
 
