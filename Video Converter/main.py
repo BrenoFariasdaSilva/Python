@@ -60,7 +60,7 @@ def convert_video(input_file, output_file):
    if output_file.split(".")[-1] == "mp4":
       command += ["-strict", "-2"] # Needed for certain audio codecs in mp4
 
-   command += [output_file] # Add the output file to the command
+   command += output_file # Add the output file to the command
 
    try:
       subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True) # Run the command
