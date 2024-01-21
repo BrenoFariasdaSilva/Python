@@ -20,6 +20,7 @@ SOUND_FILE = "./.assets/Sounds/NotificationSound.wav" # The path to the sound fi
 
 # Input Constants:
 PERIOD_TYPES = ["Years", "Months", "Days"] # The types of the period
+CONTRIBUTION = {"Years": "Annual", "Months": "Monthly", "Days": "Daily"} # The contribution according to the period type
 STR_PERIOD_TYPES = str(tuple(PERIOD_TYPES))[1:-1].replace("'", "") # The types of the period as a string list
 
 # This function defines the command to play a sound when the program finishes
@@ -62,6 +63,15 @@ def get_initial_amount():
 
    return initial_amount # Return the initial amount
 
+# This function get the user regular contribution from the user
+def get_regular_contribution(period_type):
+   regular_contribution = -1 # Initialize the regular contribution
+
+   while regular_contribution < 0: # While the regular contribution is less than or equal to 0
+      regular_contribution = float(input(f"{BackgroundColors.BOLD}{BackgroundColors.GREEN}Please enter the {CONTRIBUTION[period_type]} Contribution {BackgroundColors.CYAN}(Int or Float){BackgroundColors.GREEN}: {Style.RESET_ALL}"))
+
+   return regular_contribution # Return the regular contribution
+
 # This function get the interest rate from the user
 def get_interest_rate():
    interest_rate = 0 # Initialize the interest rate
@@ -78,6 +88,7 @@ def main():
    period_type = get_period_type() # Get the type of the period from the user
    number_of_periods = get_number_of_periods() # Get the number of the periods from the user
    initial_amount = get_initial_amount() # Get the initial amount from the user
+   regular_contribution = get_regular_contribution(period_type) # Get the regular contribution from the user
    interest_rate = get_interest_rate() # Get the interest rate from the user
 
    print(f"\n{BackgroundColors.BOLD}{BackgroundColors.GREEN}Program finished.{Style.RESET_ALL}") # Output the end of the program message
