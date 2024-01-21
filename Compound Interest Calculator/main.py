@@ -53,12 +53,22 @@ def get_initial_amount():
 
    return initial_amount # Return the initial amount
 
+# This function get the interest rate from the user
+def get_interest_rate():
+   interest_rate = 0 # Initialize the interest rate
+
+   while interest_rate <= 0: # While the interest rate is less than or equal to 0
+      interest_rate = float(input(f"{BackgroundColors.BOLD}{BackgroundColors.GREEN}Please enter the interest rate {BackgroundColors.CYAN}(0% to 100%){BackgroundColors.GREEN}: {Style.RESET_ALL}"))
+
+   return interest_rate # Return the interest rate
+
 # This is the Main function
 def main():
    print(f"{BackgroundColors.CLEAR_TERMINAL}{BackgroundColors.BOLD}{BackgroundColors.GREEN}Welcome to the {BackgroundColors.CYAN}Compound Interest Calculator {BackgroundColors.GREEN}Algorithm!{Style.RESET_ALL}", end="\n\n") # Output the Welcome message
 
    period_type = get_period_type() # Get the type of the period from the user
    initial_amount = get_initial_amount() # Get the initial amount from the user
+   interest_rate = get_interest_rate() # Get the interest rate from the user
 
    print(f"\n{BackgroundColors.BOLD}{BackgroundColors.GREEN}Program finished.{Style.RESET_ALL}") # Output the end of the program message
 
