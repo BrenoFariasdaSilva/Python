@@ -39,7 +39,7 @@ atexit.register(play_sound)
 
 # This function get for the type of the period from the user
 def get_period_type():
-   period_type = '' # Initialize the period type
+   period_type = "" # Initialize the period type
 
    while period_type.capitalize() not in PERIOD_TYPES: # While the period type is not in the list of the period types
       period_type = input(f"{BackgroundColors.BOLD}{BackgroundColors.GREEN}Please enter the type of the period {BackgroundColors.CYAN}({STR_PERIOD_TYPES}){BackgroundColors.GREEN}: {Style.RESET_ALL}")
@@ -90,7 +90,7 @@ def calculate_compound_interest(number_of_periods, initial_amount, regular_contr
 
    for period in range(number_of_periods): # For each period
       total_amount = total_amount * (1 + interest_rate / 100) + regular_contribution # Calculate the total amount
-      total_amounts.append(total_amount) # Add the total amount to the list of the total amounts
+      total_amounts.append(f"{total_amount:.2f}") # Add the total amount to the list of the total amounts
       periods.append(period + 1) # Add the period to the list of the periods
 
    return total_amounts, periods # Return the list of the total amounts and the list of the periods
