@@ -107,7 +107,7 @@ def reduce_list(list, period_type):
    return list[::reduction_ratio[period_type]] # Return the reduced list
 
 # This function plots the graph
-def plot_graph(total_amounts, money_invested, periods, period_type):
+def plot_graph(total_amounts, money_invested, profits, periods, period_type):
    fig, ax = plt.subplots(figsize=(16, 9)) # 16:9 Aspect Ratio for 1080p
    bar_width = 0.5 # Set the width of the bars
 
@@ -124,7 +124,7 @@ def plot_graph(total_amounts, money_invested, periods, period_type):
 
    plt.xlabel(f"{period_type}") # Set the x label
    plt.ylabel(f"Total Amount") # Set the y label
-   plt.title(f"Compound Interest Calculator:\nTotal Amount of {total_amounts[-1]} After {periods[-1]} {period_type}.") # Set the title
+   plt.title(f"Compound Interest Calculator:\nTotal Amount of {total_amounts[-1]} R$ After {periods[-1]} {period_type}\nProfit: {profits[0]:.2f} R$, representing {profits[1]:.2f}% of the Money Invested.") # Set the title
 
    ax.legend() # Add a legend
    plt.show() # Show the graph
@@ -148,8 +148,13 @@ def main():
    periods = reduce_list(periods, period_type) # Reduce the list of the periods
 
    total_amounts = np.array(total_amounts, dtype=float) # Convert the list to a float numpy array
-   
-   plot_graph(total_amounts, money_invested, periods, period_type) # Plot the graph
+
+   profits = [total_amounts[-1] - money_invested[-1], ((total_amounts[-1] - money_invested[-1]) / total_amounts[-1] * 100)] # Calculate the profits
+
+   plot_graph(total_amounts, money_invested, profits, periods, period_type) # Plot the graph
+
+   print(f"\n{BackgroundColors.BOLD}{BackgroundColors.GREEN}Total Amount After {BackgroundColors.CYAN}{periods[-1]} {period_type}{BackgroundColors.GREEN}: {BackgroundColors.CYAN}{total_amounts[-1]}{BackgroundColors.GREEN} R$.")
+   print(f"{BackgroundColors.BOLD}{BackgroundColors.GREEN}Profit: {BackgroundColors.CYAN}{profits[0]:.2f}{BackgroundColors.GREEN} R$, representing {BackgroundColors.CYAN}{profits[1]:.2f}%{BackgroundColors.GREEN} of the Money Invested.{Style.RESET_ALL}") # Output the profit message
 
    print(f"\n{BackgroundColors.BOLD}{BackgroundColors.GREEN}Program finished.{Style.RESET_ALL}") # Output the end of the program message
 
