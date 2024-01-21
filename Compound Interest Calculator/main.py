@@ -95,6 +95,16 @@ def calculate_compound_interest(number_of_periods, initial_amount, regular_contr
 
    return total_amounts, periods # Return the list of the total amounts and the list of the periods
 
+# This function returns the reduced list
+def reduce_list(list, period_type):
+   if not len(list) > 100: # If the length of the list is not greater than 100
+      return list # Return the list
+   
+   # Define the reduction ratio
+   reduction_ratio = {"Years": 12, "Months": 6, "Days": 30}
+
+   return list[::reduction_ratio[period_type]] # Return the reduced list
+
 # This function plots the graph
 def plot_graph(total_amounts, periods, period_type):
    # Create a figure and set its size to 1080p resolution
@@ -117,7 +127,13 @@ def main():
    interest_rate = get_interest_rate(period_type) # Get the interest rate from the user
 
    total_amounts, periods = calculate_compound_interest(number_of_periods, initial_amount, regular_contribution, interest_rate) # Calculate the compound interest
+   
    money_invested = np.array([initial_amount + regular_contribution * period for period in range(number_of_periods + 1)]) # Calculate the money invested
+
+   total_amounts = reduce_list(total_amounts, period_type) # Reduce the list of the total amounts
+   money_invested = reduce_list(money_invested, period_type) # Reduce the list of the money invested
+   periods = reduce_list(periods, period_type) # Reduce the list of the periods
+   
    plot_graph(total_amounts, periods, period_type) # Plot the graph
 
    print(f"\n{BackgroundColors.BOLD}{BackgroundColors.GREEN}Program finished.{Style.RESET_ALL}") # Output the end of the program message
