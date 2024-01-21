@@ -1,6 +1,7 @@
 import atexit # For playing a sound when the program finishes
 import os # For running a command in the terminal
 import matplotlib.pyplot as plt # For plotting graphs
+import numpy as np # For creating arrays
 import platform # For getting the operating system name
 from colorama import Style # For coloring the terminal
 
@@ -116,6 +117,7 @@ def main():
    interest_rate = get_interest_rate(period_type) # Get the interest rate from the user
 
    total_amounts, periods = calculate_compound_interest(number_of_periods, initial_amount, regular_contribution, interest_rate) # Calculate the compound interest
+   money_invested = np.array([initial_amount + regular_contribution * period for period in range(number_of_periods + 1)]) # Calculate the money invested
    plot_graph(total_amounts, periods, period_type) # Plot the graph
 
    print(f"\n{BackgroundColors.BOLD}{BackgroundColors.GREEN}Program finished.{Style.RESET_ALL}") # Output the end of the program message
