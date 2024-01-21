@@ -5,3 +5,5 @@ run:
 
 depencencies:
 	pip install colorama
+	pip install matplotlib
+	pip install numpy
