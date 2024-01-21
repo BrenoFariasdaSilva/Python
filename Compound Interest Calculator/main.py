@@ -1,5 +1,6 @@
 import atexit # For playing a sound when the program finishes
 import os # For running a command in the terminal
+import matplotlib.pyplot as plt # For plotting graphs
 import platform # For getting the operating system name
 from colorama import Style # For coloring the terminal
 
@@ -17,6 +18,10 @@ class BackgroundColors: # Colors for the terminal
 SOUND_COMMANDS = {"Darwin": "afplay", "Linux": "aplay", "Windows": "start"}
 SOUND_FILE = "./.assets/Sounds/NotificationSound.wav" # The path to the sound file
 
+# Input Constants:
+PERIOD_TYPES = ["Years", "Months", "Days"] # The types of the period
+STR_PERIOD_TYPES = str(tuple(PERIOD_TYPES))[1:-1].replace("'", "") # The types of the period as a string list
+
 # This function defines the command to play a sound when the program finishes
 def play_sound():
    if os.path.exists(SOUND_FILE):
@@ -30,9 +35,21 @@ def play_sound():
 # Register the function to play a sound when the program finishes
 atexit.register(play_sound)
 
+# This function get for the type of the period from the user
+def get_period_type():
+   period_type = '' # Initialize the period type
+
+   while period_type.capitalize() not in PERIOD_TYPES: # While the period type is not in the list of the period types
+      period_type = input(f"{BackgroundColors.BOLD}{BackgroundColors.GREEN}Please enter the type of the period {BackgroundColors.CYAN}({STR_PERIOD_TYPES}){BackgroundColors.GREEN}: {Style.RESET_ALL}")
+
+   return period_type.capitalize() # Return the period type
+
 # This is the Main function
 def main():
    print(f"{BackgroundColors.CLEAR_TERMINAL}{BackgroundColors.BOLD}{BackgroundColors.GREEN}Welcome to the {BackgroundColors.CYAN}Compound Interest Calculator {BackgroundColors.GREEN}Algorithm!{Style.RESET_ALL}", end="\n\n") # Output the Welcome message
+
+   period_type = get_period_type() # Get the type of the period from the user
+   print(f"\n{BackgroundColors.BOLD}{BackgroundColors.GREEN}You have chosen {BackgroundColors.CYAN}{period_type}{BackgroundColors.GREEN} as the type of the period.{Style.RESET_ALL}", end="\n\n") # Output the type of the period
 
    print(f"\n{BackgroundColors.BOLD}{BackgroundColors.GREEN}Program finished.{Style.RESET_ALL}") # Output the end of the program message
 
