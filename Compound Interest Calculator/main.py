@@ -146,6 +146,8 @@ def main():
    total_amounts = reduce_list(total_amounts, period_type) # Reduce the list of the total amounts
    money_invested = reduce_list(money_invested, period_type) # Reduce the list of the money invested
    periods = reduce_list(periods, period_type) # Reduce the list of the periods
+
+   total_amounts = np.array(total_amounts, dtype=float) # Convert the list to a float numpy array
    
    plot_graph(total_amounts, money_invested, periods, period_type) # Plot the graph
 
