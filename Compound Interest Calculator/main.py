@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt # For plotting graphs
 import numpy as np # For creating arrays
 import platform # For getting the operating system name
 from colorama import Style # For coloring the terminal
+from matplotlib.ticker import MaxNLocator # For setting the number of y axis ticks
 
 # Macros:
 class BackgroundColors: # Colors for the terminal
@@ -106,14 +107,26 @@ def reduce_list(list, period_type):
    return list[::reduction_ratio[period_type]] # Return the reduced list
 
 # This function plots the graph
-def plot_graph(total_amounts, periods, period_type):
-   # Create a figure and set its size to 1080p resolution
-   fig = plt.figure(figsize=(16, 9)) # 16:9 aspect ratio for 1080p
-   plt.bar(periods, total_amounts) # Plot the graph
+def plot_graph(total_amounts, money_invested, periods, period_type):
+   fig, ax = plt.subplots(figsize=(16, 9)) # 16:9 Aspect Ratio for 1080p
+   bar_width = 0.5 # Set the width of the bars
+
+   x_values = np.arange(len(periods)) # Create an array of x values for each period
+
+   # Plot the bars for the total amount with transparency
+   ax.bar(x_values, total_amounts, width=bar_width, align="center", alpha=0.7, label="Total Amount")
+   # Plot the bars for the invested amount with transparency, overlaying the total amount bars
+   ax.bar(x_values, money_invested, width=bar_width, align="center", alpha=0.7, label="Money Invested")
+
+   ax.set_xticks(np.arange(len(periods))) # Set the x ticks
+   ax.set_xticklabels(periods) # Set the x tick labels
+   ax.yaxis.set_major_locator(MaxNLocator(nbins=10)) # Set the number of y axis ticks
+
    plt.xlabel(f"{period_type}") # Set the x label
    plt.ylabel(f"Total Amount") # Set the y label
-   plt.title(f"Compound Interest Calculator Algorithm\nTotal Amount: {total_amounts[-1]:.2f} After {periods[-1]} {period_type}.") # Set the title
-   
+   plt.title(f"Compound Interest Calculator:\nTotal Amount of {total_amounts[-1]} After {periods[-1]} {period_type}.") # Set the title
+
+   ax.legend() # Add a legend
    plt.show() # Show the graph
 
 # This is the Main function
@@ -134,7 +147,7 @@ def main():
    money_invested = reduce_list(money_invested, period_type) # Reduce the list of the money invested
    periods = reduce_list(periods, period_type) # Reduce the list of the periods
    
-   plot_graph(total_amounts, periods, period_type) # Plot the graph
+   plot_graph(total_amounts, money_invested, periods, period_type) # Plot the graph
 
    print(f"\n{BackgroundColors.BOLD}{BackgroundColors.GREEN}Program finished.{Style.RESET_ALL}") # Output the end of the program message
 
