@@ -44,11 +44,21 @@ def get_period_type():
 
    return period_type.capitalize() # Return the period type
 
+# This function get the initial amount from the user
+def get_initial_amount():
+   initial_amount = -1 # Initialize the initial amount
+
+   while initial_amount < 0: # While the initial amount is less than or equal to 0
+      initial_amount = float(input(f"{BackgroundColors.BOLD}{BackgroundColors.GREEN}Please enter the initial amount {BackgroundColors.CYAN}(Int or Float){BackgroundColors.GREEN}: {Style.RESET_ALL}"))
+
+   return initial_amount # Return the initial amount
+
 # This is the Main function
 def main():
    print(f"{BackgroundColors.CLEAR_TERMINAL}{BackgroundColors.BOLD}{BackgroundColors.GREEN}Welcome to the {BackgroundColors.CYAN}Compound Interest Calculator {BackgroundColors.GREEN}Algorithm!{Style.RESET_ALL}", end="\n\n") # Output the Welcome message
 
    period_type = get_period_type() # Get the type of the period from the user
+   initial_amount = get_initial_amount() # Get the initial amount from the user
 
    print(f"\n{BackgroundColors.BOLD}{BackgroundColors.GREEN}Program finished.{Style.RESET_ALL}") # Output the end of the program message
 
