@@ -94,6 +94,17 @@ def calculate_compound_interest(number_of_periods, initial_amount, regular_contr
 
    return total_amounts, periods # Return the list of the total amounts and the list of the periods
 
+# This function plots the graph
+def plot_graph(total_amounts, periods, period_type):
+   # Create a figure and set its size to 1080p resolution
+   fig = plt.figure(figsize=(16, 9)) # 16:9 aspect ratio for 1080p
+   plt.bar(periods, total_amounts) # Plot the graph
+   plt.xlabel(f"{period_type}") # Set the x label
+   plt.ylabel(f"Total Amount") # Set the y label
+   plt.title(f"Compound Interest Calculator Algorithm\nTotal Amount: {total_amounts[-1]:.2f} After {periods[-1]} {period_type}.") # Set the title
+   
+   plt.show() # Show the graph
+
 # This is the Main function
 def main():
    print(f"{BackgroundColors.CLEAR_TERMINAL}{BackgroundColors.BOLD}{BackgroundColors.GREEN}Welcome to the {BackgroundColors.CYAN}Compound Interest Calculator {BackgroundColors.GREEN}Algorithm!{Style.RESET_ALL}", end="\n\n") # Output the Welcome message
@@ -105,6 +116,7 @@ def main():
    interest_rate = get_interest_rate(period_type) # Get the interest rate from the user
 
    total_amounts, periods = calculate_compound_interest(number_of_periods, initial_amount, regular_contribution, interest_rate) # Calculate the compound interest
+   plot_graph(total_amounts, periods, period_type) # Plot the graph
 
    print(f"\n{BackgroundColors.BOLD}{BackgroundColors.GREEN}Program finished.{Style.RESET_ALL}") # Output the end of the program message
 
