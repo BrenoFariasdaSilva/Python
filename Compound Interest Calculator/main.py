@@ -73,11 +73,11 @@ def get_regular_contribution(period_type):
    return regular_contribution # Return the regular contribution
 
 # This function get the interest rate from the user
-def get_interest_rate():
+def get_interest_rate(period_type):
    interest_rate = 0 # Initialize the interest rate
 
    while interest_rate <= 0: # While the interest rate is less than or equal to 0
-      interest_rate = float(input(f"{BackgroundColors.BOLD}{BackgroundColors.GREEN}Please enter the interest rate {BackgroundColors.CYAN}(0% to 100%){BackgroundColors.GREEN}: {Style.RESET_ALL}"))
+      interest_rate = float(input(f"{BackgroundColors.BOLD}{BackgroundColors.GREEN}Please enter the {period_type} Interest Rate {BackgroundColors.CYAN}(0% to 100%){BackgroundColors.GREEN}: {Style.RESET_ALL}"))
 
    return interest_rate # Return the interest rate
 
@@ -89,7 +89,7 @@ def main():
    number_of_periods = get_number_of_periods() # Get the number of the periods from the user
    initial_amount = get_initial_amount() # Get the initial amount from the user
    regular_contribution = get_regular_contribution(period_type) # Get the regular contribution from the user
-   interest_rate = get_interest_rate() # Get the interest rate from the user
+   interest_rate = get_interest_rate(period_type) # Get the interest rate from the user
 
    print(f"\n{BackgroundColors.BOLD}{BackgroundColors.GREEN}Program finished.{Style.RESET_ALL}") # Output the end of the program message
 
