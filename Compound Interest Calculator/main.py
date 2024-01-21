@@ -44,6 +44,15 @@ def get_period_type():
 
    return period_type.capitalize() # Return the period type
 
+# This function get the number of the periods from the user
+def get_number_of_periods():
+   number_of_periods = -1 # Initialize the number of the periods
+
+   while number_of_periods < 0: # While the number of the periods is less than or equal to 0
+      number_of_periods = int(input(f"{BackgroundColors.BOLD}{BackgroundColors.GREEN}Please enter the number of the periods {BackgroundColors.CYAN}(Int){BackgroundColors.GREEN}: {Style.RESET_ALL}"))
+
+   return number_of_periods # Return the number of the periods
+
 # This function get the initial amount from the user
 def get_initial_amount():
    initial_amount = -1 # Initialize the initial amount
@@ -67,6 +76,7 @@ def main():
    print(f"{BackgroundColors.CLEAR_TERMINAL}{BackgroundColors.BOLD}{BackgroundColors.GREEN}Welcome to the {BackgroundColors.CYAN}Compound Interest Calculator {BackgroundColors.GREEN}Algorithm!{Style.RESET_ALL}", end="\n\n") # Output the Welcome message
 
    period_type = get_period_type() # Get the type of the period from the user
+   number_of_periods = get_number_of_periods() # Get the number of the periods from the user
    initial_amount = get_initial_amount() # Get the initial amount from the user
    interest_rate = get_interest_rate() # Get the interest rate from the user
 
