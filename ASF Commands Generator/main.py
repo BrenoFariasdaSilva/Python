@@ -85,6 +85,7 @@ def generate_asf_commands(input_file, output_file):
 def main():
    print(f"{BackgroundColors.CLEAR_TERMINAL}{BackgroundColors.BOLD}{BackgroundColors.GREEN}Welcome to the {BackgroundColors.CYAN}ASF Command Generator{BackgroundColors.GREEN} program!{Style.RESET_ALL}\n") # Output the welcome message
 
+   sort_games(INPUT_FILE, OUTPUT_FILE) # Sort the games
    generate_asf_commands(INPUT_FILE, OUTPUT_FILE) # Generate ASF commands
 
    print(f"\n{BackgroundColors.BOLD}{BackgroundColors.GREEN}Program finished.{Style.RESET_ALL}") # Output the end of the program message
