@@ -43,22 +43,24 @@ def sort_games(input_file, output_file):
       for line in file: # For each line in the file
          parts = line.strip().split(" - ") # Split the line into parts
          if len(parts) == 2: # If the length of the parts is 2
-            game = parts[1] # Get the game
+            game_name = parts[1] # Get the game
             appID = parts[0] # Get the appID
-            if appID in games: # If the appID is in the games dictionary
-               games[appID].append(game) # Append the game to the appID
-            else: # If the appID is not in the games dictionary
-               games[appID] = [game] # Add the appID to the games dictionary
+            if game_name in games: # If the game is in the games dictionary
+               print(f"{BackgroundColors.RED}Duplicate game {BackgroundColors.CYAN}{game_name}{BackgroundColors.RED} found!{Style.RESET_ALL}") # Output the duplicate game message
+            else: # If the game is not in the games dictionary
+               games[game_name] = appID
 
-   # Sort the games by appID
-   sorted_games = {appID: sorted(games[appID]) for appID in sorted(games)}
+   # Sort the games by the game name
+   sorted_games = {k: v for k, v in sorted(games.items(), key=lambda item: item[0])}
 
    # Write the sorted games to the output file
    with open(output_file, "w") as file:
-      for appID in sorted_games: # For each appID in the sorted games
-         file.write(f"{appID} - {', '.join(sorted_games[appID])}\n") # Write the appID and games to the file
+      for game_name, appID in sorted_games.items():
+         file.write(f"{appID} - {game_name}\n")
 
    print(f"{BackgroundColors.BOLD}{BackgroundColors.GREEN}Games sorted and written to {BackgroundColors.CYAN}{output_file}{Style.RESET_ALL}")
+
+   return sorted_games # Return the sorted games
 
 # This function generates ASF commands
 def generate_asf_commands(input_file, output_file):
@@ -85,7 +87,7 @@ def generate_asf_commands(input_file, output_file):
 def main():
    print(f"{BackgroundColors.CLEAR_TERMINAL}{BackgroundColors.BOLD}{BackgroundColors.GREEN}Welcome to the {BackgroundColors.CYAN}ASF Command Generator{BackgroundColors.GREEN} program!{Style.RESET_ALL}\n") # Output the welcome message
 
-   sort_games(INPUT_FILE, INPUT_FILE) # Sort the games
+   sorted_games = sort_games(INPUT_FILE, OUTPUT_FILE) # Sort the games
    generate_asf_commands(INPUT_FILE, OUTPUT_FILE) # Generate ASF commands
 
    print(f"\n{BackgroundColors.BOLD}{BackgroundColors.GREEN}Program finished.{Style.RESET_ALL}") # Output the end of the program message
