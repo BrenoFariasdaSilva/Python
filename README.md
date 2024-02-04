@@ -39,6 +39,7 @@ Feel free to contribute and send suggestions.
 	- [Run Python Code:](#run-python-code)
 	- [Contributing](#contributing)
 	- [License](#license)
+		- [Creative Commons Zero v1.0 Universal](#creative-commons-zero-v10-universal)
 
 ## Setup
 
@@ -83,4 +84,6 @@ python3 ./{ProgramName}.py
 Code improvement recommendations are very welcome, but keep in mind that many exercises will be very simple, with a lot of room for improvement, after all here is all the history of my learning progress.
 
 ## License
-[MIT](https://choosealicense.com/licenses/mit/)
+### Creative Commons Zero v1.0 Universal
+
+This project is licensed under the [Creative Commons Zero v1.0 Universal](LICENSE), which means you are free to use, modify, and distribute the code, as long as you mention include the license and attribute you as the original author for the repository. See the [LICENSE](LICENSE) file for more details.
