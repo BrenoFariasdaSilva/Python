@@ -4,6 +4,9 @@
 # chmod +x install.sh
 # sudo ./install.sh
 
+# Update Package List:
+sudo apt-get update -y
+
 # Python:
 sudo apt-get install python3 python3-venv python3-pip -y
 # sudo apt install python-is-python3
