@@ -33,10 +33,23 @@ Feel free to contribute and send suggestions.
 ## Table of Contents
 - [Python. ](#python-)
 	- [Table of Contents](#table-of-contents)
+	- [Setup](#setup)
+		- [Clone the repository](#clone-the-repository)
 	- [Installation:](#installation)
 	- [Run Python Code:](#run-python-code)
 	- [Contributing](#contributing)
 	- [License](#license)
+
+## Setup
+
+### Clone the repository
+
+1. Clone the repository with the following command:
+
+```bash
+git clone https://github.com/BrenoFariasdaSilva/Python.git
+cd Python
+```
 
 ## Installation:
 * Python Language:
