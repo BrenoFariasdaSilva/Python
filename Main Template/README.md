@@ -110,4 +110,4 @@ This project is licensed under the [Creative Commons Zero v1.0 Universal](LICENS
 
 ### MIT License
 
-This project is licensed under the LICENSE-HERE License - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the [LICENSE](LICENSE), which allows you to use, modify, distribute, and sublicense this code, even for commercial purposes, as long as you include the original copyright notice and attribute you as the original author for the repository. See the [LICENSE](LICENSE) file for more details.
