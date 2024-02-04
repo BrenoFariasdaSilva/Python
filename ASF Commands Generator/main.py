@@ -34,6 +34,32 @@ def play_sound():
 # Register the function to play a sound when the program finishes
 atexit.register(play_sound)
 
+# This functions reads the input file and sorts the games by what comes after the dash and space
+def sort_games(input_file, output_file):
+   games = {} # Dictionary of games
+
+   # Read the input file
+   with open(input_file, "r") as file:
+      for line in file: # For each line in the file
+         parts = line.strip().split(" - ") # Split the line into parts
+         if len(parts) == 2: # If the length of the parts is 2
+            game = parts[1] # Get the game
+            category = parts[0] # Get the category
+            if category in games: # If the category is in the games dictionary
+               games[category].append(game) # Append the game to the category
+            else: # If the category is not in the games dictionary
+               games[category] = [game] # Add the category to the games dictionary
+
+   # Sort the games by category
+   sorted_games = {category: sorted(games[category]) for category in sorted(games)}
+
+   # Write the sorted games to the output file
+   with open(output_file, "w") as file:
+      for category in sorted_games: # For each category in the sorted games
+         file.write(f"{category} - {', '.join(sorted_games[category])}\n") # Write the category and games to the file
+
+   print(f"{BackgroundColors.BOLD}{BackgroundColors.GREEN}Games sorted and written to {BackgroundColors.CYAN}{output_file}{Style.RESET_ALL}")
+
 # This function generates ASF commands
 def generate_asf_commands(input_file, output_file):
    appids = [] # List of appids
