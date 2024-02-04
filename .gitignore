@@ -168,12 +168,17 @@ PyDriller/repositories
 *.tar.gz
 *.zip
 
+# Ignore any .csv or .txt file inside the URLs List Filter and Magnet Links from URL folders
 URLs\ List\ Filter/*.txt
 URLs\ List\ Filter/*.csv
 Magnet\ Links\ from\ URL/*.txt
 Magnet\ Links\ from\ URL/*.csv
 
+# Ignore any .txt file inside the Files Without Extension folder
 Files\ Without\ Extension/*.txt
+
+# Ignore any files from Steam Games folder
+*/Steam\ Games/*
 
 # Ignore the Data Directories
 */dataset/
