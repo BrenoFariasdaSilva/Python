@@ -44,19 +44,19 @@ def sort_games(input_file, output_file):
          parts = line.strip().split(" - ") # Split the line into parts
          if len(parts) == 2: # If the length of the parts is 2
             game = parts[1] # Get the game
-            category = parts[0] # Get the category
-            if category in games: # If the category is in the games dictionary
-               games[category].append(game) # Append the game to the category
-            else: # If the category is not in the games dictionary
-               games[category] = [game] # Add the category to the games dictionary
+            appID = parts[0] # Get the appID
+            if appID in games: # If the appID is in the games dictionary
+               games[appID].append(game) # Append the game to the appID
+            else: # If the appID is not in the games dictionary
+               games[appID] = [game] # Add the appID to the games dictionary
 
-   # Sort the games by category
-   sorted_games = {category: sorted(games[category]) for category in sorted(games)}
+   # Sort the games by appID
+   sorted_games = {appID: sorted(games[appID]) for appID in sorted(games)}
 
    # Write the sorted games to the output file
    with open(output_file, "w") as file:
-      for category in sorted_games: # For each category in the sorted games
-         file.write(f"{category} - {', '.join(sorted_games[category])}\n") # Write the category and games to the file
+      for appID in sorted_games: # For each appID in the sorted games
+         file.write(f"{appID} - {', '.join(sorted_games[appID])}\n") # Write the appID and games to the file
 
    print(f"{BackgroundColors.BOLD}{BackgroundColors.GREEN}Games sorted and written to {BackgroundColors.CYAN}{output_file}{Style.RESET_ALL}")
 
@@ -76,7 +76,7 @@ def generate_asf_commands(input_file, output_file):
    asf_commands = ["!addlicense ASF a/" + ", a/".join(appids[i:i+50]) for i in range(0, len(appids), 50)]
 
    # Append ASF commands to the end of the input file
-   with open(output_file, "a") as file:
+   with open(output_file, "w") as file:
       file.write("\n".join(asf_commands))
 
    print(f"{BackgroundColors.BOLD}{BackgroundColors.GREEN}ASF commands generated and written to {BackgroundColors.CYAN}{output_file}{Style.RESET_ALL}")
@@ -85,7 +85,7 @@ def generate_asf_commands(input_file, output_file):
 def main():
    print(f"{BackgroundColors.CLEAR_TERMINAL}{BackgroundColors.BOLD}{BackgroundColors.GREEN}Welcome to the {BackgroundColors.CYAN}ASF Command Generator{BackgroundColors.GREEN} program!{Style.RESET_ALL}\n") # Output the welcome message
 
-   sort_games(INPUT_FILE, OUTPUT_FILE) # Sort the games
+   sort_games(INPUT_FILE, INPUT_FILE) # Sort the games
    generate_asf_commands(INPUT_FILE, OUTPUT_FILE) # Generate ASF commands
 
    print(f"\n{BackgroundColors.BOLD}{BackgroundColors.GREEN}Program finished.{Style.RESET_ALL}") # Output the end of the program message
