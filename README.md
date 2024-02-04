@@ -69,7 +69,6 @@ cd Python
 
 	* Using ShellScript:
 		```bash
-		cd Python
 		chmod +x install.sh
 		sudo ./install.sh
 		```
