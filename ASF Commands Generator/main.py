@@ -18,8 +18,8 @@ SOUND_COMMANDS = {"Darwin": "afplay", "Linux": "aplay", "Windows": "start"} # Th
 SOUND_FILE = "./.assets/Sounds/NotificationSound.wav" # The path to the sound file
 
 # Input/Output Constants:
-INPUT_FILE = "games.txt" # The input file name
-OUTPUT_FILE = "commands.txt" # The output file name
+INPUT_FILE = "Free Games List.txt" # The input file name
+OUTPUT_FILE = "Add Games Command.txt" # The output file name
 
 # This function defines the command to play a sound when the program finishes
 def play_sound():
