@@ -35,27 +35,35 @@ def create_directories(directory_name):
 	if not os.path.exists(directory_name): # If the directory does not exist
 		os.makedirs(directory_name) # Create the directory
 
-# This function filters the games from a CSV file
-def filter_games_from_csv(input_csv_filename, output_csv_filename, max_hours_played=MAX_HOURS_PLAYED):
+# This function reads the games from a CSV file
+def read_games_from_csv(input_csv_filename, max_hours_played=MAX_HOURS_PLAYED):
 	filtered_games = [] # The list of filtered games
 	
-	# Open the input CSV file and read the games
 	with open(input_csv_filename, mode="r", newline="", encoding="utf-8") as file:
 		reader = csv.DictReader(file) # Create a CSV reader
 		for row in reader: # For each row in the CSV file
 			if float(row["Hours Played"]) < max_hours_played: # If the hours played is less than the maximum hours played
 				filtered_games.append(row) # Add the game to the list of filtered games
+	
+	return filtered_games # Return the list of filtered games
 
-	# Open the output CSV file and write the games
+# This function writes the games to a CSV file
+def write_games_to_csv(output_csv_filename, filtered_games):
+	# Write the filtered games to the output CSV file
 	with open(output_csv_filename, mode="w", newline="", encoding="utf-8") as file:
 		fieldnames = ["Number", "Game Name", "AppID", "Hours Played"] # The field names for the CSV file
 		writer = csv.DictWriter(file, fieldnames=fieldnames) # Create a CSV writer
 		
 		writer.writeheader() # Write the header of the CSV file
-		for index, game in enumerate(filtered_games, start = 1): # For each game in the list of filtered games
+		for index, game in enumerate(filtered_games, start=1):
 			game["Number"] = index # Update the game number for the new list
 			writer.writerow(game) # Write the game to the CSV file
 
+# This function filters the games from a CSV file
+def filter_games_from_csv(input_csv_filename, output_csv_filename, max_hours_played=MAX_HOURS_PLAYED):
+	filtered_games = read_games_from_csv(input_csv_filename, max_hours_played) # Read the games from the input CSV file
+	write_games_to_csv(output_csv_filename, filtered_games) # Write the games to the output CSV file
+	
 	return len(filtered_games) # Return the number of filtered games
 
 # This function defines the command to play a sound when the program finishes
