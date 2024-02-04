@@ -62,18 +62,8 @@ def sort_games(input_file, output_file):
 
    return sorted_games # Return the sorted games
 
-# This function generates ASF commands
-def generate_asf_commands(input_file, output_file):
-   appids = [] # List of appids
-
-   # Read the input file
-   with open(input_file, "r") as file:
-      for line in file: # For each line in the file
-         parts = line.strip().split(" - ") # Split the line into parts
-         if len(parts) == 2 and parts[0].isdigit(): # If the length of the parts is 2 and the first part is a digit
-            appid = parts[0] # Get the appid
-            appids.append(appid) # Append the appid to the appids list
-
+# This function generates ASF commands from the appids and writes them to the output file
+def generate_asf_command(appids, output_file):
    # Generate ASF add commands
    asf_commands = ["!addlicense ASF a/" + ", a/".join(appids[i:i+50]) for i in range(0, len(appids), 50)]
 
@@ -88,7 +78,8 @@ def main():
    print(f"{BackgroundColors.CLEAR_TERMINAL}{BackgroundColors.BOLD}{BackgroundColors.GREEN}Welcome to the {BackgroundColors.CYAN}ASF Command Generator{BackgroundColors.GREEN} program!{Style.RESET_ALL}\n") # Output the welcome message
 
    sorted_games = sort_games(INPUT_FILE, OUTPUT_FILE) # Sort the games
-   generate_asf_commands(INPUT_FILE, OUTPUT_FILE) # Generate ASF commands
+   appids = list(sorted_games.values())
+   generate_asf_command(appids, OUTPUT_FILE) # Generate ASF commands
 
    print(f"\n{BackgroundColors.BOLD}{BackgroundColors.GREEN}Program finished.{Style.RESET_ALL}") # Output the end of the program message
 
