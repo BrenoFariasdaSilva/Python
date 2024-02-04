@@ -39,19 +39,19 @@ def generate_asf_commands(input_file, output_file):
    appids = [] # List of appids
 
    # Read the input file
-   with open(input_file, 'r') as file:
+   with open(input_file, "r") as file:
       for line in file: # For each line in the file
-         parts = line.strip().split(' - ') # Split the line into parts
+         parts = line.strip().split(" - ") # Split the line into parts
          if len(parts) == 2 and parts[0].isdigit(): # If the length of the parts is 2 and the first part is a digit
             appid = parts[0] # Get the appid
             appids.append(appid) # Append the appid to the appids list
 
    # Generate ASF add commands
-   asf_commands = ['!addlicense ASF a/' + ', a/'.join(appids[i:i+50]) for i in range(0, len(appids), 50)]
+   asf_commands = ["!addlicense ASF a/" + ", a/".join(appids[i:i+50]) for i in range(0, len(appids), 50)]
 
    # Append ASF commands to the end of the input file
-   with open(output_file, 'a') as file:
-      file.write('\n'.join(asf_commands))
+   with open(output_file, "a") as file:
+      file.write("\n".join(asf_commands))
 
    print(f"{BackgroundColors.BOLD}{BackgroundColors.GREEN}ASF commands generated and written to {BackgroundColors.CYAN}{output_file}{Style.RESET_ALL}")
 
