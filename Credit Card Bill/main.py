@@ -61,6 +61,11 @@ def main():
 	# Apply the function to the "Valor" column
 	df["Valor"] = df["Valor"].apply(reais_to_float)
 
+	# Change the Valor column to a float and replace the "," with "."
+	df["Valor"] = df["Valor"].astype(float)
+	# Write it to the CSV file using the comma separator
+	df.to_csv(f"{INPUT_CSV_FILE}", sep=",", index=False)
+
 	# Convert the "Data" column to datetime objects assuming the format is "dd/mm/yyyy"
 	df["Data"] = pd.to_datetime(df["Data"], format="%d/%m/%Y")
 	df["Data"] = df["Data"].dt.strftime('%m/%d/%Y')
