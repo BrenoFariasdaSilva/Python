@@ -56,6 +56,27 @@ def get_cash_and_credit_payments(df):
 
 	return cash_payments, credit_payments # Return the number of cash and credit payments
 
+# @brief: This function processes dates in a DataFrame: Convert to datetime, sort, and optionally remove sorting column.
+# @param: df is a DataFrame to process
+# @param: date_column_name is the name of the column containing date strings
+def process_dates(df, date_column_name="Data", format="%d/%m/%Y"):
+	# Convert the date column to datetime objects
+	df[date_column_name] = pd.to_datetime(df[date_column_name], format=format)
+
+	# Calculate seconds since the Unix epoch for each date
+	df["SecondsSinceEpoch"] = (df[date_column_name] - pd.Timestamp("01-01-1970")).dt.total_seconds()
+
+	# Sort the DataFrame by the "SecondsSinceEpoch" column in ascending order
+	sorted_df = df.sort_values(by="SecondsSinceEpoch", ascending=True)
+
+	# Remove the "SecondsSinceEpoch" column if it's no longer needed
+	sorted_df.drop("SecondsSinceEpoch", axis=1, inplace=True)
+
+	# Change the data format from "yyyy-mm-dd" to "dd/mm/yyyy"
+	sorted_df["Data"] = sorted_df["Data"].dt.strftime("%d/%m/%Y")
+
+	return sorted_df # Return the sorted DataFrame
+
 # @brief: This is the main function.
 # @param: None
 # @return: None
@@ -82,28 +103,24 @@ def main():
 	# Write it to the CSV file using the comma separator
 	filtered_df.to_csv(f"{OUTPUT_CSV_FILE}", sep=",", index=False)
 
-	# Convert the "Data" column to datetime objects assuming the format is "dd/mm/yyyy"
-	filtered_df["Data"] = pd.to_datetime(filtered_df["Data"], format='%d/%m/%Y')
-	filtered_df["Data"] = filtered_df["Data"].dt.strftime('%d/%m/%Y')
-
-	# Sort the DataFrame by the "Data" column in ascending order
-	filtered_df = filtered_df.sort_values(by="Data", ascending=True)
+	# Process the dates and sort the DataFrame
+	sorted_df = process_dates(filtered_df, "Data", "%d/%m/%Y")
 
 	# Calculate the cumulative sum of the "Valor" column
-	filtered_df["Sum"] = filtered_df["Valor"].cumsum()
+	sorted_df["Sum"] = sorted_df["Valor"].cumsum()
 
 	# Round the "Sum" column to 2 decimal places
-	filtered_df["Sum"] = filtered_df["Sum"].round(2)
+	sorted_df["Sum"] = sorted_df["Sum"].round(2)
 
 	# Write the DataFrame with comma separator
-	filtered_df.to_csv(f"{OUTPUT_CSV_FILE}", sep=",", index=False)
+	sorted_df.to_csv(f"{OUTPUT_CSV_FILE}", sep=",", index=False)
 
 	# Get the number of Cash payments and the number of Credit payments
-	cash_payments, credit_payments = get_cash_and_credit_payments(filtered_df)
+	cash_payments, credit_payments = get_cash_and_credit_payments(sorted_df)
 
 	# Print the total sum of the "Valor" column
-	print(f"{BackgroundColors.GREEN}Total Sum of the {BackgroundColors.CYAN}\"Valor\"{BackgroundColors.GREEN} column: {BackgroundColors.CYAN}R$ {filtered_df['Valor'].sum():.2f}{BackgroundColors.GREEN}.{Style.RESET_ALL}")
-	print(f"{BackgroundColors.GREEN}Total Purchases: {BackgroundColors.CYAN}{filtered_df.shape[0]}{BackgroundColors.GREEN}.{Style.RESET_ALL}")
+	print(f"{BackgroundColors.GREEN}Total Sum of the {BackgroundColors.CYAN}\"Valor\"{BackgroundColors.GREEN} column: {BackgroundColors.CYAN}R$ {sorted_df['Valor'].sum():.2f}{BackgroundColors.GREEN}.{Style.RESET_ALL}")
+	print(f"{BackgroundColors.GREEN}Total Purchases: {BackgroundColors.CYAN}{sorted_df.shape[0]}{BackgroundColors.GREEN}.{Style.RESET_ALL}")
 	print(f"{BackgroundColors.GREEN}Total Cash Payments: {BackgroundColors.CYAN}{cash_payments}{BackgroundColors.GREEN}.{Style.RESET_ALL}")
 	print(f"{BackgroundColors.GREEN}Total Credit Payments: {BackgroundColors.CYAN}{credit_payments}{BackgroundColors.GREEN}.{Style.RESET_ALL}", end="\n\n")
 
