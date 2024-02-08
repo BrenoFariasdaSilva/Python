@@ -60,7 +60,7 @@ def get_cash_and_credit_payments(df):
 # @param: None
 # @return: None
 def main():
-	print(f"{BackgroundColors.CLEAR_TERMINAL}{BackgroundColors.BOLD}{BackgroundColors.GREEN}Welcome to {BackgroundColors.CYAN}Credit Card Bill{BackgroundColors.GREEN}!{Style.RESET_ALL}")
+	print(f"{BackgroundColors.CLEAR_TERMINAL}{BackgroundColors.BOLD}{BackgroundColors.GREEN}Welcome to {BackgroundColors.CYAN}Credit Card Bill{BackgroundColors.GREEN}!{Style.RESET_ALL}", end="\n\n") # Print the welcome message
 	
 	# Verify if the "Bills" folder exists
 	verify_bills_folder()
@@ -102,9 +102,12 @@ def main():
 	cash_payments, credit_payments = get_cash_and_credit_payments(filtered_df)
 
 	# Print the total sum of the "Valor" column
-	print(f"{BackgroundColors.GREEN}Total sum of the \"Valor\" column: {BackgroundColors.CYAN}R$ {filtered_df['Valor'].sum():.2f}{BackgroundColors.GREEN}.{Style.RESET_ALL}")
+	print(f"{BackgroundColors.GREEN}Total Sum of the {BackgroundColors.CYAN}\"Valor\"{BackgroundColors.GREEN} column: {BackgroundColors.CYAN}R$ {filtered_df['Valor'].sum():.2f}{BackgroundColors.GREEN}.{Style.RESET_ALL}")
+	print(f"{BackgroundColors.GREEN}Total Purchases: {BackgroundColors.CYAN}{filtered_df.shape[0]}{BackgroundColors.GREEN}.{Style.RESET_ALL}")
+	print(f"{BackgroundColors.GREEN}Total Cash Payments: {BackgroundColors.CYAN}{cash_payments}{BackgroundColors.GREEN}.{Style.RESET_ALL}")
+	print(f"{BackgroundColors.GREEN}Total Credit Payments: {BackgroundColors.CYAN}{credit_payments}{BackgroundColors.GREEN}.{Style.RESET_ALL}", end="\n\n")
 
-	print(f"{BackgroundColors.BOLD}{BackgroundColors.GREEN}Execution finished.{Style.RESET_ALL}") # Print the end of the execution
+	print(f"{BackgroundColors.BOLD}{BackgroundColors.GREEN}Execution finished.{Style.RESET_ALL}", end="\n\n")
  
 # This is the standard boilerplate that calls the main() function
 if __name__ == "__main__":
