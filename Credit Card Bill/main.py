@@ -47,6 +47,15 @@ def remove_rows(df):
 def reais_to_float(reais):
 	return float(reais.replace("R$ ", "").replace(".", "").replace(",", "."))
 
+# @brief: This function gets the cash and credit payments from the DataFrame
+# @param: df is a DataFrame
+# @return: The number of cash and credit payments
+def get_cash_and_credit_payments(df):
+	cash_payments = df[df["Parcela"] == "-"].shape[0]
+	credit_payments = df[df["Parcela"] != "-"].shape[0]
+
+	return cash_payments, credit_payments # Return the number of cash and credit payments
+
 # @brief: This is the main function.
 # @param: None
 # @return: None
@@ -88,6 +97,9 @@ def main():
 
 	# Write the DataFrame with comma separator
 	filtered_df.to_csv(f"{OUTPUT_CSV_FILE}", sep=",", index=False)
+
+	# Get the number of Cash payments and the number of Credit payments
+	cash_payments, credit_payments = get_cash_and_credit_payments(filtered_df)
 
 	# Print the total sum of the "Valor" column
 	print(f"{BackgroundColors.GREEN}Total sum of the \"Valor\" column: {BackgroundColors.CYAN}R$ {filtered_df['Valor'].sum():.2f}{BackgroundColors.GREEN}.{Style.RESET_ALL}")
