@@ -70,29 +70,27 @@ def main():
 	# Apply the function that converts the "Valor" column to a float
 	filtered_df["Valor"] = filtered_df["Valor"].apply(reais_to_float)
 
-	# Change the Valor column to a float and replace the "," with "."
-	df["Valor"] = df["Valor"].astype(float)
 	# Write it to the CSV file using the comma separator
-	df.to_csv(f"{INPUT_CSV_FILE}", sep=",", index=False)
+	filtered_df.to_csv(f"{OUTPUT_CSV_FILE}", sep=",", index=False)
 
 	# Convert the "Data" column to datetime objects assuming the format is "dd/mm/yyyy"
-	df["Data"] = pd.to_datetime(df["Data"], format="%d/%m/%Y")
-	df["Data"] = df["Data"].dt.strftime('%m/%d/%Y')
+	filtered_df["Data"] = pd.to_datetime(filtered_df["Data"], format='%d/%m/%Y')
+	filtered_df["Data"] = filtered_df["Data"].dt.strftime('%d/%m/%Y')
 
 	# Sort the DataFrame by the "Data" column in ascending order
-	df = df.sort_values(by="Data")
+	filtered_df = filtered_df.sort_values(by="Data", ascending=True)
 
 	# Calculate the cumulative sum of the "Valor" column
-	df["Sum"] = df["Valor"].cumsum()
+	filtered_df["Sum"] = filtered_df["Valor"].cumsum()
 
 	# Round the "Sum" column to 3 decimal places
-	df["Sum"] = df["Sum"].round(3)
+	filtered_df["Sum"] = filtered_df["Sum"].round(3)
 
 	# Write the DataFrame with comma separator
-	df.to_csv(f"{OUTPUT_CSV_FILE}", sep=",", index=False)
+	filtered_df.to_csv(f"{OUTPUT_CSV_FILE}", sep=",", index=False)
 
 	# Print the total sum of the "Valor" column
-	print(f"{BackgroundColors.GREEN}Total sum of the \"Valor\" column: {BackgroundColors.CYAN}R$ {df['Valor'].sum():.2f}{BackgroundColors.GREEN}.{Style.RESET_ALL}")
+	print(f"{BackgroundColors.GREEN}Total sum of the \"Valor\" column: {BackgroundColors.CYAN}R$ {filtered_df['Valor'].sum():.2f}{BackgroundColors.GREEN}.{Style.RESET_ALL}")
 
 	print(f"{BackgroundColors.BOLD}{BackgroundColors.GREEN}Execution finished.{Style.RESET_ALL}") # Print the end of the execution
  
