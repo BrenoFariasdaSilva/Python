@@ -36,7 +36,7 @@ def debits_csv_exists(file_name):
 # @param: reais is a string with the format "R$ 1,00"
 # @return: a float with the value 1
 def reais_to_float(reais):
-	return float(reais.replace("R$ ", "").replace(",", ".").strip())
+	return float(reais.replace("R$ ", "").replace(".", "").replace(",", "."))
 
 # @brief: This is the main function.
 # @param: None
