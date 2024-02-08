@@ -106,11 +106,8 @@ def main():
 	# Process the dates and sort the DataFrame
 	sorted_df = process_dates(filtered_df, "Data", "%d/%m/%Y")
 
-	# Calculate the cumulative sum of the "Valor" column
-	sorted_df["Sum"] = sorted_df["Valor"].cumsum()
-
-	# Round the "Sum" column to 2 decimal places
-	sorted_df["Sum"] = sorted_df["Sum"].round(2)
+	# Calculate the cumulative sum of the "Valor" column and round it to 2 decimal places
+	sorted_df["Sum"] = sorted_df["Valor"].cumsum().round(2)
 
 	# Write the DataFrame with comma separator
 	sorted_df.to_csv(f"{OUTPUT_CSV_FILE}", sep=",", index=False)
