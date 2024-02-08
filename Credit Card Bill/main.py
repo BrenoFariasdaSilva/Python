@@ -92,8 +92,8 @@ def main():
 	# Calculate the cumulative sum of the "Valor" column
 	filtered_df["Sum"] = filtered_df["Valor"].cumsum()
 
-	# Round the "Sum" column to 3 decimal places
-	filtered_df["Sum"] = filtered_df["Sum"].round(3)
+	# Round the "Sum" column to 2 decimal places
+	filtered_df["Sum"] = filtered_df["Sum"].round(2)
 
 	# Write the DataFrame with comma separator
 	filtered_df.to_csv(f"{OUTPUT_CSV_FILE}", sep=",", index=False)
