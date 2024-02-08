@@ -32,6 +32,15 @@ def verify_bills_folder():
 def debits_csv_exists(file_name):
 	return os.path.isfile(f"{file_name}")
 
+# @brief: This function removes specified rows from the DataFrame
+# @param: df is a DataFrame
+# @return: A filtered DataFrame
+def remove_rows(df):
+	# Remove rows where "Estabelecimento" column contains "Pagamentos Validos Normais"
+	df_filtered = df[df["Estabelecimento"] != "Pagamentos Validos Normais"].copy()
+
+	return df_filtered # Return the filtered DataFrame
+
 # @brief: This function converts a string with the format "R$ 1,00" to a float
 # @param: reais is a string with the format "R$ 1,00"
 # @return: a float with the value 1
@@ -55,11 +64,11 @@ def main():
 	# Read the CSV file using the ";" delimiter
 	df = pd.read_csv(f"{INPUT_CSV_FILE}", sep=";")
 
-	# Remove any row in the "Valor" column starting with "R$ -"
-	df = df[~df["Valor"].str.startswith("R$ -")]
+	# Remove specified rows from the dataframe
+	filtered_df = remove_rows(df)
 
-	# Apply the function to the "Valor" column
-	df["Valor"] = df["Valor"].apply(reais_to_float)
+	# Apply the function that converts the "Valor" column to a float
+	filtered_df["Valor"] = filtered_df["Valor"].apply(reais_to_float)
 
 	# Change the Valor column to a float and replace the "," with "."
 	df["Valor"] = df["Valor"].astype(float)
