@@ -76,7 +76,7 @@ def get_regular_contribution(period_type):
 
 # This function get the progressive contribution rate from the user
 def get_progressive_contribution_rate():
-   progressive_contribution = float(input(f"{BackgroundColors.BOLD}{BackgroundColors.GREEN}Please enter the Progressive Contribution Rate{BackgroundColors.CYAN} (0.0 to 1.0){BackgroundColors.GREEN}: {Style.RESET_ALL}"))
+   progressive_contribution = -1 # Initialize the progressive contribution
    
    while progressive_contribution < 0.00 or progressive_contribution > 1.00:
       progressive_contribution = float(input(f"{BackgroundColors.BOLD}{BackgroundColors.GREEN}Please enter the Progressive Contribution Rate{BackgroundColors.CYAN} (0.0 to 1.0){BackgroundColors.GREEN}: {Style.RESET_ALL}"))
@@ -87,8 +87,8 @@ def get_progressive_contribution_rate():
 def get_interest_rate(period_type):
    interest_rate = 0 # Initialize the interest rate
 
-   while interest_rate <= 0: # While the interest rate is less than or equal to 0
-      interest_rate = float(input(f"{BackgroundColors.BOLD}{BackgroundColors.GREEN}Please enter the {period_type} Interest Rate {BackgroundColors.CYAN}(0% to 100%){BackgroundColors.GREEN}: {Style.RESET_ALL}"))
+   while interest_rate < 0.0 or interest_rate > 1.0: # While the interest rate is less than 0.0 or greater than 1.0
+      interest_rate = float(input(f"{BackgroundColors.BOLD}{BackgroundColors.GREEN}Please enter the {period_type} Interest Rate {BackgroundColors.CYAN}(0.0 to 1.0){BackgroundColors.GREEN}: {Style.RESET_ALL}"))
 
    return interest_rate # Return the interest rate
 
