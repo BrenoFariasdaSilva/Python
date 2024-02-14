@@ -85,7 +85,7 @@ def get_progressive_contribution_rate():
 
 # This function get the interest rate from the user
 def get_interest_rate(period_type):
-   interest_rate = 0 # Initialize the interest rate
+   interest_rate = -1 # Initialize the interest rate
 
    while interest_rate < 0.0 or interest_rate > 1.0: # While the interest rate is less than 0.0 or greater than 1.0
       interest_rate = float(input(f"{BackgroundColors.BOLD}{BackgroundColors.GREEN}Please enter the {period_type} Interest Rate {BackgroundColors.CYAN}(0.0 to 1.0){BackgroundColors.GREEN}: {Style.RESET_ALL}"))
@@ -100,7 +100,7 @@ def calculate_compound_interest(number_of_periods, initial_amount, regular_contr
 
    for period in range(1, number_of_periods + 1): # For each period
       current_contribution = regular_contribution * (1 + progressive_contribution_rate ** (period - 1))
-      total_amount = total_amount * (1 + interest_rate / 100) + current_contribution
+      total_amount = total_amount * (1 + interest_rate) + current_contribution
       total_amounts.append(f"{total_amount:.2f}")
       periods.append(period)
 
