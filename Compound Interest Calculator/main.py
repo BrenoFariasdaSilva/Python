@@ -74,6 +74,15 @@ def get_regular_contribution(period_type):
 
    return regular_contribution # Return the regular contribution
 
+# This function get the progressive contribution rate from the user
+def get_progressive_contribution_rate():
+   progressive_contribution = float(input(f"{BackgroundColors.BOLD}{BackgroundColors.GREEN}Please enter the Progressive Contribution Rate{BackgroundColors.CYAN} (0.0 to 1.0){BackgroundColors.GREEN}: {Style.RESET_ALL}"))
+   
+   while progressive_contribution < 0.00 or progressive_contribution > 1.00:
+      progressive_contribution = float(input(f"{BackgroundColors.BOLD}{BackgroundColors.GREEN}Please enter the Progressive Contribution Rate{BackgroundColors.CYAN} (0.0 to 1.0){BackgroundColors.GREEN}: {Style.RESET_ALL}"))
+
+   return progressive_contribution # Return the progressive contribution
+
 # This function get the interest rate from the user
 def get_interest_rate(period_type):
    interest_rate = 0 # Initialize the interest rate
@@ -84,15 +93,16 @@ def get_interest_rate(period_type):
    return interest_rate # Return the interest rate
 
 # This function calculates the compound interest
-def calculate_compound_interest(number_of_periods, initial_amount, regular_contribution, interest_rate):
+def calculate_compound_interest(number_of_periods, initial_amount, regular_contribution, progressive_contribution_rate, interest_rate):
    total_amount = initial_amount # Initialize the total amount
    total_amounts = [total_amount] # Initialize the list of the total amounts
    periods = [0] # Initialize the list of the periods
 
-   for period in range(number_of_periods): # For each period
-      total_amount = total_amount * (1 + interest_rate / 100) + regular_contribution # Calculate the total amount
-      total_amounts.append(f"{total_amount:.2f}") # Add the total amount to the list of the total amounts
-      periods.append(period + 1) # Add the period to the list of the periods
+   for period in range(1, number_of_periods + 1): # For each period
+      current_contribution = regular_contribution * (1 + progressive_contribution_rate ** (period - 1))
+      total_amount = total_amount * (1 + interest_rate / 100) + current_contribution
+      total_amounts.append(f"{total_amount:.2f}")
+      periods.append(period)
 
    return total_amounts, periods # Return the list of the total amounts and the list of the periods
 
@@ -137,9 +147,10 @@ def main():
    number_of_periods = get_number_of_periods() # Get the number of the periods from the user
    initial_amount = get_initial_amount() # Get the initial amount from the user
    regular_contribution = get_regular_contribution(period_type) # Get the regular contribution from the user
+   progressive_contribution_rate = get_progressive_contribution_rate() # Get the progressive contribution from the user
    interest_rate = get_interest_rate(period_type) # Get the interest rate from the user
 
-   total_amounts, periods = calculate_compound_interest(number_of_periods, initial_amount, regular_contribution, interest_rate) # Calculate the compound interest
+   total_amounts, periods = calculate_compound_interest(number_of_periods, initial_amount, regular_contribution, progressive_contribution_rate, interest_rate) # Calculate the compound interest
    
    money_invested = np.array([initial_amount + regular_contribution * period for period in range(number_of_periods + 1)]) # Calculate the money invested
 
@@ -149,7 +160,7 @@ def main():
 
    total_amounts = np.array(total_amounts, dtype=float) # Convert the list to a float numpy array
 
-   profits = [total_amounts[-1] - money_invested[-1], ((total_amounts[-1] - money_invested[-1]) / total_amounts[-1] * 100)] # Calculate the profits
+   profits = [ float(total_amounts[-1]) - money_invested[-1], (( float(total_amounts[-1]) - money_invested[-1]) /  float(total_amounts[-1]) * 100)]
 
    plot_graph(total_amounts, money_invested, profits, periods, period_type) # Plot the graph
 
