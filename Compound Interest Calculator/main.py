@@ -94,15 +94,15 @@ def get_interest_rate(period_type):
 
 # This function calculates the compound interest
 def calculate_compound_interest(number_of_periods, initial_amount, regular_contribution, progressive_contribution_rate, interest_rate):
-   total_amount = initial_amount # Initialize the total amount
+   total_amount = initial_amount + regular_contribution # Initialize the total amount
    total_amounts = [total_amount] # Initialize the list of the total amounts
    periods = [0] # Initialize the list of the periods
 
    for period in range(1, number_of_periods + 1): # For each period
-      current_contribution = regular_contribution * (1 + progressive_contribution_rate ** (period - 1))
-      total_amount = total_amount * (1 + interest_rate) + current_contribution
-      total_amounts.append(f"{total_amount:.2f}")
-      periods.append(period)
+      current_contribution = regular_contribution * (1 + progressive_contribution_rate) ** (period - 1) # Calculate the current contribution
+      total_amount = total_amount * (1 + interest_rate) + current_contribution # Calculate the total amount
+      total_amounts.append(f"{total_amount:.2f}") # Append the total amount to the list of the total amounts
+      periods.append(period) # Append the period to the list of the periods
 
    return total_amounts, periods # Return the list of the total amounts and the list of the periods
 
