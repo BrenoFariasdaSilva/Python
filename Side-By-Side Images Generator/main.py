@@ -23,6 +23,7 @@ SOUND_FILE = "./.assets/Sounds/NotificationSound.wav" # The path to the sound fi
 
 # Constants:
 FILES_FORMATS = [".jpg", ".jpeg", ".png", ".bmp"]
+FONT_PATH = "./DejaVuSans-Bold.ttf"
 INPUT_DIRECTORY = "Dataset"
 OUTPUT_DIRECTORY = "Images"
 DDMMYYYYFORMAT = True
@@ -41,7 +42,7 @@ def add_image_names(folder_path, image_path, OUTPUT_DIRECTORY):
    draw = ImageDraw.Draw(image) # Draw the image
    
    # Font settings:
-   font_path = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf" # The font path
+   font_path = FONT_PATH # The font path
    font_size = 128 # The font size
    font = ImageFont.truetype(font_path, font_size) # The font
    
