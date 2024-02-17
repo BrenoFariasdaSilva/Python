@@ -62,6 +62,13 @@ def get_image_files_in_folder(folder_path):
    image_files = [f for f in files if os.path.splitext(f)[1].lower() in FILES_FORMATS] # Get the image files in the folder
    return image_files # Return the image files
 
+# This function renames the files in the folder in the format "number.extension"
+def rename_files_numbered(folder_path, files):
+   print(f"{BackgroundColors.GREEN}Renaming files in {BackgroundColors.CYAN}{folder_path}{Style.RESET_ALL}") # Output the renaming message
+   for index, filename in enumerate(files): # Iterate through the files
+      file_path = os.path.join(folder_path, filename) # Get the file path
+      os.rename(file_path, os.path.join(folder_path, f"{str(index + 1).zfill(2)}{os.path.splitext(filename)[1]}"))
+
 # This function combines the images vertically and rotates them
 def find_common_files(folder1_files, folder2_files):
    return sorted(set(folder1_files) & set(folder2_files)) # Return the common files
@@ -78,6 +85,9 @@ def combine_and_rotate_images(image1, image2):
 def process_images(folder1_path, folder2_path, output_directory):
    folder1_files = get_image_files_in_folder(folder1_path) # Get the image files in the first folder
    folder2_files = get_image_files_in_folder(folder2_path) # Get the image files in the second folder
+
+   rename_files_numbered(folder1_path, folder1_files) # Rename the files in the first folder
+   rename_files_numbered(folder2_path, folder2_files) # Rename the files in the second folder
    
    common_files = find_common_files(folder1_files, folder2_files) # Find the common files
    
