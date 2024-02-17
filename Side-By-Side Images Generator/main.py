@@ -23,7 +23,7 @@ SOUND_FILE = "./.assets/Sounds/NotificationSound.wav" # The path to the sound fi
 
 # Constants:
 FILES_FORMATS = [".jpg"]
-FONT_PATH = "./DejaVuSans-Bold.ttf"
+FONT_PATH = "./Font/DejaVuSans-Bold.ttf"
 INPUT_DIRECTORY = "Dataset"
 OUTPUT_DIRECTORY = "Images"
 DDMMYYYYFORMAT = True
