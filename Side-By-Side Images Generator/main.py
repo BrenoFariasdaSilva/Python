@@ -62,12 +62,15 @@ def get_image_files_in_folder(folder_path):
    image_files = [file for file in files if os.path.splitext(file)[1].lower() in FILES_FORMATS and not any(char.isalpha() for char in os.path.splitext(file)[0])]
    return image_files # Return the image files
 
-# This function renames the files in the folder in the format "number.extension"
+# This function renames the files in the folder in the format "number.extension" and return the new files list
 def rename_files_numbered(folder_path, files):
    print(f"{BackgroundColors.GREEN}Renaming files in {BackgroundColors.CYAN}{folder_path}{Style.RESET_ALL}") # Output the renaming message
+   renamed_files = [] # The renamed files list
    for index, filename in enumerate(files): # Iterate through the files
       file_path = os.path.join(folder_path, filename) # Get the file path
       os.rename(file_path, os.path.join(folder_path, f"{str(index + 1).zfill(2)}{os.path.splitext(filename)[1]}"))
+      renamed_files.append(f"{str(index + 1).zfill(2)}{os.path.splitext(filename)[1]}")
+   return renamed_files # Return the renamed files list
 
 # This function combines the images vertically and rotates them
 def find_common_files(folder1_files, folder2_files):
