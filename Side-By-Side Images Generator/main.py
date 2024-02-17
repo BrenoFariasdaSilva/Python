@@ -59,7 +59,7 @@ def add_image_names(folder_path, image_path, OUTPUT_DIRECTORY):
 # This function combines the images vertically and rotates them
 def get_image_files_in_folder(folder_path):
    files = os.listdir(folder_path) # Get the files in the folder
-   image_files = [f for f in files if os.path.splitext(f)[1].lower() in FILES_FORMATS] # Get the image files in the folder
+   image_files = [file for file in files if os.path.splitext(file)[1].lower() in FILES_FORMATS and not any(char.isalpha() for char in os.path.splitext(file)[0])]
    return image_files # Return the image files
 
 # This function renames the files in the folder in the format "number.extension"
