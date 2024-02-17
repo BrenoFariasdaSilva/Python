@@ -86,10 +86,13 @@ def combine_and_rotate_images(image1, image2):
 
 # This function combines the images vertically and rotates them
 def process_images(folder1_path, folder2_path, output_directory):
-   rename_files_numbered(folder1_path, get_image_files_in_folder(folder1_path)) # Rename the files in the first folder
-   rename_files_numbered(folder2_path, get_image_files_in_folder(folder2_path)) # Rename the files in the second folder
+   folder1_files = get_image_files_in_folder(folder1_path) # Get the files in the first folder
+   folder2_files = get_image_files_in_folder(folder2_path) # Get the files in the second folder
    
-   common_files = find_common_files(get_image_files_in_folder(folder1_path), get_image_files_in_folder(folder2_path)) # Get the common files
+   renamed_folder1_files = rename_files_numbered(folder1_path, folder1_files) # Rename the files in the first folder
+   renamed_folder2_files = rename_files_numbered(folder2_path, folder2_files) # Rename the files in the second folder
+   
+   common_files = find_common_files(renamed_folder1_files, renamed_folder2_files) # Find the common files
    
    for filename in common_files: # Iterate through the common files
       image1_path = os.path.join(folder1_path, filename) # Get the first image path
