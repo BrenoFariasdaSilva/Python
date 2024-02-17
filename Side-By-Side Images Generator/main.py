@@ -37,7 +37,7 @@ def create_directories(directory_name):
 
 # This function adds the image names to the images
 def add_image_names(folder_path, image_path, OUTPUT_DIRECTORY):
-   image = Image.open(image_path) # Open the image
+   image = Image.open(f"./{image_path}") # Open the image
 
    draw = ImageDraw.Draw(image) # Draw the image
    
@@ -51,7 +51,7 @@ def add_image_names(folder_path, image_path, OUTPUT_DIRECTORY):
    draw.text((image.width/2 - font.getsize(image_path)[0]/2, text_height), image_path, font=font, fill="yellow") # Draw the filename
 
    # Save the image with the filename
-   output_path = os.path.join(OUTPUT_DIRECTORY, f"labeled_{folder_path}_{os.path.basename(image_path)}")
+   output_path = os.path.join(OUTPUT_DIRECTORY, f"labeled_{folder_path.replace('/', '_')}_{os.path.basename(image_path)}")
    image.save(output_path)
 
    return output_path # Return the output path
@@ -98,7 +98,6 @@ def process_images(folder1_path, folder2_path, output_directory):
       image1_path = os.path.join(folder1_path, filename) # Get the first image path
       image2_path = os.path.join(folder2_path, filename) # Get the second image path
 
-      print(f"{BackgroundColors.GREEN}Processing {BackgroundColors.CYAN}{folder1_path}{BackgroundColors.GREEN} and {BackgroundColors.CYAN}{folder2_path}{Style.RESET_ALL}") # Output the processing message
       labeled_image1_path = add_image_names(folder1_path, image1_path, output_directory) # Add the image names to the first image
       labeled_image2_path = add_image_names(folder2_path, image2_path, output_directory) # Add the image names to the second image
 
