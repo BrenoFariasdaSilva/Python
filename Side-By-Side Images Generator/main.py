@@ -22,7 +22,7 @@ SOUND_COMMANDS = {"Darwin": "afplay", "Linux": "aplay", "Windows": "start"} # Th
 SOUND_FILE = "./.assets/Sounds/NotificationSound.wav" # The path to the sound file
 
 # Constants:
-FILES_FORMATS = [".jpg", ".jpeg", ".png", ".bmp"]
+FILES_FORMATS = [".jpg"]
 FONT_PATH = "./DejaVuSans-Bold.ttf"
 INPUT_DIRECTORY = "Dataset"
 OUTPUT_DIRECTORY = "Images"
