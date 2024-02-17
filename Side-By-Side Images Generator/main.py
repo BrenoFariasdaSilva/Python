@@ -56,13 +56,13 @@ def add_image_names(folder_path, image_path, OUTPUT_DIRECTORY):
 
    return output_path # Return the output path
 
-# This function combines the images vertically and rotates them
+# This function gets the image files in the folder and returns the sorted image files list
 def get_image_files_in_folder(folder_path):
    files = os.listdir(folder_path) # Get the files in the folder
    image_files = [file for file in files if os.path.splitext(file)[1].lower() in FILES_FORMATS and not any(char.isalpha() for char in os.path.splitext(file)[0])]
-   return image_files # Return the image files
+   return image_files.sort() # Return the sorted  image files
 
-# This function renames the files in the folder in the format "number.extension" and return the new files list
+# This function renames the files in the folder in the format "number.extension" and return the sorted new files list
 def rename_files_numbered(folder_path, files):
    print(f"{BackgroundColors.GREEN}Renaming files in {BackgroundColors.CYAN}{folder_path}{Style.RESET_ALL}") # Output the renaming message
    renamed_files = [] # The renamed files list
@@ -70,7 +70,7 @@ def rename_files_numbered(folder_path, files):
       file_path = os.path.join(folder_path, filename) # Get the file path
       os.rename(file_path, os.path.join(folder_path, f"{str(index + 1).zfill(2)}{os.path.splitext(filename)[1]}"))
       renamed_files.append(f"{str(index + 1).zfill(2)}{os.path.splitext(filename)[1]}")
-   return renamed_files # Return the renamed files list
+   return renamed_files.sort() # Return the sorted renamed files list
 
 # This function combines the images vertically and rotates them
 def find_common_files(folder1_files, folder2_files):
@@ -84,7 +84,7 @@ def combine_and_rotate_images(image1, image2):
    rotated_image = combined_image.rotate(-90, expand=True) # Rotate the image
    return rotated_image # Return the rotated image
 
-# This function combines the images vertically and rotates them
+# This function calls the functions to process the images
 def process_images(folder1_path, folder2_path, output_directory):
    folder1_files = get_image_files_in_folder(folder1_path) # Get the files in the first folder
    folder2_files = get_image_files_in_folder(folder2_path) # Get the files in the second folder
