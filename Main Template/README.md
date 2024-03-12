@@ -102,12 +102,12 @@ Code improvement recommendations are very welcome. In order to contribute, follo
 
 ### Apache License 2.0
 
-This project is licensed under the [Apache License 2.0](LICENSE), which permits use, modification, distribution, and sublicensing of this code, including for commercial purposes, provided that the original copyright notice is included and proper credit is given to Breno Farias da Silva as the original author of the repository. See the [LICENSE](LICENSE) file for more details.
+This project is licensed under the [Apache License 2.0](LICENSE), which permits use, modification, distribution, and sublicensing of this code, including for commercial purposes, provided that the original copyright notice is included and proper credit is given to [Breno Farias da Silva](https://github.com/BrenoFariasdaSilva) as the original author of the repository. See the [LICENSE](LICENSE) file for more details.
 
 ### Creative Commons Zero v1.0 Universal
 
-This project is licensed under the [Creative Commons Zero v1.0 Universal](LICENSE), which permits use, modification, distribution, and sublicensing of this code, including for commercial purposes, provided that the original copyright notice is included and proper credit is given to Breno Farias da Silva as the original author of the repository. See the [LICENSE](LICENSE) file for more details.
+This project is licensed under the [Creative Commons Zero v1.0 Universal](LICENSE), which permits use, modification, distribution, and sublicensing of this code, including for commercial purposes, provided that the original copyright notice is included and proper credit is given to [Breno Farias da Silva](https://github.com/BrenoFariasdaSilva) as the original author of the repository. See the [LICENSE](LICENSE) file for more details.
 
 ### MIT License
 
-This project is licensed under the [LICENSE](LICENSE), which permits use, modification, distribution, and sublicensing of this code, including for commercial purposes, provided that the original copyright notice is included and proper credit is given to Breno Farias da Silva as the original author of the repository. See the [LICENSE](LICENSE) file for more details.
+This project is licensed under the [LICENSE](LICENSE), which permits use, modification, distribution, and sublicensing of this code, including for commercial purposes, provided that the original copyright notice is included and proper credit is given to [Breno Farias da Silva](https://github.com/BrenoFariasdaSilva) as the original author of the repository. See the [LICENSE](LICENSE) file for more details.
