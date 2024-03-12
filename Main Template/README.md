@@ -102,12 +102,12 @@ Code improvement recommendations are very welcome. In order to contribute, follo
 
 ### Apache License 2.0
 
-This project is licensed under the [Apache License 2.0](LICENSE), which allows you to use, modify, distribute, and sublicense this code, even for commercial purposes, as long as you include the original copyright notice and attribute you as the original author for the repository. See the [LICENSE](LICENSE) file for more details.
+This project is licensed under the [Apache License 2.0](LICENSE), which permits use, modification, distribution, and sublicensing of this code, including for commercial purposes, provided that the original copyright notice is included and proper credit is given to Breno Farias da Silva as the original author of the repository. See the [LICENSE](LICENSE) file for more details.
 
 ### Creative Commons Zero v1.0 Universal
 
-This project is licensed under the [Creative Commons Zero v1.0 Universal](LICENSE), which means you are free to use, modify, and distribute the code, as long as you mention include the license and attribute you as the original author for the repository. See the [LICENSE](LICENSE) file for more details.
+This project is licensed under the [Creative Commons Zero v1.0 Universal](LICENSE), which permits use, modification, distribution, and sublicensing of this code, including for commercial purposes, provided that the original copyright notice is included and proper credit is given to Breno Farias da Silva as the original author of the repository. See the [LICENSE](LICENSE) file for more details.
 
 ### MIT License
 
-This project is licensed under the [LICENSE](LICENSE), which allows you to use, modify, distribute, and sublicense this code, even for commercial purposes, as long as you include the original copyright notice and attribute me as the original author for the repository. See the [LICENSE](LICENSE) file for more details.
+This project is licensed under the [LICENSE](LICENSE), which permits use, modification, distribution, and sublicensing of this code, including for commercial purposes, provided that the original copyright notice is included and proper credit is given to Breno Farias da Silva as the original author of the repository. See the [LICENSE](LICENSE) file for more details.
