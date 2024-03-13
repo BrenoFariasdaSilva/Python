@@ -16,10 +16,10 @@ Project-Description.
 
 <div align="center">
 
-![GitHub Code Size in Bytes Badge](https://img.shields.io/github/languages/code-size/BrenoFariasdaSilva/Repository-Name)
-![GitHub Last Commit Badge](https://img.shields.io/github/last-commit/BrenoFariasdaSilva/Repository-Name)
-![GitHub License Badge](https://img.shields.io/github/license/BrenoFariasdaSilva/Repository-Name)
-![Wakatime Badge](https://wakatime.com/badge/github/BrenoFariasdaSilva/Repository-Name.svg)
+![GitHub Code Size in Bytes Badge](https://img.shields.io/github/languages/code-size/Your-Name/Repository-Name)
+![GitHub Last Commit Badge](https://img.shields.io/github/last-commit/Your-Name/Repository-Name)
+![GitHub License Badge](https://img.shields.io/github/license/Your-Name/Repository-Name)
+![Wakatime Badge](https://wakatime.com/badge/github/Your-Name/Repository-Name.svg)
 
 </div>
 
@@ -50,7 +50,7 @@ Project-Description.
     - [Step 5: Celebrate Your Contribution](#step-5-celebrate-your-contribution)
   - [License](#license)
     - [Apache License 2.0](#apache-license-20)
-    - [Creative Commons Zero v1.0 Universal](#creative-commons-zero-v10-universal)
+    - [Creative Commons Zero v1.0 Universal (CC0 1.0)](#creative-commons-zero-v10-universal-cc0-10)
     - [MIT License](#mit-license)
 
 
@@ -69,7 +69,7 @@ Bullet points of the requirements.
 1. Clone the repository with the following command:
 
 ```bash
-git clone https://github.com/BrenoFariasdaSilva/Repository-Name.git
+git clone https://github.com/Your-Name/Repository-Name.git
 cd Repository-Name
 ```
 
@@ -209,12 +209,12 @@ By following these steps, you can contribute effectively to projects and make a 
 
 ### Apache License 2.0
 
-This project is licensed under the [Apache License 2.0](LICENSE), which permits use, modification, distribution, and sublicensing of this code, including for commercial purposes, provided that the original copyright notice is included and proper credit is given to [Breno Farias da Silva](https://github.com/BrenoFariasdaSilva) as the original author of the repository. See the [LICENSE](LICENSE) file for more details.
+This project is licensed under the [Apache License 2.0](LICENSE). This license permits use, modification, distribution, and sublicense of the code for both private and commercial purposes, provided that the original copyright notice and a disclaimer of warranty are included in all copies or substantial portions of the software. It also requires a clear attribution back to the original author(s) of the repository. For more details, see the [LICENSE](LICENSE) file in this repository.
 
-### Creative Commons Zero v1.0 Universal
+### Creative Commons Zero v1.0 Universal (CC0 1.0)
 
-This project is licensed under the [Creative Commons Zero v1.0 Universal](LICENSE), which permits use, modification, distribution, and sublicensing of this code, including for commercial purposes, provided that the original copyright notice is included and proper credit is given to [Breno Farias da Silva](https://github.com/BrenoFariasdaSilva) as the original author of the repository. See the [LICENSE](LICENSE) file for more details.
+This project is licensed under the [Creative Commons Zero v1.0 Universal](LICENSE) (CC0 1.0) Public Domain Dedication. This means that the work is released into the public domain, allowing anyone to use, modify, distribute, and perform the work, even for commercial purposes, without asking permission and without attributing the original author(s). However, it's appreciated if you include a copy of the license or a link to it in any significant use or distribution. For more details, see the [LICENSE](LICENSE) file in this repository.
 
 ### MIT License
 
-This project is licensed under the [LICENSE](LICENSE), which permits use, modification, distribution, and sublicensing of this code, including for commercial purposes, provided that the original copyright notice is included and proper credit is given to [Breno Farias da Silva](https://github.com/BrenoFariasdaSilva) as the original author of the repository. See the [LICENSE](LICENSE) file for more details.
+This project is licensed under the [MIT License](LICENSE). The MIT License is a permissive license that is short and to the point. It lets people do anything they want with your code as long as they provide attribution back to you and don’t hold you liable. This license allows for commercial use, modification, distribution, private use, and sublicensing. See the [LICENSE](LICENSE) file in this repository for more details.
