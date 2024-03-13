@@ -37,6 +37,7 @@ Feel free to contribute and send suggestions.
 		- [Clone the repository](#clone-the-repository)
 	- [Installation:](#installation)
 	- [Run Python Code:](#run-python-code)
+		- [Dependencies](#dependencies)
 	- [Contributing](#contributing)
 	- [License](#license)
 		- [Creative Commons Zero v1.0 Universal](#creative-commons-zero-v10-universal)
@@ -78,6 +79,18 @@ cd Python
 ```bash
 python3 ./{ProgramName}.py
 # Example: python3 ./main.py 
+```
+
+### Dependencies
+
+1. Install the project dependencies with the following command:
+
+```bash
+make dependencies
+```
+or
+```bash
+pip install -r requirements.txt
 ```
 
 ## Contributing
