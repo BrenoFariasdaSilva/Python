@@ -178,7 +178,6 @@ By following these guidelines for your commits, you help ensure that your contri
     ```
 Remember, the quality of your commits and their messages significantly affects the review process and the overall development flow. It's always worth taking the extra time to review your changes and craft meaningful commit messages.
 
-
 ### Step 3: Submit Your Contribution
 
 After making your changes, you're ready to contribute them back to the original project.
@@ -205,7 +204,6 @@ Once your pull request has been reviewed and merged, your contribution is now pa
 ---
 
 By following these steps, you can contribute effectively to projects and make a positive impact on the open-source ecosystem. Thank you for contributing!
-
 
 ## License
 
