@@ -31,27 +31,27 @@ Project-Description.
 
 ## Table of Contents
 - [Repository-Name. ](#repository-name-)
-	- [Table of Contents](#table-of-contents)
-	- [Introduction](#introduction)
-	- [Requirements](#requirements)
-	- [Setup](#setup)
-		- [Clone the repository](#clone-the-repository)
-		- [Dependencies](#dependencies)
-		- [Dataset - Optional](#dataset---optional)
-	- [Usage](#usage)
-	- [Results - Optional](#results---optional)
-	- [Contributing](#contributing)
-		- [Step 1: Set Up Your Environment](#step-1-set-up-your-environment)
-		- [Step 2: Make Your Changes](#step-2-make-your-changes)
-		- [Crafting Your Commit Messages](#crafting-your-commit-messages)
-		- [Navigating Commits](#navigating-commits)
-		- [Step 3: Submit Your Contribution](#step-3-submit-your-contribution)
-		- [Step 4: Stay Engaged](#step-4-stay-engaged)
-		- [Step 5: Celebrate Your Contribution](#step-5-celebrate-your-contribution)
-	- [License](#license)
-		- [Apache License 2.0](#apache-license-20)
-		- [Creative Commons Zero v1.0 Universal](#creative-commons-zero-v10-universal)
-		- [MIT License](#mit-license)
+  - [Table of Contents](#table-of-contents)
+  - [Introduction](#introduction)
+  - [Requirements](#requirements)
+  - [Setup](#setup)
+    - [Clone the repository](#clone-the-repository)
+    - [Dependencies](#dependencies)
+    - [Dataset - Optional](#dataset---optional)
+  - [Usage](#usage)
+  - [Results - Optional](#results---optional)
+  - [Contributing](#contributing)
+    - [Step 1: Set Up Your Environment](#step-1-set-up-your-environment)
+    - [Step 2: Make Your Changes](#step-2-make-your-changes)
+    - [Crafting Your Commit Messages](#crafting-your-commit-messages)
+    - [Navigating Commits](#navigating-commits)
+    - [Step 3: Submit Your Contribution](#step-3-submit-your-contribution)
+    - [Step 4: Stay Engaged](#step-4-stay-engaged)
+    - [Step 5: Celebrate Your Contribution](#step-5-celebrate-your-contribution)
+  - [License](#license)
+    - [Apache License 2.0](#apache-license-20)
+    - [Creative Commons Zero v1.0 Universal](#creative-commons-zero-v10-universal)
+    - [MIT License](#mit-license)
 
 
 ## Introduction
@@ -137,7 +137,7 @@ Your commit messages play a vital role in documenting the project's development 
    
    - **Bug Fixes**: Resolving issues or errors.
      ```
-     FIX: Resolve <IssueDescription>, closes #<IssueNumber>
+     FIX: Resolve <IssueDescription>. Closes #<IssueNumber>
      ```
    
    - **Documentation**: Updating or adding to the documentation, including both code comments and README files.
