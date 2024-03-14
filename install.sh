@@ -5,10 +5,10 @@
 # sudo ./install.sh
 
 # Update Package List:
-sudo apt-get update -y
+sudo apt update -y
 
 # Python:
-sudo apt-get install python3 python3-venv python3-pip -y
+sudo apt install python3 python3-venv python3-pip -y
 # sudo apt install python-is-python3
 
 # Jupyter using Pip
