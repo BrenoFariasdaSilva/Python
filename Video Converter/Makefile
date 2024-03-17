@@ -1,8 +1,8 @@
-all: depencencies run
+all: dependencies run
 
 run:
 	clear; time python3 ./main.py
 
-depencencies:
+dependencies:
 	sudo apt install ffmpeg -y
 	pip install colorama

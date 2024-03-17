@@ -1,9 +1,9 @@
-all: depencencies run
+all: dependencies run
 
 run:
 	clear; time python3 ./main.py
 
-depencencies:
+dependencies:
 	pip install colorama
 	pip install matplotlib
 	pip install numpy

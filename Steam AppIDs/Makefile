@@ -1,4 +1,4 @@
-all: depencencies run filter
+all: dependencies run filter
 
 run:
 	clear; time python3 ./accountGames.py
@@ -6,5 +6,5 @@ run:
 filter:
 	clear; time python3 ./gamesPlaytimeFilter.py
 
-depencencies:
+dependencies:
 	pip install csvkit colorama requests
