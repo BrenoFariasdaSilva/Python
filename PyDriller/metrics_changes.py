@@ -4,7 +4,9 @@ import matplotlib.pyplot as plt # for plotting the graphs
 import numpy as np # for calculating the min, max, avg, and third quartile of each metric
 import os # for walking through directories
 import pandas as pd # for the csv file operations
+import platform # For determining the system's null device to discard output
 import time # For measuring the time
+import json # For reading the refactoring file from RefactoringMiner
 from colorama import Style # For coloring the terminal
 from pydriller import Repository # PyDriller is a Python framework that helps developers in analyzing Git repositories. 
 from sklearn.linear_model import LinearRegression # for the linear regression
@@ -12,7 +14,7 @@ from tqdm import tqdm # for progress bar
 
 # Import from the main.py file
 from code_metrics import BackgroundColors # For coloring the terminal outputs
-from code_metrics import START_PATH, CK_METRICS_FILES, CSV_FILE_EXTENSION, DEFAULT_REPOSITORIES, FULL_CK_METRICS_DIRECTORY_PATH, FULL_REPOSITORIES_DIRECTORY_PATH # Importing constants from the code_metrics.py file
+from code_metrics import START_PATH, CK_METRICS_FILES, CSV_FILE_EXTENSION, DEFAULT_REPOSITORIES, FULL_CK_METRICS_DIRECTORY_PATH, FULL_REFACTORINGS_DIRECTORY_PATH, RELATIVE_REPOSITORIES_DIRECTORY_PATH, FULL_REPOSITORIES_DIRECTORY_PATH # Importing constants from the code_metrics.py file
 from code_metrics import create_directory, output_time, path_contains_whitespaces, play_sound, verify_ck_metrics_folder # Importing functions from the code_metrics.py file
 
 # CONSTANTS:
@@ -20,12 +22,18 @@ PROCESS_CLASSES = input(f"{BackgroundColors.GREEN}Do you want to process the {Ba
 MINIMUM_CHANGES = 1 # The minimum number of changes a method should have to be considered
 NUMBER_OF_METRICS = 3 # The number of metrics
 DESIRED_DECREASED = 0.20 # The desired decreased in the metric
+IGNORE_CLASS_NAME_KEYWORDS = ["test"] # The keywords to ignore in the class name
+IGNORE_VARIABLE_ATTRIBUTE_KEYWORDS = ["anonymous"] # The keywords to ignore in the variable attribute
 SUBSTANTIAL_CHANGE_METRIC = "CBO" # The desired metric to check for substantial changes
 DEFAULT_REPOSITORY_NAMES = list(DEFAULT_REPOSITORIES.keys()) # The default repository names
-METRICS_POSITION = {"CBO": 0, "WMC": 1, "RFC": 2}
+METRICS_POSITION = {"CBO": 0, "WMC": 1, "RFC": 2} # The position of the metrics in the metrics list
+FIRST_SUBSTANTIAL_CHANGE_CHECK = True # If True, then it is the first run of the program
+DESIRED_REFACTORINGS_ONLY = False # If True, then only the desired refactorings will be stored
+DESIRED_REFACTORINGS = ["Extract Method", "Extract Class", "Pull Up Method", "Push Down Method", "Extract Superclass", "Move Method"] # The desired refactorings to check for substantial changes
 
 # Extensions:
 PNG_FILE_EXTENSION = ".png" # The extension of the PNG files
+REFACTORING_MINER_JSON_FILE_EXTENSION = ".json" # The extension of the RefactoringMiner JSON files
 
 # Filenames:
 CK_CSV_FILE = CK_METRICS_FILES[0] if PROCESS_CLASSES else CK_METRICS_FILES[1] # The name of the csv generated file from ck.
@@ -37,6 +45,7 @@ RELATIVE_METRICS_DATA_DIRECTORY_PATH = "/metrics_data" # The relative path to th
 RELATIVE_METRICS_EVOLUTION_DIRECTORY_PATH = "/metrics_evolution" # The relative path to the directory containing the metrics evolution
 RELATIVE_METRICS_STATISTICS_DIRECTORY_PATH = "/metrics_statistics" # The relative path to the directory containing the metrics statistics
 RELATIVE_METRICS_PREDICTION_DIRECTORY_PATH = "/metrics_predictions" # The relative path to the directory containing the metrics prediction
+RELATIVE_REFACTORING_MINER_DIRECTORY_PATH = "../RefactoringMiner/RefactoringMiner-2.4.0/bin/RefactoringMiner" # The relative path to the RefactoringMiner directory
 
 # Directories Paths:
 FULL_METRICS_DATA_DIRECTORY_PATH = f"{START_PATH}{RELATIVE_METRICS_DATA_DIRECTORY_PATH}" # The full path to the directory containing the metrics evolution
@@ -179,7 +188,7 @@ def get_identifier_and_metrics(row):
 def was_file_modified(commit_dict, commit_hash, row):	
 	# The file_path is the substring that comes after the: FULL_REPOSITORIES_DIRECTORY_PATH/repository_name/
 	file_path = row["file"][row["file"].find(FULL_REPOSITORIES_DIRECTORY_PATH) + len(FULL_REPOSITORIES_DIRECTORY_PATH) + 1:]
-	repository_name = file_path.split('/')[0]
+	repository_name = file_path.split("/")[0]
 	file_path = file_path[len(repository_name) + 1:] # Get the substring that comes after the: repository_name/
 			
 	modified_files_paths = commit_dict[commit_hash]
@@ -244,7 +253,7 @@ def generate_commit_dict(repository_name):
 # @param repository_name: The name of the repository
 # @return: A dictionary containing the metrics of each class and method combination
 def traverse_directory(repository_name, repository_ck_metrics_path):
-	metrics_track_record = {}
+	metrics_track_record = {} # Dictionary containing the track record of the metrics of each method nor class. The key is the identifier and the value is a dictionary containing the metrics, commit hashes and the number of times the metrics changed.
 	file_count = 0
 	progress_bar = None
 
@@ -313,52 +322,133 @@ def verify_and_create_folder(folder_path):
 def verify_file(file_path):
 	return os.path.exists(file_path)
 
+# @brief: This function gets specific informations about the refactorings of the commit hash and class name from RefactoringMiner
+# @param: repository_name: The name of the repository
+# @param: commit_number: The commit number of the current linear regression
+# @param: commit_hash: The commit hash of the current linear regression
+# @param: class_name: The class name of the current linear regression
+# @return: The dictionary containing the specific informations about the refactorings
+def get_refactorings_info(repository_name, commit_number, commit_hash, class_name):
+	# Get the refactoring file path
+	refactoring_file_path = f"{FULL_REFACTORINGS_DIRECTORY_PATH}/{repository_name}/{commit_number}-{commit_hash}{REFACTORING_MINER_JSON_FILE_EXTENSION}" # The refactoring file path
+
+	if not verify_file(refactoring_file_path):
+		# Call the generate_refactoring_file function to generate the refactoring file
+		generate_refactoring_file(repository_name, commit_number, commit_hash)
+
+	# Open the refactoring file
+	with open(refactoring_file_path, "r") as file:
+		refactorings_info = {"types": [],"filePath": []} # The refactorings information dictionary
+		data = json.load(file) # Load the json data
+		# Loop through the refactorings in the data
+		for commit in data["commits"]:
+			if commit["sha1"] == commit_hash: # If the commit hash is equal to the specified commit hash
+				for refactoring in commit["refactorings"]: # Loop through the refactorings in the commit
+					for location in refactoring["leftSideLocations"] + refactoring["rightSideLocations"]: # Loop through the locations in the refactoring
+						# If the class name is in the file path, then append the refactoring type to the refactorings list
+						if class_name.replace(".", "/") in location["filePath"]:
+							refactorings_info["types"].append(refactoring["type"])
+							if location["filePath"] not in refactorings_info["filePath"]:
+								# print(f"{BackgroundColors.YELLOW}Refactoring: {json.dumps(refactoring, indent=4)}{Style.RESET_ALL}")
+								refactorings_info["filePath"].append(location["filePath"])
+		return refactorings_info # Return the refactorings types list
+
+# @brief: This function generates the refactoring file for a specific commit hash in a specific repository
+# @param: repository_name: The name of the repository
+# @param: commit_number: The commit number of the current linear regression
+# @param: commit_hash: The commit hash of the current linear regression
+# @param: class_name: The class name of the current linear regression
+# @return: The refactoring file path
+def generate_refactoring_file(repository_name, commit_number, commit_hash):
+	# Create the "refactorings" directory if it does not exist
+	verify_and_create_folder(f"{FULL_REFACTORINGS_DIRECTORY_PATH}/{repository_name}")
+
+	# Get the refactoring file path
+	refactoring_file_path = f"{FULL_REFACTORINGS_DIRECTORY_PATH}/{repository_name}/{commit_number}-{commit_hash}.json"
+
+	if not verify_file(refactoring_file_path):
+		# Determine the system's null device to discard output
+		null_device = "NUL" if platform.system() == "Windows" else "/dev/null"
+		
+		# Run RefactoringMiner to get the refactoring data, hiding its output
+		command = f"{RELATIVE_REFACTORING_MINER_DIRECTORY_PATH} -c {RELATIVE_REPOSITORIES_DIRECTORY_PATH}{repository_name} {commit_hash} -json {refactoring_file_path} >{null_device} 2>&1"
+		os.system(command)
+
+	return refactoring_file_path # Return the refactoring file path
+
 # @brief: This function verifies if the class or method has had a substantial decrease in the current metric
 # @param: metrics: A list containing the metrics values for linear regression
 # @param: class_name: The class name of the current linear regression
 # @param: raw_variable_attribute: The raw variable attribute (class type or method name) of the current linear regression
+# @param: commit_hashes: The commit hashes list for the speficied class_name.
 # @param: metric_name: The name of the metric
 # @param: repository_name: The name of the repository
 # @return: None
-def verify_substantial_metric_decrease(metrics, class_name, raw_variable_attribute, metric_name, repository_name):
+def verify_substantial_metric_decrease(metrics_values, class_name, raw_variable_attribute, commit_hashes, metric_name, repository_name):
+	if any(keyword.lower() in class_name.lower() for keyword in IGNORE_CLASS_NAME_KEYWORDS):
+		return # If any of the class name ignore keywords is found in the class name, return
+
+	if any(keyword.lower() in raw_variable_attribute.lower() for keyword in IGNORE_VARIABLE_ATTRIBUTE_KEYWORDS):
+		return # If any of the variable/attribute ignore keywords is found in the variable attribute, return
+	
 	folder_path = f"{FULL_METRICS_STATISTICS_DIRECTORY_PATH}/{repository_name}/"
 	csv_filename = f"{folder_path}{SUBSTANTIAL_CHANGES_FILENAME}"
 
-	# If the csv folder does not exist, create it
-	if not verify_file(csv_filename):
+	global FIRST_SUBSTANTIAL_CHANGE_CHECK # Declare that we're using the global variable
+	
+	# Verify if it's the first run and if the CSV file already exists
+	if FIRST_SUBSTANTIAL_CHANGE_CHECK and verify_file(csv_filename):
+		FIRST_SUBSTANTIAL_CHANGE_CHECK = False # Update the flag after handling the first run
+		os.remove(csv_filename) # Remove the CSV file if it exists
+
+		# Open the csv file and write the header. If the file does not exist, create it.
 		with open(f"{csv_filename}", "w") as csvfile:
 			writer = csv.writer(csvfile)
 			if PROCESS_CLASSES:
-				writer.writerow(["Class", "Type", f"From {metric_name}", f"To {metric_name}", "Percentual Variation"])
+				writer.writerow(["Class", "Type", f"From {metric_name}", f"To {metric_name}", "Percentual Variation", "Commit Number", "Commit Hash", "Refactorings Types", "File Path"])
 			else:
-				writer.writerow(["Class", "Method", f"From {metric_name}", f"To {metric_name}", "Percentual Variation"])
+				writer.writerow(["Class", "Method", f"From {metric_name}", f"To {metric_name}", "Percentual Variation", "Commit Number", "Commit Hash", "Refactorings Types", "File Path"])
 
-	biggest_change = [0, 0, 0.0] # The biggest change values in the metric
+	biggest_change = [0, 0, 0.00] # The biggest change values in the metric
+	commit_data = [0, 0] # The commit data [commit_number, commit_hash]
 
 	# Check if the current metric decreased by more than DESIRED_DECREASED in any commit
-	for i in range(1, len(metrics)):
-		if metrics[i] >= metrics[i - 1] or metrics[i - 1] == 0:
-			continue
+	for i in range(1, len(metrics_values)):
+		if metrics_values[i] >= metrics_values[i - 1] or metrics_values[i - 1] == 0:
+			continue # If the current metric is bigger than the previous metric or the previous metric is zero, then continue
 
-		current_percentual_variation = round((metrics[i - 1] - metrics[i]) / metrics[i - 1], 3)
+		current_percentual_variation = round((metrics_values[i - 1] - metrics_values[i]) / metrics_values[i - 1], 3)
 		# If the current percentual variation is bigger than the desired decreased, then update the biggest_change list
 		if current_percentual_variation > DESIRED_DECREASED and current_percentual_variation > biggest_change[2]:
-			biggest_change = [metrics[i - 1], metrics[i], current_percentual_variation]
+			# Fetch commit data to retrieve refactoring information
+			temp_commit_data = [commit_hashes[i - 1].split("-")[0], commit_hashes[i - 1].split("-")[1]]
+			refactorings_info = get_refactorings_info(repository_name, temp_commit_data[0], temp_commit_data[1], class_name)
+
+			if DESIRED_REFACTORINGS_ONLY: 
+				# Update the biggest change if it involves desired refactoring types.
+				if any(refactoring in DESIRED_REFACTORINGS for refactoring in refactorings_info["types"]):
+					biggest_change = [metrics_values[i - 1], metrics_values[i], current_percentual_variation, refactorings_info["types"], refactorings_info["filePath"]]
+					commit_data = temp_commit_data
+			else:
+				# If not filtering by desired refactorings, store any type of refactoring.
+				biggest_change = [metrics_values[i - 1], metrics_values[i], current_percentual_variation, refactorings_info["types"], refactorings_info["filePath"]]
+				commit_data = temp_commit_data
 
 	# Write the biggest change to the csv file if the percentual variation is bigger than the desired decreased
 	if biggest_change[2] > DESIRED_DECREASED:
 		with open(f"{csv_filename}", "a") as csvfile:
 			writer = csv.writer(csvfile)
-			writer.writerow([class_name, raw_variable_attribute, biggest_change[0], biggest_change[1], biggest_change[2]])
+			writer.writerow([class_name, raw_variable_attribute, biggest_change[0], biggest_change[1], round(biggest_change[2] * 100, 2), commit_data[0], commit_data[1], refactorings_info["types"], refactorings_info["filePath"]])
 	 
 # @brief: Perform linear regression on the given metrics and save the plot to a PNG file
 # @param: metrics: A list containing the metrics values for linear regression
 # @param: class_name: The class name of the current linear regression
 # @param: variable_attribute: The variable attribute (class type or method name) of the current linear regression
+# @param: commit_hashes: A list of the commit_hashes for the specified class_name/identifier.
 # @param: raw_variable_attribute: The raw variable attribute (class type or method name) of the current linear regression
 # @param: repository_name: The name of the repository
 # @return: None
-def linear_regression_graphics(metrics, class_name, variable_attribute, raw_variable_attribute, repository_name):
+def linear_regression_graphics(metrics, class_name, variable_attribute, commit_hashes, raw_variable_attribute, repository_name):
 	# Check for empty metrics list
 	if not metrics:
 		# print(f"{BackgroundColors.RED}Metrics list for {class_name} {variable_attribute} is empty!{Style.RESET_ALL}")
@@ -370,38 +460,38 @@ def linear_regression_graphics(metrics, class_name, variable_attribute, raw_vari
 		return
 	
 	# Loop through the metrics_position dictionary
-	for key, value in METRICS_POSITION.items():
+	for metric_name, metric_position in METRICS_POSITION.items():
 		# Extract the metrics values
-		x = np.arange(len(metrics))
-		y = np.array(metrics)[:, value] # Considering the metric in the value variable for linear regression
+		commit_number = np.arange(len(metrics)) # Create an array with the order of the commits numbers
+		metric_values = np.array(metrics)[:, metric_position] # Considering the metric in the value variable for linear regression
 
 		# For the CBO metric, check if there occurred any substantial decrease in the metric
-		if key == SUBSTANTIAL_CHANGE_METRIC:
-			verify_substantial_metric_decrease(y, class_name, raw_variable_attribute, key, repository_name)
+		if metric_name == SUBSTANTIAL_CHANGE_METRIC:
+			verify_substantial_metric_decrease(metric_values, class_name, raw_variable_attribute, commit_hashes, metric_name, repository_name)
 			
 		# Check for sufficient data points for regression
-		if len(x) < 2 or len(y) < 2:
+		if len(commit_number) < 2 or len(metric_values) < 2:
 			return
 		
 		# Perform linear regression using Scikit-Learn
 		model = LinearRegression()
-		model.fit(x.reshape(-1, 1), y)
-		linear_fit = model.predict(x.reshape(-1, 1))
+		model.fit(commit_number.reshape(-1, 1), metric_values)
+		linear_fit = model.predict(commit_number.reshape(-1, 1))
 
 		# Create the plot
 		plt.figure(figsize=(10, 6))
-		plt.plot(x, y, "o", label=f"{key}")
-		plt.plot(x, linear_fit, "-", label="Linear Regression Fit")
+		plt.plot(commit_number, metric_values, "o", label=f"{metric_name}")
+		plt.plot(commit_number, linear_fit, "-", label="Linear Regression Fit")
 		plt.xlabel("Commit Number")
-		plt.ylabel(f"{key} Value")
-		plt.title(f"Linear Regression for {key} metric of {class_name} {variable_attribute}")
+		plt.ylabel(f"{metric_name} Value")
+		plt.title(f"Linear Regression for {metric_name} metric of {class_name} {variable_attribute}")
 		plt.legend()
 
 		# Create the Class/Method linear prediction directory if it does not exist
 		verify_and_create_folder(f"{FULL_METRICS_PREDICTION_DIRECTORY_PATH}/{repository_name}/{CLASSES_OR_METHODS}/{class_name}/{variable_attribute}")
 
 		# Save the plot to a PNG file
-		plt.savefig(f"{FULL_METRICS_PREDICTION_DIRECTORY_PATH}/{repository_name}/{CLASSES_OR_METHODS}/{class_name}/{variable_attribute}/{key}{PNG_FILE_EXTENSION}")
+		plt.savefig(f"{FULL_METRICS_PREDICTION_DIRECTORY_PATH}/{repository_name}/{CLASSES_OR_METHODS}/{class_name}/{variable_attribute}/{metric_name}{PNG_FILE_EXTENSION}")
 		
 		# Close the plot
 		plt.close()
@@ -415,7 +505,7 @@ def write_metrics_evolution_to_csv(repository_name, metrics_track_record):
 	with tqdm(total=len(metrics_track_record), unit=f" {BackgroundColors.CYAN}Creating Linear Regression and Metrics Evolution{Style.RESET_ALL}") as progress_bar:
 		for identifier, record in metrics_track_record.items():
 			metrics = record["metrics"]
-			class_name = identifier.split(' ')[0] # Get the identifier which is currently the class name
+			class_name = identifier.split(" ")[0] # Get the identifier which is currently the class name
 			variable_attribute = get_clean_id(identifier.split(" ")[1]) # Get the variable attribute which could be the type of the class or the method name
 			mkdir_path = f"{FULL_METRICS_EVOLUTION_DIRECTORY_PATH}/{repository_name}/{CLASSES_OR_METHODS}/{class_name}/"
 			verify_and_create_folder(mkdir_path)
@@ -434,7 +524,7 @@ def write_metrics_evolution_to_csv(repository_name, metrics_track_record):
 				for i in range(metrics_len):
 					writer.writerow([unique_identifier, record["commit_hashes"][i], metrics[i][0], metrics[i][1], metrics[i][2]])
 
-			linear_regression_graphics(metrics, class_name, variable_attribute, identifier.split(" ")[1], repository_name) # Perform linear regression on the metrics
+			linear_regression_graphics(metrics, class_name, variable_attribute, record["commit_hashes"], identifier.split(" ")[1], repository_name) # Perform linear regression on the metrics
 			progress_bar.update(1) # Update the progress bar
 
 # @brief: Calculates the minimum, maximum, average, and third quartile of each metric and writes it to a csv file
@@ -532,11 +622,16 @@ def main():
 	if path_contains_whitespaces():
 		print(f"{BackgroundColors.RED}The PATH constant contains whitespaces. Please remove them!{Style.RESET_ALL}")
 		return
+	
+	# Check if the refactoring miner tool exists in the specified path
+	if not verify_file(RELATIVE_REFACTORING_MINER_DIRECTORY_PATH):
+		print(f"{BackgroundColors.RED}The {BackgroundColors.CYAN}RefactoringMiner{BackgroundColors.RED} tool was not found in the specified path: {BackgroundColors.GREEN}{RELATIVE_REFACTORING_MINER_DIRECTORY_PATH}{Style.RESET_ALL}")
+		return
 
 	print(f"{BackgroundColors.GREEN}This script generates the {BackgroundColors.CYAN}classes or methods metrics evolution history, metrics statistics and linear regression{BackgroundColors.GREEN} for the {BackgroundColors.CYAN}{list(DEFAULT_REPOSITORY_NAMES)}{BackgroundColors.GREEN} repositories.{Style.RESET_ALL}")
 
 	process_all_repositories() # Process all the repositories
 		
 # This is the standard boilerplate that calls the main() function.
-if __name__ == "__main__":
+if __name__ == '__main__':
    main() # Call the main function

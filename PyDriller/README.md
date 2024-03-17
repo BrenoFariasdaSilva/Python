@@ -17,7 +17,8 @@ Welcome to the PyDriller folder, in which you will find the scripts used to gene
 - [PyDriller.  ](#pydriller--)
     - [Important Notes:](#important-notes)
   - [Installation:](#installation)
-    - [Requirements:](#requirements)
+    - [Requirements and Setup](#requirements-and-setup)
+    - [Cleaning Up](#cleaning-up)
   - [How to use:](#how-to-use)
     - [Main Scripts:](#main-scripts)
       - [Code\_Metrics](#code_metrics)
@@ -46,11 +47,45 @@ sudo apt install python3-pip -y
 ```
 Great, you now have python3 and pip installed. Now, we need to install the project requirements/dependencies.
 
-### Requirements:
-Run the following command to install the requirements, like ```matplotlib```, ```numpy```, ```pandas```, ```pydriller``` and ```tqdm```:  
+### Requirements and Setup
+
+This project requires a virtual environment to ensure all dependencies are installed and managed in an isolated manner. A virtual environment is a self-contained directory tree that contains a Python installation for a particular version of Python, plus a number of additional packages. Using a virtual environment helps avoid conflicts between project dependencies and system-wide Python packages. 
+
+To set up and use a virtual environment for this project, we leverage Python's built-in `venv` module. The `makefile` included with the project automates the process of creating a virtual environment, installing the necessary dependencies, and running scripts within this environment.
+
+Follow these steps to prepare your environment:
+
+1. **Create and Activate the Virtual Environment:** The project uses a `makefile` to streamline the creation and activation of a virtual environment named `venv`. This environment is where all required packages, such as `matplotlib`, `numpy`, `pandas`, `pydriller`, `scikit-learn` and `tqdm`, will be installed.
+
+2. **Install Dependencies:** Run the following command to set up the virtual environment and install all necessary dependencies:
+
+  ```
+  make dependencies
+  ```
+
+  This command performs the following actions:
+  - Initializes a new virtual environment by running `python3 -m venv venv`.
+  - Installs the project's dependencies within the virtual environment using `pip`.
+
+3. **Running Scripts:** The `makefile` also defines commands to run every script with the virtual environment's Python interpreter. For example, to run the `code_metrics_script`, use:
+
+  ```
+  make code_metrics_script
+  ```
+
+  This ensures that the script runs using the Python interpreter and packages installed in the `venv` directory.
+
+### Cleaning Up
+
+To clean your project directory from the virtual environment and Python cache files, use the `clean` rule defined in the `makefile`:
+
 ```
-make dependencies
+make clean
 ```
+
+This command removes the `venv` directory and deletes all compiled Python files in the project directory, helping maintain a clean workspace.
+
+By following these instructions, you'll ensure that all project dependencies are correctly managed and isolated, leading to a more stable and consistent development environment.
 	
 ## How to use: 
 ### Main Scripts:
@@ -102,7 +137,7 @@ make metrics_changes_script
    3. Now it gets the metrics values list in the identifier position of the dictionary and verify if the current metrics combination aren't inside that metrics values list. If it ain't, it means that those metrics combination haven't appeared yet, so we can add it to the list and increment the value of times that this class or method changed. If they are in, we won't add them to the list, as those values would be repeated;  
      
    Now that the `metrics_track_record` dictionary is filled with the metrics evolution of every class or method, the `traverse_directory` function will return the `metrics_track_record` dictionary, in order for the metrics be processed to generate statistics.
-7. Now its time to write those `metrics_track_record` to the `metrics_evolution`folder with the call of the `write_metrics_track_record_to_csv` function. This function will, for each class or method in the repository, write it's values inside the `metrics_track_record` dictionary to the `{FULL_METRICS_EVOLUTION_DIRECTORY_PATH}/{repository_name}/{CLASSES_OR_METHODS}/{class_name}/{variable_attribute}{CSV_FILE_EXTENSION}` csv file and call the `linear_regression_graphics(metrics, class_name, variable_attribute, repository_name)` function to generate the linear regression graphics that same class or method. Inside the `linear_regression_graphics` function, it calls the `verify_substantial_metric_decrease` function for the specified metric name in the `SUBSTANTIAL_CHANGE_METRIC` constant, which will verify if the current metrics values of the current class or method had a substantial decrease, defined in the `DESIRED_DECREASED` constant. If it had any decrease equal or higher than the `DESIRED_DECREASED`, it will add the `class_name`, `variable_attribute`, `metric[i - 1]`, `metric[i]` and `percentual_variation` to a csv file stored in the `{FULL_METRICS_STATISTICS_DIRECTORY_PATH}/{repository_name}/{SUBSTANTIAL_CHANGES_FILENAME}` file.  
+7. Now its time to write those `metrics_track_record` to the `metrics_evolution`folder with the call of the `write_metrics_track_record_to_csv` function. This function will, for each class or method in the repository, write it's values inside the `metrics_track_record` dictionary to the `{FULL_METRICS_EVOLUTION_DIRECTORY_PATH}/{repository_name}/{CLASSES_OR_METHODS}/{class_name}/{variable_attribute}{CSV_FILE_EXTENSION}` csv file and call the `linear_regression_graphics(metrics, class_name, variable_attribute, repository_name)` function to generate the linear regression graphics that same class or method. Inside the `linear_regression_graphics` function, it calls the `verify_substantial_metric_decrease` function for the specified metric name in the `SUBSTANTIAL_CHANGE_METRIC` constant, which will verify if the current metrics values of the current class or method had a substantial decrease, defined in the `DESIRED_DECREASED` constant. There are restrictions, for example, keywords that might be found in the class name or variable attributeIf it had any decrease equal or higher than the `DESIRED_DECREASED`, it will add the `class_name`, `variable_attribute`, `metric[i - 1]`, `metric[i]`, `percentual_variation`, `commit number` and ``commit hash` to a csv file stored in the `{FULL_METRICS_STATISTICS_DIRECTORY_PATH}/{repository_name}/{SUBSTANTIAL_CHANGES_FILENAME}` file.  
 8. Now that we have the record of the times the metrics changed and it's values for every class or method, the main function calls the `generate_metrics_track_record_statistics(repository_name, metrics_track_record)`, which will generate the metrics statistics (`Minimum`, `Maximum`, `Average` and `Third Quartile`) for every metric (`cbo`, `cboModified`, `wmc` and `rfc`), which allow us to have a better understanding of the metrics behavior over time. Those statistics will be stored in the `METRICS_STATISTICS_DIRECTORY_PATH + "/" + repository_name + "-" + CHANGED_METHODS_CSV_FILENAME` file.
 9. In this step, with those statistics generated and stored in the `METRICS_STATISTICS_DIRECTORY_PATH + "/" + repository_name + "-" + CHANGED_METHODS_CSV_FILENAME` csv file, the main funcion call the `sort_csv_by_changes(repository_name)` function that is going to sort the lines of the metrics statistics csv file by the `Changed` column, which is the number of times the metrics changed. The top changes will be stored in the `METRICS_STATISTICS_DIRECTORY_PATH + "/" + repository_name + "-" + SORTED_CHANGED_METHODS_CSV_FILENAME` csv file.  
 10. Now, that we have the sorted csv file, the main function will call the `os.remove` to delete the old, unsorted csv file.
