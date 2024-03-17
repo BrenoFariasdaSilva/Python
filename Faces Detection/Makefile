@@ -1,22 +1,8 @@
-# Name of the virtual environment directory
-VENV := venv
-# Python command to use
-PYTHON := python3
-
-.PHONY: all venv dependencies run
-
-all: venv dependencies run
-
-venv: $(VENV)/bin/activate
-
-$(VENV)/bin/activate:
-	$(PYTHON) -m venv $(VENV)
-	$(VENV)/bin/pip install --upgrade pip
-	touch $(VENV)/bin/activate
+all: dependencies dataset run
 
 run:
-	clear; time $(VENV)/bin/python ./main.py
+	clear; time python3 ./main.py
 
 dependencies:
-	$(VENV)/bin/pip install colorama opencv-python dlib tqdm
-	$(VENV)/bin/pip install --upgrade threadpoolctl
+	pip install colorama opencv-python dlib tqdm
+	pip install --upgrade threadpoolctl
