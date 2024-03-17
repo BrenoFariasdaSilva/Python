@@ -41,6 +41,27 @@ def remove_duplicate_rules(content):
       new_lines.append(line) # Add the line to the list of new lines
    return "\n".join(new_lines) # Join the new lines into a single string
 
+# This function removes duplicate Makefile rules, keeping only the first occurrence
+def update_phony_and_all_rules(content, original_all_dependencies):
+   rule_names = re.findall(r"^([a-zA-Z0-9_-]+):", content, re.MULTILINE)
+   phony_line = f".PHONY: {' '.join(set(rule_names))}"
+   # Construct "all" rule including "venv" and original dependencies
+   all_dependencies = "venv " + " ".join(original_all_dependencies)
+   all_rule_index = content.find("all:")
+   if all_rule_index != -1:
+      content = re.sub(r"^all:.*", f"all: {all_dependencies}", content, flags=re.MULTILINE)
+   else:
+      # Insert "all" rule at the beginning if it"s not found
+      content = f"all: {all_dependencies}\n" + content
+   return f"{phony_line}\n{content}"
+
+# This function extracts the original "all" rule dependencies from the given content
+def extract_original_all_dependencies(content):
+   match = re.search(r"^all: (.*)$", content, re.MULTILINE)
+   if match: # If the "all" rule is found
+      return match.group(1).strip().split() # Return the dependencies of the "all" rule
+   return [] # Return an empty list if the "all" rule is not found
+
 # This function updates the contents of a Makefile to use a Python virtual environment
 def update_makefile_contents(original_content):
    if "VENV :=" in original_content:
@@ -64,12 +85,22 @@ $(VENV)/bin/activate:
 
 """
 
-   original_content = re.sub(r"\bpip install", "$(VENV)/bin/pip install", original_content) # Replace pip install with $(VENV)/bin/pip install
-   original_content = re.sub(r"\bpython3\b", "$(VENV)/bin/python", original_content) # Replace python3 with $(VENV)/bin/python
+   # Extract the original "all" rule dependencies
+   original_all_dependencies = extract_original_all_dependencies(original_content)
 
-   merged_content = venv_setup + original_content # Merge the venv setup with the original content
-   no_duplicate_rules_content = remove_duplicate_rules(merged_content) # Remove duplicate Makefile rules
-   final_content = remove_duplicated_blank_lines(no_duplicate_rules_content) # Remove duplicated blank lines
+   # Modify the content for pip and python to use virtual env
+   modified_content = re.sub(r"\bpip install", "$(VENV)/bin/pip install", original_content)
+   modified_content = re.sub(r"\bpython3\b", "$(VENV)/bin/python", modified_content)
+
+   # Ensure venv setup is added only once
+   if not "VENV :=" in modified_content:
+      modified_content = venv_setup + modified_content
+
+   modified_content = remove_duplicate_rules(modified_content)
+   modified_content = update_phony_and_all_rules(modified_content, original_all_dependencies)
+   
+   final_content = remove_duplicated_blank_lines(modified_content)
+
    return final_content # Return the final content
 
 # This function updates the given Makefile to use a Python virtual environment
