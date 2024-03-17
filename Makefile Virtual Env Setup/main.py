@@ -35,11 +35,12 @@ def remove_duplicate_rules(content):
       match = re.match(r"^([a-zA-Z0-9_-]+):.*", line)
       if match: # If the line is a potential Makefile rule
          rule_name = match.group(1) # Get the name of the rule
-         if rule_name in seen_rules: # If the rule has already been seen
-            continue # Skip the line
-         seen_rules.add(rule_name) # Add the rule to the set of seen rules
-      new_lines.append(line) # Add the line to the list of new lines
-   return "\n".join(new_lines) # Join the new lines into a single string
+         if rule_name not in seen_rules: # If the rule has not been seen
+            seen_rules.add(rule_name) # Add the rule to the set of seen rules
+            new_lines.append(line) # Add the line to the list of new lines
+         else: # If the rule has been seen
+            new_lines.append(line) # Add the line to the list of new lines
+   return "\n".join(new_lines), seen_rules # Return the new content and the set of seen rules
 
 # This function removes duplicate Makefile rules, keeping only the first occurrence
 def update_phony_and_all_rules(content, original_all_dependencies):
