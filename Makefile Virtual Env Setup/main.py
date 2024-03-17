@@ -42,20 +42,6 @@ def remove_duplicate_rules(content):
             new_lines.append(line) # Add the line to the list of new lines
    return "\n".join(new_lines), seen_rules # Return the new content and the set of seen rules
 
-# This function removes duplicate Makefile rules, keeping only the first occurrence
-def update_phony_and_all_rules(content, original_all_dependencies):
-   rule_names = re.findall(r"^([a-zA-Z0-9_-]+):", content, re.MULTILINE)
-   phony_line = f".PHONY: {' '.join(set(rule_names))}"
-   # Construct "all" rule including "venv" and original dependencies
-   all_dependencies = "venv " + " ".join(original_all_dependencies)
-   all_rule_index = content.find("all:")
-   if all_rule_index != -1:
-      content = re.sub(r"^all:.*", f"all: {all_dependencies}", content, flags=re.MULTILINE)
-   else:
-      # Insert "all" rule at the beginning if it"s not found
-      content = f"all: {all_dependencies}\n" + content
-   return f"{phony_line}\n{content}"
-
 # This function extracts the original "all" rule dependencies from the given content
 def extract_original_all_dependencies(content):
    match = re.search(r"^all: (.*)$", content, re.MULTILINE)
@@ -73,12 +59,6 @@ VENV := venv
 # Python command to use
 PYTHON := python3
 
-.PHONY: all venv dependencies run
-
-all: venv dependencies run
-
-venv: $(VENV)/bin/activate
-
 $(VENV)/bin/activate:
 \t$(PYTHON) -m venv $(VENV)
 \t$(VENV)/bin/pip install --upgrade pip
@@ -89,18 +69,24 @@ $(VENV)/bin/activate:
    # Extract the original "all" rule dependencies
    original_all_dependencies = extract_original_all_dependencies(original_content)
 
-   # Modify the content for pip and python to use virtual env
-   modified_content = re.sub(r"\bpip install", "$(VENV)/bin/pip install", original_content)
+   # Update the Makefile content
+   modified_content = venv_setup + re.sub(r"\bpip install", "$(VENV)/bin/pip install", original_content)
    modified_content = re.sub(r"\bpython3\b", "$(VENV)/bin/python", modified_content)
 
-   # Ensure venv setup is added only once
-   if not "VENV :=" in modified_content:
-      modified_content = venv_setup + modified_content
+   # Remove duplicate rules and get the set of rule names
+   no_duplicate_content, rule_names = remove_duplicate_rules(modified_content)
+   all_dependencies = "venv " + " ".join(original_all_dependencies)
+   phony_line = ".PHONY: " + " ".join(rule_names | set(original_all_dependencies))
 
-   modified_content = remove_duplicate_rules(modified_content)
-   modified_content = update_phony_and_all_rules(modified_content, original_all_dependencies)
-   
-   final_content = remove_duplicated_blank_lines(modified_content)
+   # Reconstruct the "all" rule with its original dependencies
+   all_rule_pattern = re.compile(r"^all:.*$", re.MULTILINE)
+   if all_rule_pattern.search(no_duplicate_content):
+      no_duplicate_content = all_rule_pattern.sub(f"all: {all_dependencies}", no_duplicate_content)
+   else:
+      no_duplicate_content = f"all: {all_dependencies}\n" + no_duplicate_content
+
+   final_content = f"{phony_line}\n{no_duplicate_content}"
+   final_content = remove_duplicated_blank_lines(final_content)
 
    return final_content # Return the final content
 
