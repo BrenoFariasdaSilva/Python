@@ -20,7 +20,10 @@ SOUND_FILE = "./.assets/Sounds/NotificationSound.wav" # The path to the sound fi
 def play_sound():
    """
    Plays a sound when the program finishes.
+
+   :return: None
    """
+
    if os.path.exists(SOUND_FILE):
       if platform.system() in SOUND_COMMANDS: # If the platform.system() is in the SOUND_COMMANDS dictionary
          os.system(f"{SOUND_COMMANDS[platform.system()]} {SOUND_FILE}")
@@ -34,12 +37,20 @@ atexit.register(play_sound)
 
 def main():
    """
-   The main function.
+   Main function.
+
+   :return: None
    """
+
    print(f"{BackgroundColors.CLEAR_TERMINAL}{BackgroundColors.BOLD}{BackgroundColors.GREEN}Hello, World!{Style.RESET_ALL}", end="\n\n") # Output the Welcome message
 
    print(f"\n{BackgroundColors.BOLD}{BackgroundColors.GREEN}Program finished.{Style.RESET_ALL}") # Output the end of the program message
 
-# This is the standard boilerplate that calls the main() function.
 if __name__ == "__main__":
-	main() # Call the main function
+   """
+   This is the standard boilerplate that calls the main() function.
+
+   :return: None
+   """
+
+   main() # Call the main function
