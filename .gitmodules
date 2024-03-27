@@ -1,3 +1,6 @@
 [submodule "Worked-Example-Miner"]
 	path = Worked-Example-Miner
 	url = https://github.com/BrenoFariasdaSilva/Worked-Example-Miner
+[submodule "Scientific-Research"]
+	path = Scientific-Research
+	url = https://github.com/BrenoFariasdaSilva/Scientific-Research
