@@ -35,7 +35,9 @@ Feel free to contribute and send suggestions.
 - [Python. ](#python-)
 	- [Table of Contents](#table-of-contents)
 	- [Setup](#setup)
-		- [Clone the repository](#clone-the-repository)
+		- [Clone without Submodule](#clone-without-submodule)
+		- [Clone with Submodule](#clone-with-submodule)
+		- [Clone Submodule](#clone-submodule)
 	- [Installation:](#installation)
 	- [Run Python Code:](#run-python-code)
 		- [Dependencies](#dependencies)
@@ -45,13 +47,29 @@ Feel free to contribute and send suggestions.
 
 ## Setup
 
-### Clone the repository
+### Clone without Submodule
 
-1. Clone the repository with the following command:
+In order to clone this repository without the submodule (Worked-Example-Miner), you can use the following command:
 
 ```bash
 git clone https://github.com/BrenoFariasdaSilva/Python.git
-cd Python
+```
+
+### Clone with Submodule
+
+In order to clone this repository with the submodule (Worked-Example-Miner), you can use the following command:
+
+```bash
+git clone --recurse-submodules https://github.com/BrenoFariasdaSilva/Python.git
+```
+
+### Clone Submodule
+
+In case you have already cloned the repository and forgot to clone the submodule, you can use the following command to clone the submodule:
+
+```bash
+git submodule init
+git submodule update
 ```
 
 ## Installation:
