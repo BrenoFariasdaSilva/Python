@@ -3,19 +3,26 @@ VENV := venv
 PYTHON := $(VENV)/bin/python3
 PIP := $(VENV)/bin/pip
 
-# Scripts:
-repositories_refactors_script: $(VENV)
-	clear; time $(PYTHON) repository_refactors.py
+# Activate the virtual environment: source venv/bin/activate
 
-metrics_evolution_refactors_script: $(VENV)
-	clear; time $(PYTHON) metrics_evolution_refactors.py
+# Scripts:
+metrics_evolution_refactorings_script: $(VENV)
+	clear; time $(PYTHON) metrics_evolution_refactorings.py
+
+repositories_refactorings_script: $(VENV)
+	clear; time $(PYTHON) repositories_refactorings.py
 
 # Setup Virtual Environment and Install Dependencies
 $(VENV): dependencies
 
+# Install the project dependencies in a virtual environment
 dependencies:
 	python3 -m venv $(VENV)
-	$(PIP) install colorama pandas pydriller scikit-learn tqdm
+	$(PIP) install -r requirements.txt
+
+# Generate requirements.txt from the current venv
+generate_requirements:
+	$(PIP) freeze > requirements.txt
 
 # Utility rule for cleaning the project
 clean:
@@ -23,4 +30,4 @@ clean:
 	find . -type f -name '*.pyc' -delete
 	find . -type d -name '__pycache__' -delete
 
-.PHONY: clean repositories_refactors_script metrics_evolution_refactors_script dependencies
+.PHONY: clean metrics_evolution_refactorings_script repositories_refactorings_script dependencies generate_requirements
