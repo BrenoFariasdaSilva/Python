@@ -1,8 +1,11 @@
 #!/bin/bash
 
 # Run:
-# chmod +x ./moveExtractedFiles.sh
-# ./moveExtractedFiles.sh
+# chmod +x ./move_extracted_files.sh
+# ./move_extracted_files.sh
+
+# Echo welcome message
+echo "Welcome to the Move Extracted Files script!"
 
 # Get the current directory
 current_dir="$(pwd)"
@@ -12,7 +15,7 @@ echo "Current directory: ${current_dir}"
 
 # If the current_dir doesn't end with "/PyDriller", then exit
 if [[ "${current_dir}" != *"/PyDriller" ]]; then
-   echo "Please run the script from the '/PyDriller' with the command './Scripts/moveExtractedFiles.sh'."
+   echo "Please run the script from the '/PyDriller' with the command './Scripts/move_extracted_files.sh'."
    exit # Exit the script
 fi
 
@@ -29,7 +32,7 @@ for extracted_folder in "${extracted_folders[@]}"; do
    if [[ ! -d "${extracted_folder}" ]]; then
       mkdir "${extracted_folder}"
    fi
-   
+
    # Move the contents from the source to destination folder
    mv "${compressed_folder_path}/${extracted_folder}"/* "${extracted_folder}/"
 
@@ -38,13 +41,13 @@ for extracted_folder in "${extracted_folders[@]}"; do
 done
 
 # Play a sound when the script finishes
-sound_file="../.assets/NotificationSound.wav"
+sound_file="../.assets/Sounds/NotificationSound.wav"
 
 if [ -e "$sound_file" ]; then
-  aplay "$sound_file" # Play the sound file
+   aplay "$sound_file" # Play the sound file
 else
-  echo "Sound file not found at: $sound_file"
+   echo "Sound file not found at: $sound_file"
 fi
 
 # Print a success message
-echo "Files moved and source folders deleted successfully."
+echo "Files Moved and Source Folders deleted successfully."

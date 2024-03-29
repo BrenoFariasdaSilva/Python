@@ -12,38 +12,50 @@ class BackgroundColors: # Colors for the terminal
 	UNDERLINE = "\033[4m" # Underline
 	CLEAR_TERMINAL = "\033[H\033[J" # Clear the terminal
 
-# List of target file names
-TARGET_FILENAMES = {"commons-lang": "", "jabref": "", "kafka": "", "zookeeper": "CHANGES.txt.diff"}
+# Default values that can be changed:
+REPOSITORIES = ["zookeeper"] # The list of repositories
+TARGET_FILENAMES = {"zookeeper": "CHANGES.txt.diff"} # The target file names
+VERBOSE = False # Verbose mode. If set to True, it will output messages at the start/call of each function.
 
-# Repositories List
-REPOSITORIES = ["commons-lang", "jabref", "kafka", "zookeeper"]
-
-# @brief: This function searches for files in the given directory
-# @param: search_directory - The directory to search in
-# @param: search_string - The string to search for
-# @return: found_file_paths - A list of the paths of the found files
-# @return: file_counts - A dictionary containing the number of files found
 def search_files(search_directory, search_string):
-	file_counts = 0 # Counter for the number of files found
+	"""
+	Search for files in the given directory.
+
+	:param search_directory: The directory to search in
+	:param search_string: The string to search for
+	:return: found_file_paths: A list of the paths of the found files
+	:return: found_files_count: A dictionary containing the number of files found
+	"""
+
+	if VERBOSE: # If the VERBOSE constant is set to True
+		print(f"{BackgroundColors.GREEN}Searching for {BackgroundColors.CYAN}{search_string} {BackgroundColors.GREEN}files in {BackgroundColors.CYAN}{search_directory}{Style.RESET_ALL}")
+
+	found_files_count = 0 # Counter for the number of files found
 	found_file_paths = [] # List to store the paths of the found files
+
 	# Walk through the directory
 	for root, _, files in os.walk(search_directory):
-		# Search for the target files
-		for file in files:
+		for file in files: # Loop through the files
 			file_path = os.path.join(root, file)
+
 			# Verify if the file name matches the target file name
 			if search_string in file:
-				file_counts += 1 # Increment the counter
+				found_files_count += 1 # Increment the counter
 				found_file_paths.append(file_path) # Add the file path to the list
 					
-	return found_file_paths, file_counts # Return the list and the dictionary
+	return found_file_paths, found_files_count # Return the list and the dictionary
 
-# @brief: This function writes the found file paths to a text file
-# @param: found_file_paths - A list of the paths of the found files
-# @param: repository_name - The name of the repository
-# @param: current_directory - The current directory
-# @return: None
-def write_file_paths(found_file_paths, repository_name, current_directory):
+def write_file_paths(found_file_paths, found_files_count, repository_name, current_directory):
+	"""
+	Write the found file paths to a text file.
+
+	:param found_file_paths: A list of the paths of the found files
+	:param found_files_count: A dictionary containing the number of files found
+	:param repository_name: The name of the repository
+	:param current_directory: The current directory
+	:return: None
+	"""
+	
 	output_file_path = f"{current_directory}/metrics_data/{repository_name}/track_files_list.txt"
 	print(f"{BackgroundColors.GREEN}Writing found files to {BackgroundColors.CYAN}{output_file_path}{Style.RESET_ALL}")
 
@@ -52,19 +64,26 @@ def write_file_paths(found_file_paths, repository_name, current_directory):
 		print(f"{BackgroundColors.RED}No files found in {BackgroundColors.CYAN}{repository_name}{Style.RESET_ALL}")
 		return # Exit the function
 
-	# Write the found file paths to a text file
+	# Open the text file
 	with open(output_file_path, "w") as file:
-		found_files_count = len(found_file_paths)
+		# Write the found file paths to a text file
 		file.write(f"Found files in PyDriller/diffs/{repository_name}: {found_files_count}\n")
 
 		# For each file path in the list
 		for path in found_file_paths:
 			file.write(f"{path}\n") # Write the file path to the text file
 
-# @brief: This is the main function
-# @param: None
-# @return: None
 def main():
+	"""
+   Main function.
+
+   :return: None
+   """
+
+	# Print the welcome message
+	print(f"{BackgroundColors.GREEN}Welcome to the {BackgroundColors.CYAN}Track Files{BackgroundColors.GREEN} script! This script is part of the {BackgroundColors.CYAN}Worked Example Miner (WEM){BackgroundColors.GREEN} project.{Style.RESET_ALL}")
+	print(f"{BackgroundColors.GREEN}This script searches for {BackgroundColors.CYAN}specific files (README.md, for example){BackgroundColors.GREEN} in the specified repositories and writes the file paths to a text file stored in the {BackgroundColors.CYAN}metrics_data{BackgroundColors.GREEN} directory.{Style.RESET_ALL}", end="\n\n")
+	
    # Directory to start the search from (current directory)
 	current_directory = os.getcwd()
 
@@ -86,16 +105,24 @@ def main():
 			continue
 
 		# Call the function to start the search
-		found_file_paths, file_counts = search_files(search_directory, TARGET_FILENAMES[repository_name])
+		found_file_paths, found_files_count = search_files(search_directory, TARGET_FILENAMES[repository_name])
 
-		print(f"{BackgroundColors.GREEN}Number of {BackgroundColors.CYAN}{TARGET_FILENAMES[repository_name]} {BackgroundColors.GREEN}files found in {BackgroundColors.CYAN}{repository_name}{BackgroundColors.GREEN}: {BackgroundColors.CYAN}{file_counts}{Style.RESET_ALL}")
+		print(f"{BackgroundColors.GREEN}Number of {BackgroundColors.CYAN}{TARGET_FILENAMES[repository_name]} {BackgroundColors.GREEN}files found in {BackgroundColors.CYAN}{repository_name}{BackgroundColors.GREEN}: {BackgroundColors.CYAN}{found_files_count}{Style.RESET_ALL}")
 
 		# Sort the file paths based on the numeric value
 		found_file_paths.sort(key=lambda path: int(re.search(rf"{repository_name}/(\d+)-", path).group(1)))
 
 		# Write the file paths to a text file
-		write_file_paths(found_file_paths, repository_name, current_directory)
+		write_file_paths(found_file_paths, found_files_count, repository_name, current_directory)
+
+	# Print the completion message
+	print(f"\n{BackgroundColors.GREEN}The {BackgroundColors.CYAN}Track Files{BackgroundColors.GREEN} script has completed!{Style.RESET_ALL}")
  
-# This is the standard boilerplate that calls the main() function.
-if __name__ == "__main__":
-	main() # Call the main function
+if __name__ == '__main__':
+   """
+   This is the standard boilerplate that calls the main() function.
+
+   :return: None
+   """
+   
+   main() # Call the main function
