@@ -1,0 +1,29 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+# Ignore the MacOS DS_Store Files
+.DS_Store
+
+# Ignore the Windows .Desktop Files
+desktop.ini
+
+# Ignore the Compressed Files
+*.zip
+*.rar
+*.gz
+*.7z
+.tar.gz
+
+# Ignore the Environment Files
+.env
+
+# Text Files
+*.txt
+!requirements.txt
+
+# Ignore the Data Files
+Outputs/*.csv
+Outputs/*.xlsx
+Outputs/*.json
+Outputs/*.txt
