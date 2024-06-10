@@ -132,19 +132,6 @@ def configure_model(api_key):
 
 	return model # Return the model
 
-def write_output_to_file(output, file_path=OUTPUT_FILE):
-	"""
-	Writes the chat output to a specified file.
-	:param output: The output to write.
-	:param file_path: The path to the file.
-	:return: None
-	"""
-
-	verbose_output(true_string=f"{BackgroundColors.GREEN}Writing the output to the file...{Style.RESET_ALL}")
-
-	with open(file_path, "w") as file:
-		file.write(output) # Write the output to the file
-
 def start_chat_session(model, initial_user_message):
 	"""
 	Start a chat session with the model.
@@ -180,6 +167,19 @@ def send_message(chat_session, user_message):
 
 	output = chat_session.send_message(user_message) # Send the message
 	return output.text # Return the output
+
+def write_output_to_file(output, file_path=OUTPUT_FILE):
+	"""
+	Writes the chat output to a specified file.
+	:param output: The output to write.
+	:param file_path: The path to the file.
+	:return: None
+	"""
+
+	verbose_output(true_string=f"{BackgroundColors.GREEN}Writing the output to the file...{Style.RESET_ALL}")
+
+	with open(file_path, "w") as file:
+		file.write(output) # Write the output to the file
 
 def main():
 	"""
