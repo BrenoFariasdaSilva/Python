@@ -9,6 +9,9 @@ PIP := $(VENV)/bin/pip
 gemini_script: $(VENV)
 	clear; time $(PYTHON) ./gemini.py
 
+gemini_input_file_script: $(VENV)
+	clear; time $(PYTHON) ./gemini_file_input.py
+
 # Setup Virtual Environment and Install Dependencies
 $(VENV): dependencies
 
@@ -27,4 +30,4 @@ clean:
 	find . -type f -name '*.pyc' -delete
 	find . -type d -name '__pycache__' -delete
 
-.PHONY: gemini_script clean dependencies generate_requirements
+.PHONY: gemini_script gemini_input_file_script clean dependencies generate_requirements
