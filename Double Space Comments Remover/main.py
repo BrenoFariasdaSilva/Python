@@ -19,8 +19,8 @@ SOUND_COMMANDS = {"Darwin": "afplay", "Linux": "aplay", "Windows": "start"} # Th
 SOUND_FILE = "./.assets/Sounds/NotificationSound.wav" # The path to the sound file
 
 # Filename Constants:
-INPUT_PYTHON_FILE = "./main.py" # The path to the input Python file
-OUTPUT_PYTHON_FILE = "./main.py" # The path to the output Python file
+INPUT_PYTHON_FILE = "./input.py" # The path to the input Python file
+OUTPUT_PYTHON_FILE = "./input.py" # The path to the output Python file
 
 def play_sound():
    """
