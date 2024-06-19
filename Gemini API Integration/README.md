@@ -28,6 +28,10 @@ Welcome to the Google Gemini API integration directory, in which you will find t
       - [Configuration](#configuration)
       - [Run](#run)
       - [Workflow](#workflow)
+    - [Gemini File Input](#gemini-file-input)
+      - [Configuration](#configuration-1)
+      - [Run](#run-1)
+      - [Workflow](#workflow-1)
   - [Generated Data](#generated-data)
   - [Contributing](#contributing)
   - [License](#license)
@@ -197,6 +201,59 @@ make gemini_script
 
 7. **Play Sound on Completion:**
    - Upon script completion, triggers a notification sound using the `play_sound()` function, registered with `atexit`.
+
+### Gemini File Input
+
+This script interacts with the Google Gemini API using input specified in the `input.txt` file, with the result being saved in the `Outputs/` directory.
+
+#### Configuration
+
+To run this code, you must modify the following constants:
+
+1. `VERBOSE`: Set this constant to `True` to enable detailed progress and print statements. The default value is `False`.
+2. `.env` File: Ensure the `.env` file contains the `GEMINI_API_KEY` required for API access.
+
+#### Run
+
+Once you have configured the constants, run the following command to execute the `gemini_file_input.py` file:
+   
+   ```
+   make gemini_file_input_script
+   ```
+
+#### Workflow
+
+1. **Check for Whitespaces in Project Path:**
+   - The script initially verifies if there are any whitespaces in the project path. If detected, it halts the process.
+
+2. **Verify `.env` File:**
+   - Calls `verify_env_file()` to ensure the existence of the `.env` file containing the required `GEMINI_API_KEY`.
+   - If either the `.env` file or the key is missing, the script terminates.
+
+3. **Create Output Directory:**
+   - Uses `create_directory()` to ensure the output directory exists or creates it if it doesn't.
+
+4. **Configure the Generative AI Model:**
+   - Invokes `configure_model()` to set up the Google Generative AI model using the API key obtained from the `.env` file.
+   - This step involves configuring the model with parameters such as temperature, top_p, top_k, and max_output_tokens.
+
+5. **Read Input File:**
+   - Reads the `input.txt` file from the `Inputs/` directory using `read_input_file()`.
+
+6. **Prepare Context Message:**
+   - Constructs an initial message for the chat session, integrating the content from the input file.
+
+7. **Start Chat Session with Model:**
+   - Initiates a chat session with the AI model using `start_chat_session()` and the context message.
+
+8. **Send Task Message to the Model:**
+   - Dispatches a `task_message` to the model, instructing it to analyze the provided data. The model generates corresponding outputs.
+
+9. **Print and Save Outputs:**
+   - Utilizes `write_output_to_file()` to save the AI model's responses in the specified output file (`output.txt`).
+
+10. **Play Sound on Completion:**
+    - Upon script completion, triggers a notification sound using the `play_sound()` function, registered with `atexit`.
 
 ## Generated Data
 
