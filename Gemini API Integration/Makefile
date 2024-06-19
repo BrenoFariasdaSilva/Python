@@ -12,6 +12,9 @@ gemini_script: $(VENV)
 gemini_input_file_script: $(VENV)
 	clear; time $(PYTHON) ./gemini_file_input.py
 
+gemini_pdf_script: $(VENV)
+	clear; time $(PYTHON) ./gemini_pdf.py
+
 # Setup Virtual Environment and Install Dependencies
 $(VENV): dependencies
 
