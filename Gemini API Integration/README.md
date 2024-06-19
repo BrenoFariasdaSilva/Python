@@ -24,7 +24,7 @@ Welcome to the Google Gemini API integration directory, in which you will find t
     - [Requirements](#requirements)
     - [Cleaning Up](#cleaning-up)
   - [How to use](#how-to-use)
-    - [gemini\_script](#gemini_script)
+    - [Gemini Script](#gemini-script)
       - [Configuration](#configuration)
       - [Run](#run)
       - [Workflow](#workflow)
@@ -32,6 +32,10 @@ Welcome to the Google Gemini API integration directory, in which you will find t
       - [Configuration](#configuration-1)
       - [Run](#run-1)
       - [Workflow](#workflow-1)
+    - [Gemini PDF](#gemini-pdf)
+      - [Configuration](#configuration-2)
+      - [Run](#run-2)
+      - [Workflow](#workflow-2)
   - [Generated Data](#generated-data)
   - [Contributing](#contributing)
   - [License](#license)
@@ -157,7 +161,7 @@ By following these instructions, you'll ensure that all project dependencies are
 
 In order to use the makefile rules, you must be in the `Gemini/` directory.
 
-### gemini_script
+### Gemini Script
 
 This script is used to interact with the Google Gemini API given a input specified in the `context_message` variable and the result will be written in the `Gemini/Outputs/` directory. 
 
@@ -254,6 +258,51 @@ Once you have configured the constants, run the following command to execute the
 
 10. **Play Sound on Completion:**
     - Upon script completion, triggers a notification sound using the `play_sound()` function, registered with `atexit`.
+
+### Gemini PDF
+
+This script interacts with the Google Gemini API using input from the `input.txt` file located in the `Inputs/` directory. The output will be written to the `Outputs/` directory.
+
+#### Configuration
+
+To customize the script, modify the following constants:
+
+1. `VERBOSE`: If set to `True`, the script will display detailed progress messages. By default, it is set to `False`, showing minimal output.
+2. `.env File`: Ensure the `.env` file is present in the root directory with the `GEMINI_API_KEY` variable set to your Google Gemini API key.
+
+#### Run
+
+To execute the `gemini_pdf.py` script, use the following command:
+
+```bash
+make gemini_pdf_script
+```
+
+#### Workflow
+
+1. **Play Sound on Completion:**
+   - Uses `atexit.register(play_sound)` to trigger a notification sound when the script finishes.
+
+2. **Verify `.env` File:**
+   - Calls `verify_env_file()` to ensure the `.env` file and the `GEMINI_API_KEY` are present. If not, the script will terminate.
+
+3. **Create Necessary Directories:**
+   - Utilizes `create_directory()` to ensure the `Outputs/` directory exists.
+
+4. **Configure the Generative AI Model:**
+   - Uses `configure_model()` to set up the Google Generative AI model with parameters such as temperature, top_p, top_k, and max_output_tokens.
+
+5. **Read Input File:**
+   - Reads content from `input.txt` using `read_input_file()`.
+
+6. **Start Chat Session with Model:**
+   - Prepares an initial message using the input data and starts a chat session with the model via `start_chat_session()`.
+
+7. **Send Task Messages to the Model:**
+   - Dispatches a task message to the model, instructing it to analyze the provided data with `send_message()`. The model generates the corresponding output.
+
+8. **Print and Save Outputs:**
+   - Writes the model's responses to `output.txt` using `write_output_to_file()`.
 
 ## Generated Data
 
