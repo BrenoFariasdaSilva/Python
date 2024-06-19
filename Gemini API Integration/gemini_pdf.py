@@ -28,7 +28,7 @@ class BackgroundColors: # Colors for the terminal
 
 # Sound Constants:
 SOUND_COMMANDS = {"Darwin": "afplay", "Linux": "aplay", "Windows": "start"} # The commands to play a sound for each operating system
-SOUND_FILE = "../.assets/Sounds/NotificationSound.wav" # The path to the sound file
+SOUND_FILE = ".assets/Sounds/NotificationSound.wav" # The path to the sound file
 
 # Execution Constants:
 VERBOSE = False # Verbose mode. If set to True, it will output messages at the start/call of each function (Note: It will output a lot of messages).
@@ -36,7 +36,7 @@ RUNS = 5 # Number of runs to perform
 MAX_THREADS = 2 # Maximum number of threads to run concurrently
 
 # .Env Constants:
-ENV_PATH = "../.env" # The path to the .env file
+ENV_PATH = ".env" # The path to the .env file
 ENV_VARIABLE = "GEMINI_API_KEY" # The environment variable to load
 
 # Directory Constants:
