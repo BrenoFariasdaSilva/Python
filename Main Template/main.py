@@ -32,8 +32,7 @@ def play_sound():
    else: # If the sound file does not exist
       print(f"{BackgroundColors.RED}Sound file {BackgroundColors.CYAN}{SOUND_FILE}{BackgroundColors.RED} not found. Make sure the file exists.{Style.RESET_ALL}")
 
-# Register the function to play a sound when the program finishes
-atexit.register(play_sound)
+atexit.register(play_sound) # Register the function to play a sound when the program finishes
 
 def main():
    """
