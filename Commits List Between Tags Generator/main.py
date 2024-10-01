@@ -39,7 +39,7 @@ def play_sound():
 
 atexit.register(play_sound) # Register the function to play a sound when the program finishes
 
-def get_commits_information(repo_url, from_tag, to_tag):
+def get_commits_information(repo_url, from_tag=None, to_tag=None):
    """
    Generates a CSV file with commit dates and messages between specific tags in a GitHub repository.
 
