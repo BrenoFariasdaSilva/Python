@@ -17,6 +17,16 @@ class BackgroundColors: # Colors for the terminal
 SOUND_COMMANDS = {"Darwin": "afplay", "Linux": "aplay", "Windows": "start"} # The commands to play a sound for each operating system
 SOUND_FILE = "./.assets/Sounds/NotificationSound.wav" # The path to the sound file
 
+def verify_filepath_exists(filepath):
+   """
+   Verify if a file or folder exists at the specified path.
+
+   :param filepath: Path to the file or folder
+   :return: True if the file or folder exists, False otherwise
+   """
+
+   return os.path.exists(filepath) # Return True if the file or folder exists, False otherwise
+
 def play_sound():
    """
    Plays a sound when the program finishes.
@@ -24,7 +34,7 @@ def play_sound():
    :return: None
    """
 
-   if os.path.exists(SOUND_FILE):
+   if verify_filepath_exists(SOUND_FILE):
       if platform.system() in SOUND_COMMANDS: # If the platform.system() is in the SOUND_COMMANDS dictionary
          os.system(f"{SOUND_COMMANDS[platform.system()]} {SOUND_FILE}")
       else: # If the platform.system() is not in the SOUND_COMMANDS dictionary
