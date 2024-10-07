@@ -42,8 +42,6 @@ def play_sound():
    else: # If the sound file does not exist
       print(f"{BackgroundColors.RED}Sound file {BackgroundColors.CYAN}{SOUND_FILE}{BackgroundColors.RED} not found. Make sure the file exists.{Style.RESET_ALL}")
 
-atexit.register(play_sound) # Register the function to play a sound when the program finishes
-
 def main():
    """
    Main function.
@@ -54,6 +52,8 @@ def main():
    print(f"{BackgroundColors.CLEAR_TERMINAL}{BackgroundColors.BOLD}{BackgroundColors.GREEN}Hello, World!{Style.RESET_ALL}", end="\n\n") # Output the Welcome message
 
    print(f"\n{BackgroundColors.BOLD}{BackgroundColors.GREEN}Program finished.{Style.RESET_ALL}") # Output the end of the program message
+
+   atexit.register(play_sound) # Register the function to play a sound when the program finishes
 
 if __name__ == "__main__":
    """
