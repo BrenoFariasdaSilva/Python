@@ -13,9 +13,26 @@ class BackgroundColors: # Colors for the terminal
    UNDERLINE = "\033[4m" # Underline
    CLEAR_TERMINAL = "\033[H\033[J" # Clear the terminal
 
+# Execution Constants:
+VERBOSE = False # Set to True to output verbose messages
+
 # Sound Constants:
 SOUND_COMMANDS = {"Darwin": "afplay", "Linux": "aplay", "Windows": "start"} # The commands to play a sound for each operating system
 SOUND_FILE = "./.assets/Sounds/NotificationSound.wav" # The path to the sound file
+
+def verbose_output(true_string="", false_string=""):
+   """
+   Outputs a message if the VERBOSE constant is set to True.
+
+   :param true_string: The string to be outputted if the VERBOSE constant is set to True.
+   :param false_string: The string to be outputted if the VERBOSE constant is set to False.
+   :return: None
+   """
+
+   if VERBOSE and true_string != "": # If the VERBOSE constant is set to True and the true_string is set
+      print(true_string) # Output the true statement string
+   elif false_string != "":
+      print(false_string) # Output the false statement string
 
 def verify_filepath_exists(filepath):
    """
@@ -24,6 +41,8 @@ def verify_filepath_exists(filepath):
    :param filepath: Path to the file or folder
    :return: True if the file or folder exists, False otherwise
    """
+
+   verbose_output(f"{BackgroundColors.YELLOW}Verifying if the file or folder exists at the path: {BackgroundColors.CYAN}{filepath}{Style.RESET_ALL}") # Output the verbose message
 
    return os.path.exists(filepath) # Return True if the file or folder exists, False otherwise
 
