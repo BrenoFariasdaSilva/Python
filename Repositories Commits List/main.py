@@ -95,10 +95,10 @@ def write_commits_to_csv(commits_list, output_csv):
    add_header_to_csv(output_csv) # Add a header to the CSV file
 
    with open(output_csv, mode="a", newline="") as csv_file: # Open the CSV file in append mode
-      fieldnames = ["Commit Date", "Commit Message"] # CSV header
+      fieldnames = ["Commit Number", "Commit Hash", "Commit Date", "Commit Message"] # CSV header
       writer = csv.DictWriter(csv_file, fieldnames=fieldnames) # Create a CSV writer
       for commit in commits_list: # Iterate over the commits list
-         writer.writerow({"Commit Date": commit[0], "Commit Message": commit[1]})
+         writer.writerow({"Commit Number": commit[0], "Commit Hash": commit[1], "Commit Date": commit[2], "Commit Message": commit[3]})
 
 def main():
    """
