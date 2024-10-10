@@ -85,9 +85,9 @@ def add_header_to_csv(output_csv):
       writer = csv.DictWriter(csv_file, fieldnames=fieldnames) # Create a CSV writer
       writer.writeheader() # Write the header to the CSV
 
-def generate_commit_csv(commits_list, output_csv):
+def write_commits_to_csv(commits_list, output_csv):
    """
-   Generates a CSV file with commit dates and messages between specific tags in a GitHub repository.
+   Writes the commits list to a CSV file.
 
    :param commits_list: List of tuples with commit dates and messages
    :param output_csv: The output CSV file path
@@ -97,10 +97,10 @@ def generate_commit_csv(commits_list, output_csv):
    add_header_to_csv(output_csv) # Add a header to the CSV file
 
    with open(output_csv, mode="a", newline="") as csv_file: # Open the CSV file in append mode
-      fieldnames = ["Commit Date", "Commit Message"] # CSV header
+      fieldnames = ["Commit Number", "Commit Hash", "Commit Date", "Commit Message"] # CSV header
       writer = csv.DictWriter(csv_file, fieldnames=fieldnames) # Create a CSV writer
       for commit in commits_list: # Iterate over the commits list
-         writer.writerow({"Commit Date": commit[0], "Commit Message": commit[1]})
+         writer.writerow({"Commit Number": commit[0], "Commit Hash": commit[1], "Commit Date": commit[2], "Commit Message": commit[3]})
 
 def main():
    """
@@ -120,7 +120,7 @@ def main():
    commits_tuple_list = get_commits_information(repo_url, from_tag, to_tag) # Get the commits information
    create_directory(FULL_OUTPUT_DIRECTORY_PATH, RELATIVE_OUTPUT_DIRECTORY_PATH) # Create the output directory
    output_csv = f"{RELATIVE_OUTPUT_DIRECTORY_PATH}{repo_name}-{from_tag}_to_{to_tag}-commits_list.csv" # The output CSV file path
-   generate_commit_csv(commits_tuple_list, output_csv) # Generate the CSV file
+   write_commits_to_csv(commits_tuple_list, output_csv) # Generate the CSV file
 
    print(f"{BackgroundColors.CYAN}Program finished.{Style.RESET_ALL}")
 
