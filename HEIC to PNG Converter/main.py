@@ -134,6 +134,11 @@ def main():
    create_directory(FULL_OUTPUT_FOLDER, RELATIVE_OUTPUT_FOLDER) # Create the output directory
    converted_files_count = convert_heic_to_specified_format(FULL_INPUT_FOLDER, FULL_OUTPUT_FOLDER, OUTPUT_FILE_EXTENSION) # Convert the HEIC files to the specified
 
+   if converted_files_count == 0: # If no files were converted
+      print(f"{BackgroundColors.RED}No HEIC files found in the folder: {BackgroundColors.CYAN}{RELATIVE_INPUT_FOLDER}{Style.RESET_ALL}")
+   else: # If files were converted
+      print(f"{BackgroundColors.GREEN}Successfully converted {converted_files_count} HEIC file(s) to {OUTPUT_FILE_EXTENSION.lower()} format.{Style.RESET_ALL}")
+
    print(f"\n{BackgroundColors.BOLD}{BackgroundColors.GREEN}Program finished.{Style.RESET_ALL}") # Output the end of the program message
 
    atexit.register(play_sound) # Register the function to play a sound when the program finishes
