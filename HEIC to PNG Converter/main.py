@@ -1,7 +1,9 @@
 import atexit # For playing a sound when the program finishes
 import os # For running a command in the terminal
 import platform # For getting the operating system name
+import pyheif # For reading HEIC files
 from colorama import Style # For coloring the terminal
+from PIL import Image # For reading and writing images
 
 # Macros:
 class BackgroundColors: # Colors for the terminal
@@ -15,6 +17,7 @@ class BackgroundColors: # Colors for the terminal
 
 # Execution Constants:
 VERBOSE = False # Set to True to output verbose messages
+OUTPUT_FILE_EXTENSION = ".png" # The output file extension to save as
 
 # Path Constants:
 START_PATH = os.getcwd() # The path where the program is executed
@@ -71,6 +74,38 @@ def create_directory(full_directory_name, relative_directory_name):
    except OSError: # If the directory cannot be created
       print(f"{BackgroundColors.GREEN}The creation of the {BackgroundColors.CYAN}{relative_directory_name}{BackgroundColors.GREEN} directory failed.{Style.RESET_ALL}")
 
+def convert_heic_to_specified_format(input_folder=FULL_INPUT_FOLDER, output_folder=FULL_OUTPUT_FOLDER, file_extension=OUTPUT_FILE_EXTENSION):
+   """
+   Converts HEIC files to the specified target format (e.g., PNG, JPEG).
+
+   :param input_folder: The folder containing the HEIC files.
+   :param output_folder: The folder to save the converted files.
+   :param target_format: The target image format (e.g., "PNG", "JPEG").
+   :return: Number of files converted.
+   """
+
+   verbose_output(f"{BackgroundColors.YELLOW}Converting HEIC files to PNG files in the folder: {BackgroundColors.CYAN}{input_folder}{Style.RESET_ALL}") # Output the verbose message
+
+   file_count = 0 # The number of files converted
+
+   for filename in os.listdir(input_folder): # For each file in the input folder
+      if filename.lower().endswith(".heic"): # If the file is a HEIC file
+         file_count += 1 # Increment the file count
+         print(f"{BackgroundColors.GREEN}{file_count:.02d} - Converting {BackgroundColors.CYAN}{filename}{BackgroundColors.GREEN} to a PNG file...{Style.RESET_ALL}") # Output the message
+         heif_file = pyheif.read(os.path.join(input_folder, filename)) # Read the HEIC file
+         image = Image.frombytes( # Create an image from the HEIC file
+            heif_file.mode, # The mode of the image
+            heif_file.size, # The size of the image
+            heif_file.data, # The data of the image
+            "raw", # The raw mode
+            heif_file.mode, # The mode of the image
+            heif_file.stride, # The stride of the image
+         )
+         output_path = os.path.join(output_folder, f"{os.path.splitext(filename)[0]}.{file_extension.lower()}") # The path to save the converted file
+         image.save(output_path, file_extension.lower()) # Save the image in the specified format
+
+   return file_count # Return the number of files converted
+
 def play_sound():
    """
    Plays a sound when the program finishes.
@@ -97,6 +132,7 @@ def main():
 
    create_directory(FULL_INPUT_FOLDER, RELATIVE_INPUT_FOLDER) # Create the input directory
    create_directory(FULL_OUTPUT_FOLDER, RELATIVE_OUTPUT_FOLDER) # Create the output directory
+   converted_files_count = convert_heic_to_specified_format(FULL_INPUT_FOLDER, FULL_OUTPUT_FOLDER, OUTPUT_FILE_EXTENSION) # Convert the HEIC files to the specified
 
    print(f"\n{BackgroundColors.BOLD}{BackgroundColors.GREEN}Program finished.{Style.RESET_ALL}") # Output the end of the program message
 
