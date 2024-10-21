@@ -16,6 +16,13 @@ class BackgroundColors: # Colors for the terminal
 # Execution Constants:
 VERBOSE = False # Set to True to output verbose messages
 
+# Path Constants:
+START_PATH = os.getcwd() # The path where the program is executed
+RELATIVE_INPUT_FOLDER = "Inputs" # The relative path to the input folder
+RELATIVE_OUTPUT_FOLDER = "Outputs" # The relative path to the output folder
+FULL_INPUT_FOLDER = os.path.join(START_PATH, RELATIVE_INPUT_FOLDER) # The full path to the input folder
+FULL_OUTPUT_FOLDER = os.path.join(START_PATH, RELATIVE_OUTPUT_FOLDER) # The full path to the output folder
+
 # Sound Constants:
 SOUND_COMMANDS = {"Darwin": "afplay", "Linux": "aplay", "Windows": "start"} # The commands to play a sound for each operating system
 SOUND_FILE = "./.assets/Sounds/NotificationSound.wav" # The path to the sound file
@@ -46,6 +53,24 @@ def verify_filepath_exists(filepath):
 
    return os.path.exists(filepath) # Return True if the file or folder exists, False otherwise
 
+def create_directory(full_directory_name, relative_directory_name):
+   """
+   Creates a directory.
+
+   :param full_directory_name: Name of the directory to be created.
+   :param relative_directory_name: Relative name of the directory to be created that will be shown in the terminal.
+   :return: None
+   """
+
+   verbose_output(true_string=f"{BackgroundColors.GREEN}Creating the {BackgroundColors.CYAN}{relative_directory_name}{BackgroundColors.GREEN} directory...{Style.RESET_ALL}")
+
+   if os.path.isdir(full_directory_name): # Verify if the directory already exists
+      return # Return if the directory already exists
+   try: # Try to create the directory
+      os.makedirs(full_directory_name) # Create the directory
+   except OSError: # If the directory cannot be created
+      print(f"{BackgroundColors.GREEN}The creation of the {BackgroundColors.CYAN}{relative_directory_name}{BackgroundColors.GREEN} directory failed.{Style.RESET_ALL}")
+
 def play_sound():
    """
    Plays a sound when the program finishes.
@@ -69,6 +94,9 @@ def main():
    """
 
    print(f"{BackgroundColors.CLEAR_TERMINAL}{BackgroundColors.BOLD}{BackgroundColors.GREEN}Welcome to the {BackgroundColors.CLEAR_TERMINAL}HEIC to PNG Converter{BackgroundColors.GREEN}!{Style.RESET_ALL}", end="\n\n") # Output the welcome message
+
+   create_directory(FULL_INPUT_FOLDER, RELATIVE_INPUT_FOLDER) # Create the input directory
+   create_directory(FULL_OUTPUT_FOLDER, RELATIVE_OUTPUT_FOLDER) # Create the output directory
 
    print(f"\n{BackgroundColors.BOLD}{BackgroundColors.GREEN}Program finished.{Style.RESET_ALL}") # Output the end of the program message
 
