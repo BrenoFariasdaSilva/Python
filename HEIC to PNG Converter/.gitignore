@@ -24,11 +24,34 @@ desktop.ini
 */data/
 */dataset/
 */results/
+*/Input/
+*/input/
+*/Inputs/
+*/inputs/
+*/Output/
+*/output/
+*/Outputs/
+*/outputs/
+*/Temp/
 
 # Ignore the Data Files
 *.csv
 *.xlsx
 .txt
+
+# Ignore any photo fileformats
+*.jpg
+*.jpeg
+*.png
+*.gif
+*.bmp
+*.tiff
+*.tif
+*.svg
+*.webp
+*.heic
+*.heif
+*.HEIC
 
 # Environments
 .env
