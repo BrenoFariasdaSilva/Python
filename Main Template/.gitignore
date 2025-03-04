@@ -2,6 +2,7 @@
 __pycache__/
 *.py[cod]
 *$py.class
+
 # Ignore the MacOS DS_Store Files
 .DS_Store
 
