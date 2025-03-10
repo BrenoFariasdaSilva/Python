@@ -1,7 +1,10 @@
 import atexit # For playing a sound when the program finishes
+import ffmpeg # For decoding audio files
 import os # For running a command in the terminal
 import platform # For getting the operating system name
 from colorama import Style # For coloring the terminal
+from mutagen import File # For reading audio file metadata
+from tqdm import tqdm # For creating a progress bar
 
 # Macros:
 class BackgroundColors: # Colors for the terminal
@@ -61,6 +64,25 @@ def play_sound():
    else: # If the sound file does not exist
       print(f"{BackgroundColors.RED}Sound file {BackgroundColors.CYAN}{SOUND_FILE}{BackgroundColors.RED} not found. Make sure the file exists.{Style.RESET_ALL}")
 
+def find_audio_files(directory):
+   """
+   Recursively find all audio files (any format supported by Mutagen) in the given directory.
+   
+   :param directory: The directory to search for audio files.
+   :return: A list of audio files found in the directory.
+   """
+
+   verbose_output(f"{BackgroundColors.YELLOW}Finding audio files in the directory: {BackgroundColors.CYAN}{directory}{Style.RESET_ALL}") # Output the verbose message
+
+   audio_files = [] # Initialize an empty list to store audio files
+
+   for root, _, files in os.walk(directory): # Recursively walk through the directory
+      for file in files: # Iterate over the files in the current directory
+         if file.lower().endswith((".mp3", ".flac", ".ogg", ".aac", ".wav", ".m4a", ".wma")): # Check if the file is an audio file
+            audio_files.append(os.path.join(root, file)) # Add the audio file to the list
+
+   return audio_files # Return the list of audio files
+
 def main():
    """
    Main function.
@@ -70,6 +92,13 @@ def main():
 
    print(f"{BackgroundColors.CLEAR_TERMINAL}{BackgroundColors.BOLD}{BackgroundColors.GREEN}Welcome to the {BackgroundColors.CYAN}Corrupted Audio Files Checker{BackgroundColors.GREEN}!{Style.RESET_ALL}", end="\n\n") # Output the Welcome message
 
+   directory = os.getcwd() # Get the current working directory
+   audio_files = find_audio_files(directory) # Find all audio files in the current directory
+
+   if not audio_files: # If no audio files are found
+      print(f"{BackgroundColors.RED}No audio files found in the directory: {BackgroundColors.CYAN}{directory}{Style.RESET_ALL}")
+      return # Exit the program
+   
    print(f"\n{BackgroundColors.BOLD}{BackgroundColors.GREEN}Program finished.{Style.RESET_ALL}") # Output the end of the program message
 
    atexit.register(play_sound) # Register the function to play a sound when the program finishes
