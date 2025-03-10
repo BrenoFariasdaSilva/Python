@@ -83,6 +83,40 @@ def find_audio_files(directory):
 
    return audio_files # Return the list of audio files
 
+def check_audio_integrity(audio_files):
+   """
+   Check each audio file for corruption by verifying metadata, length, file size, bitrate, and attempting playback.
+   
+   :param audio_files: A list of audio files to check.
+   :return: A list of corrupted audio files.
+   """
+
+   corrupted_files = [] # Initialize an empty list to store corrupted files
+   
+   for file in tqdm(audio_files, desc=f"{BackgroundColors.GREEN}Searching for corrupted audio files{Style.RESET_ALL}", unit="file"): # Iterate over the audio files with a progress bar
+      try: # Try to check the integrity of the audio file
+         if os.path.getsize(file) == 0: # Check if the file size is zero
+            raise ValueError(f"File size is zero: {file}") # Raise an exception if the file size is zero
+         
+         audio = File(file) # Use Mutagen's File method, which automatically detects the audio format
+         
+         if audio.info.length <= 0: # Check the length of the audio file
+            raise ValueError(f"Invalid audio length: {file}") # Raise an exception if the audio length is invalid
+         
+         if audio.info.bitrate <= 0: # Check bitrate (only available in certain formats, such as MP3, FLAC, etc.)
+            raise ValueError(f"Invalid bitrate: {file}") # Raise an exception if the bitrate is invalid
+
+         try: # Attempt to decode the file using ffmpeg
+            ffmpeg.input(file).output("-", format="null").run(quiet=True) # Use ffmpeg to decode the audio file
+         except ffmpeg.Error as e: # If ffmpeg raises an error
+            raise ValueError(f"Corrupted audio file: {file}") from e # Raise an exception indicating a corrupted audio file
+         
+      except Exception as e: # If an exception is raised
+         print(f"{BackgroundColors.RED}Corrupted audio file detected: {BackgroundColors.CYAN}{file}{Style.RESET_ALL}") # Output the corrupted audio file
+         corrupted_files.append(file) # Add the corrupted file to the list
+   
+   return corrupted_files # Return the list of corrupted files
+
 def main():
    """
    Main function.
@@ -99,6 +133,15 @@ def main():
       print(f"{BackgroundColors.RED}No audio files found in the directory: {BackgroundColors.CYAN}{directory}{Style.RESET_ALL}")
       return # Exit the program
    
+   corrupted_files = check_audio_integrity(audio_files) # Check the integrity of the audio files
+   
+   if corrupted_files: # If there are corrupted audio files
+      print(f"\n{BackgroundColors.RED}Corrupted audio files detected:{Style.RESET_ALL}")
+      for file in corrupted_files: # Output the corrupted audio files
+         print(file) # Output the corrupted audio file
+   else: # If there are no corrupted audio files
+      print(f"\n{BackgroundColors.GREEN}No corrupted audio files detected.{Style.RESET_ALL}")
+
    print(f"\n{BackgroundColors.BOLD}{BackgroundColors.GREEN}Program finished.{Style.RESET_ALL}") # Output the end of the program message
 
    atexit.register(play_sound) # Register the function to play a sound when the program finishes
