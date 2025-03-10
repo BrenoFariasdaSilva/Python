@@ -1,21 +1,31 @@
-# Name of the virtual environment directory
+# Variables
 VENV := venv
-# Python command to use
-PYTHON := python3
+PYTHON := $(VENV)/bin/python3
+PIP := $(VENV)/bin/pip
 
-.PHONY: all venv dependencies run
+# Main target that runs the scripts
+all: run
 
-all: venv dependencies run
+# Main Scripts:
+run: $(VENV)
+	time $(PYTHON) ./main.py
 
-venv: $(VENV)/bin/activate
+# Setup Virtual Environment and Install Dependencies
+$(VENV):
+	python3 -m venv $(VENV)
+	$(PIP) install -r requirements.txt
 
-$(VENV)/bin/activate:
-	$(PYTHON) -m venv $(VENV)
-	$(VENV)/bin/pip install --upgrade pip
-	touch $(VENV)/bin/activate
+# Install the project dependencies
+dependencies: $(VENV)
 
-run:
-	clear; time $(VENV)/bin/python ./main.py
+# Generate requirements.txt from the current venv
+generate_requirements: $(VENV)
+	$(PIP) freeze > requirements.txt
 
-dependencies:
-	$(VENV)/bin/pip install colorama
+# Utility rule for cleaning the project
+clean:
+	rm -rf $(VENV)
+	find . -type f -name '*.pyc' -delete
+	find . -type d -name '__pycache__' -delete
+
+.PHONY: run clean dependencies generate_requirements
