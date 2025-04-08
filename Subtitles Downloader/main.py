@@ -127,20 +127,23 @@ def get_directories():
 
 def download_subtitles(directory):
    """
-   Download subtitles for the specified directory.
+   Download subtitles for the specified directory in multiple languages.
 
    :param directory: The directory to download subtitles for
    :return: None
    """
 
-   verbose_output(f"{BackgroundColors.GREEN}Downloading subtitles for {BackgroundColors.CYAN}{directory}{BackgroundColors.GREEN}...{Style.RESET_ALL}") # Output the verbose message
+   languages = ["pt-BR", "eng"] # Add any additional language codes here
 
-   command = f'subliminal download -l pt-BR -m 50 "{directory}"' # Download subtitles for the directory
-
-   try: # Try to run the command in the terminal
-      subprocess.run(command, shell=True, check=True) # Run the command in the terminal
-   except subprocess.CalledProcessError: # If the process fails
-      print(f"{BackgroundColors.RED}Failed to download subtitles for {directory}{Style.RESET_ALL}")
+   for lang in languages: # Loop through the languages
+      print(f"{BackgroundColors.GREEN}Downloading subtitles in {BackgroundColors.YELLOW}{lang}{BackgroundColors.GREEN} for {BackgroundColors.CYAN}{directory}{BackgroundColors.GREEN}...{Style.RESET_ALL}")
+      
+      command = f'subliminal download -l {lang} -m 50 "{directory}"' # The command to download subtitles using subliminal
+      
+      try: # Try to run the command in the terminal
+         subprocess.run(command, shell=True, check=True) # Run the command in the terminal
+      except subprocess.CalledProcessError: # If the process fails
+         print(f"{BackgroundColors.RED}Failed to download subtitles for {directory}{Style.RESET_ALL}")
 
 def process_directories(dirs):
    """
