@@ -384,7 +384,7 @@ def plot_copy_speed(file_speeds, average_speed):
 
    ensure_output_directory() # Ensure the output directory exists
 
-   timestamp_str = datetime.datetime.now().strftime("%Y.%m.%d-%H:%M") # Generate a timestamp string for the filename
+   timestamp_str = datetime.datetime.now().strftime("%Y.%m.%d - %HH-%MM-%SS") # Generate a timestamp string for the filename
    filename = f"./Output/{timestamp_str}.png" # Filename for the plot
 
    timestamps, speeds = zip(*file_speeds) # Unzip the file speeds into timestamps and speeds
