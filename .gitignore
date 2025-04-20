@@ -144,6 +144,7 @@ Non\ Repetitive\ Combinations/non_repetitive_combinations.txt
 # System Files
 .DS_Store
 Thumbs.db
+Icon? # macOS Icon files
 
 # Ignore the Windows .Desktop Files
 desktop.ini
