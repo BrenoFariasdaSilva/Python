@@ -412,6 +412,25 @@ def generate_copy_speed_plot(file_speeds, average_speed):
 
    return fig # Return the figure object
 
+def save_copy_speed_plot(fig):
+   """
+   Saves a given matplotlib Figure to ./Output with a timestamped filename.
+
+   :param fig: matplotlib.figure.Figure to save
+   """
+
+   verbose_output(f"{BackgroundColors.GREEN}Saving the plot to {BackgroundColors.CYAN}./Output{Style.RESET_ALL}") # Output the verbose message
+
+   if fig is None: # If there is no figure to save
+      print(f"{BackgroundColors.RED}No figure to save.{Style.RESET_ALL}") # Output the error message
+      return # Return
+
+   ensure_output_directory() # Ensure the output directory exists
+   timestamp_str = datetime.datetime.now().strftime("%Y.%m.%d - %HH-%MM-%SS") # Generate a timestamp string
+   filename = f"./Output/{timestamp_str}.png" # Create a filename with the timestamp
+   fig.savefig(filename) # Save the figure to the filename
+   print(f"{BackgroundColors.GREEN}Plot saved as: {filename}{Style.RESET_ALL}") # Output the success message
+
 def play_sound():
    """
    Plays a sound when the program finishes.
