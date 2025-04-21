@@ -381,14 +381,13 @@ def ensure_output_directory(path="./Output"):
 
    os.makedirs(path, exist_ok=True) # Create the output directory if it doesn't exist
 
-def plot_copy_speed(file_speeds, average_speed):
+def generate_copy_speed_plot(file_speeds, average_speed): 
    """
-   Plots the file copy speed over time, shows the average speed line,
-   and saves the plot to ./Output with timestamped filename.
+   Generates and returns a matplotlib Figure showing file copy speed over time.
 
-   :param file_speeds: List of tuples containing (timestamp_since_start, speed_MBps)
-   :param average_speed: Average speed of the file copy in MB/s
-   :return: None
+   :param file_speeds: List of tuples containing (timestamp_since_start, speed_Bps)
+   :param average_speed: Average speed of the file copy in B/s
+   :return: matplotlib.figure.Figure or None if no data
    """
 
    verbose_output(f"{BackgroundColors.GREEN}Plotting the file copy speed over time{Style.RESET_ALL}") # Output the verbose message
@@ -397,26 +396,21 @@ def plot_copy_speed(file_speeds, average_speed):
       print(f"{BackgroundColors.RED}No data to plot copy speed.{Style.RESET_ALL}") # Output the error message
       return # Return
 
-   ensure_output_directory() # Ensure the output directory exists
-
-   timestamp_str = datetime.datetime.now().strftime("%Y.%m.%d - %HH-%MM-%SS") # Generate a timestamp string for the filename
-   filename = f"./Output/{timestamp_str}.png" # Filename for the plot
-
    timestamps, speeds = zip(*file_speeds) # Unzip the file speeds into timestamps and speeds
 
-   plt.figure(figsize=(10, 5)) # Create a new figure for the plot
-   plt.plot(timestamps, speeds, label="Copy Speed (MB/s)") # Plot the copy speed
-   plt.axhline(average_speed, color="red", linestyle="--", label=f"Average: {average_speed:.2f} MB/s") # Plot the average speed line
-   plt.xlabel("Time since start (s)") # X-axis label
-   plt.ylabel("Speed (MB/s)") # Y-axis label
-   plt.title("File Copy Speed Over Time") # Plot title
-   plt.legend() # Show the legend
-   plt.grid(True) # Show grid lines
-   plt.tight_layout() # Adjust layout to fit the plot
+   formatted_average_speed = format_size(average_speed) # Format the average speed into a human-readable string
 
-   plt.savefig(filename) # Save the plot to the output directory
-   print(f"{BackgroundColors.GREEN}Plot saved as: {filename}{Style.RESET_ALL}") # Output the filename
-   plt.show() # Show the plot
+   fig, ax = plt.subplots(figsize=(10, 5)) # Create a figure and axis for the plot
+   ax.plot(timestamps, speeds, label="Copy Speed") # Plot the copy speed
+   ax.axhline(average_speed, color="red", linestyle="--", label=f"Average: {formatted_average_speed}/s") # Plot the average speed using human-readable format
+   ax.set_xlabel("Time since start (s)") # Set the x-axis label
+   ax.set_ylabel("Speed") # Set the y-axis label
+   ax.set_title("File Copy Speed Over Time") # Set the title of the plot
+   ax.legend() # Add a legend to the plot
+   ax.grid(True) # Add a grid to the plot
+   fig.tight_layout() # Adjust the layout of the plot
+
+   return fig # Return the figure object
 
 def play_sound():
    """
