@@ -31,9 +31,9 @@ DST_DIR = r"E:\My Files\Backup" # Destination directory to copy files to
 
 # List of directories to ignore (add any other directories here)
 IGNORE_DIRS = {
-   "Linux": [".boxsync", "venv", ".git", "node_modules"], # Linux Ignore directories
-   "Windows": [".boxsync", "GitHub", "TeraBox", "venv", ".git", "node_modules"], # Windows Ignore directories
-   "Darwin": [".boxsync", "venv", ".git", "node_modules"] # MacOS Ignore directories
+   "Linux": [".boxsync", "TeraBox/Downloads/", "venv", "node_modules"], # Linux Ignore directories
+   "Windows": [".boxsync", "GitHub", "TeraBox/Downloads/", "venv", "node_modules"], # Windows Ignore directories
+   "Darwin": [".boxsync", "TeraBox/Downloads/", "venv", "node_modules"] # MacOS Ignore directories
 }
 
 def verbose_output(true_string="", false_string=""):
