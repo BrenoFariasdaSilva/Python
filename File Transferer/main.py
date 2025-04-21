@@ -350,9 +350,9 @@ def print_summary(total_time, total_bytes, avg_speed):
    """
 
    print(f"\n{BackgroundColors.BOLD}{BackgroundColors.GREEN}Summary:{Style.RESET_ALL}")
-   print(f"{BackgroundColors.CYAN}Total time:{Style.RESET_ALL} {total_time:.2f} minutes")
-   print(f"{BackgroundColors.CYAN}Total data:{Style.RESET_ALL} {total_bytes / (1024 * 1024):.2f} MB")
-   print(f"{BackgroundColors.CYAN}Average speed:{Style.RESET_ALL} {avg_speed:.2f} MB/s")
+   print(f"{BackgroundColors.GREEN}- Total Time:{BackgroundColors.CYAN} {format_duration(total_time)}{Style.RESET_ALL}") # Output the total time taken for the copy operation
+   print(f"{BackgroundColors.GREEN}- Total Data:{Style.RESET_ALL} {format_size(total_bytes)}") # Output the total data copied
+   print(f"{BackgroundColors.CYAN}- Average Write Speed: {BackgroundColors.GREEN}{avg_speed:.2f} MB/s{Style.RESET_ALL}") # Output the average speed of the copy operation
 
 def ensure_output_directory(path="./Output"):
    """
