@@ -112,8 +112,7 @@ def get_platform_ignore_dirs():
 
 def get_files_to_copy(src_dir):
    """
-   Get a list of all files in the source directory, excluding ignored directories.
-
+   Get a list of all files in the source directory, excluding ignored directories and subdirectories.
    :param src_dir: Source directory to copy files from
    :return: List of files to copy
    """
@@ -121,13 +120,15 @@ def get_files_to_copy(src_dir):
    verbose_output(f"{BackgroundColors.GREEN}Getting all files to copy from the source directory: {BackgroundColors.CYAN}{src_dir}{Style.RESET_ALL}") # Output the verbose message
 
    all_files = [] # List to store all files to copy
-   ignore_dirs_lower = [name.lower() for name in get_platform_ignore_dirs()] # Get the ignored directories for the current platform
-
+   ignore_paths = [os.path.normpath(os.path.join(src_dir, path)) for path in get_platform_ignore_dirs()] # Get the ignored directories for the current platform
+   
    for root, dirs, files in os.walk(src_dir): # Walk through the source directory
-      parts = [part.lower() for part in root.split(os.sep)] # Split the path into parts and convert to lowercase
-      if any(ignored in parts for ignored in ignore_dirs_lower): # Verify if any ignored directory is in the path parts
+      root_normalized = os.path.normpath(root) # Normalize the path of the current directory
+      
+      if any(root_normalized.startswith(ignore_dir) for ignore_dir in ignore_paths): # Verify if the current directory is in the ignored directories
+         verbose_output(f"{BackgroundColors.YELLOW}Skipping ignored directory: {BackgroundColors.CYAN}{root}{Style.RESET_ALL}")
          continue # Skip this directory if it contains an ignored directory
-
+      
       for file in files: # Iterate through all files in the directory
          all_files.append(os.path.join(root, file)) # Append the full path of the file to the list
 
