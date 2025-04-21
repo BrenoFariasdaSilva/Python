@@ -113,26 +113,31 @@ def get_platform_ignore_dirs():
 def get_files_to_copy(src_dir):
    """
    Get a list of all files in the source directory, excluding ignored directories and subdirectories.
+   Also includes empty directories to be recreated at the destination.
+
    :param src_dir: Source directory to copy files from
-   :return: List of files to copy
+   :return: List of files and empty directories to copy
    """
 
    verbose_output(f"{BackgroundColors.GREEN}Getting all files to copy from the source directory: {BackgroundColors.CYAN}{src_dir}{Style.RESET_ALL}") # Output the verbose message
 
-   all_files = [] # List to store all files to copy
+   all_paths = [] # List to store all file and empty directory paths
    ignore_paths = [os.path.normpath(os.path.join(src_dir, path)) for path in get_platform_ignore_dirs()] # Get the ignored directories for the current platform
    
    for root, dirs, files in os.walk(src_dir): # Walk through the source directory
       root_normalized = os.path.normpath(root) # Normalize the path of the current directory
-      
+
       if any(root_normalized.startswith(ignore_dir) for ignore_dir in ignore_paths): # Verify if the current directory is in the ignored directories
          verbose_output(f"{BackgroundColors.YELLOW}Skipping ignored directory: {BackgroundColors.CYAN}{root}{Style.RESET_ALL}")
          continue # Skip this directory if it contains an ignored directory
       
-      for file in files: # Iterate through all files in the directory
-         all_files.append(os.path.join(root, file)) # Append the full path of the file to the list
+      if not files and not dirs: # If the directory is empty (no files and no subdirectories)
+         all_paths.append(root_normalized) # Add the empty directory to the list
 
-   return all_files # Return the list of all files to copy
+      for file in files: # Iterate through all files in the directory
+         all_paths.append(os.path.join(root, file)) # Get the full path of the file and add it to the list
+
+   return all_paths # Return the list of all file and empty directory paths
 
 def get_file_size(file_path):
    """
