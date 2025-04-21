@@ -431,6 +431,21 @@ def save_copy_speed_plot(fig):
    fig.savefig(filename) # Save the figure to the filename
    print(f"{BackgroundColors.GREEN}Plot saved as: {filename}{Style.RESET_ALL}") # Output the success message
 
+def show_copy_speed_plot(fig):
+   """
+   Displays a given matplotlib Figure using plt.show().
+
+   :param fig: matplotlib.figure.Figure to display
+   """
+
+   verbose_output(f"{BackgroundColors.GREEN}Displaying the plot{Style.RESET_ALL}") # Output the verbose message
+
+   if fig is None: # If there is no figure to display
+      print(f"{BackgroundColors.RED}No figure to display.{Style.RESET_ALL}") # Output the error message
+      return # Return
+
+   plt.show() # Display the figure
+
 def play_sound():
    """
    Plays a sound when the program finishes.
