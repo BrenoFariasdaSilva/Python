@@ -473,7 +473,10 @@ def main():
 
    total_time, total_bytes, avg_speed, speeds = copy_and_track_files(SRC_DIR, DST_DIR) # Copy files and track the speed
    print_summary(total_time, total_bytes, avg_speed) # Print the summary of the copy operation
-   plot_copy_speed(speeds, avg_speed) # Plot the copy speed over time
+
+   fig = generate_copy_speed_plot(speeds, avg_speed) # Generate the copy speed plot
+   save_copy_speed_plot(fig) # Save the copy speed plot if RUN_FUNCTIONS["Save Plot"] is True
+   show_copy_speed_plot(fig) # Show the copy speed plot if RUN_FUNCTIONS["Plotting"] is True
 
    print(f"\n{BackgroundColors.BOLD}{BackgroundColors.GREEN}Program finished.{Style.RESET_ALL}")
 
