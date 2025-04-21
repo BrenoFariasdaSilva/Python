@@ -63,11 +63,11 @@ def validate_inputs(src_dir=SRC_DIR, dst_dir=DST_DIR):
 
    valid_inputs = True # Initialize valid inputs to True
 
-   if not verify_filepath_exists(src_dir): # Check if the source directory exists
+   if not verify_filepath_exists(src_dir): # Verify if the source directory exists
       print(f"{BackgroundColors.RED}Source directory does not exist: {src_dir}{Style.RESET_ALL}") # Output the error message
       valid_inputs = False # Set valid inputs to False
    
-   if not verify_filepath_exists(dst_dir): # Check if the destination directory exists
+   if not verify_filepath_exists(dst_dir): # Verify if the destination directory exists
       print(f"{BackgroundColors.YELLOW}Destination directory does not exist: {dst_dir}{Style.RESET_ALL}")
       try: # Try to create the destination directory
          os.makedirs(dst_dir, exist_ok=True) # Create the destination directory if it doesn't exist
@@ -76,11 +76,11 @@ def validate_inputs(src_dir=SRC_DIR, dst_dir=DST_DIR):
          print(f"{BackgroundColors.RED}Error creating destination directory: {e}{Style.RESET_ALL}") # Output the error message
          valid_inputs = False # Set valid inputs to False
       
-   if src_dir == dst_dir: # Check if the source and destination directories are the same
+   if src_dir == dst_dir: # Verify if the source and destination directories are the same
       print(f"{BackgroundColors.RED}Source and destination directories cannot be the same.{Style.RESET_ALL}")
       valid_inputs = False # Set valid inputs to False
    
-   if not src_dir or not dst_dir: # Check if the source and destination directories are empty
+   if not src_dir or not dst_dir: # Verify if the source and destination directories are empty
       print(f"{BackgroundColors.RED}Source and destination directories cannot be empty.{Style.RESET_ALL}")
       valid_inputs = False # Set valid inputs to False
    
@@ -125,7 +125,7 @@ def get_files_to_copy(src_dir):
 
    for root, dirs, files in os.walk(src_dir): # Walk through the source directory
       parts = [part.lower() for part in root.split(os.sep)] # Split the path into parts and convert to lowercase
-      if any(ignored in parts for ignored in ignore_dirs_lower): # Check if any ignored directory is in the path parts
+      if any(ignored in parts for ignored in ignore_dirs_lower): # Verify if any ignored directory is in the path parts
          continue # Skip this directory if it contains an ignored directory
 
       for file in files: # Iterate through all files in the directory
