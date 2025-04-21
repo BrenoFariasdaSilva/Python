@@ -196,7 +196,7 @@ def list_top_level_dirs(base_dir):
    
 def get_dir_size(directory):
    """
-   Returns the total size of a directory, including all its subdirectories and files.
+   Returns the total size of a directory, excluding ignored subdirectories and their files.
 
    :param directory: Path to the directory
    :return: Total size in bytes
@@ -205,13 +205,22 @@ def get_dir_size(directory):
    verbose_output(f"{BackgroundColors.GREEN}Calculating the size of the directory: {BackgroundColors.CYAN}{directory}{Style.RESET_ALL}") # Output the verbose message
 
    total_size = 0 # Initialize total size to 0
+   ignore_paths = [os.path.normpath(os.path.join(SRC_DIR, path)) for path in get_platform_ignore_dirs()] # Get the ignored directories for the current platform
 
    for dirpath, dirnames, filenames in os.walk(directory): # Walk through the directory
+      dirpath_normalized = os.path.normpath(dirpath) # Normalize the path of the current directory
+
+      if any(dirpath_normalized.startswith(ignore_dir) for ignore_dir in ignore_paths): # Verify if the current directory is in the ignored directories
+         continue # Skip this directory if it contains an ignored directory
+
       for filename in filenames: # Iterate through all files in the directory
          filepath = os.path.join(dirpath, filename) # Get the full path of the file
-         total_size += os.path.getsize(filepath) # Add the size of the file to the total size
-   
-   return total_size # Return the total size of the directory in bytes
+         try: # Try to get the size of the file
+            total_size += os.path.getsize(filepath) # Add the size of the file to the total size
+         except OSError: # If an error occurs (e.g., permission denied)
+            verbose_output(f"{BackgroundColors.RED}Could not access file: {filepath}{Style.RESET_ALL}")
+
+   return total_size # Return the total size of the directory
 
 def print_top_level_dirs_to_copy(base_dir):
    """
