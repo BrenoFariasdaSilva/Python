@@ -256,16 +256,16 @@ def print_top_level_dirs_to_copy(base_dir):
 def copy_and_track_files(src_dir, dst_dir):
    """
    Copies all files from src_dir to dst_dir while tracking the copy speed with a progress bar.
-   :return: Tuple containing (total_time_minutes, total_bytes_copied, avg_speed_MBps, file_speeds)
+   :return: Tuple containing (total_time_minutes, total_bytes_copied, avg_speed_Bps, file_speeds)
 
    :param src_dir: Source directory to copy files from
    :param dst_dir: Destination directory to copy files to
-   :return: Tuple containing (total_time_minutes, total_bytes_copied, avg_speed_MBps, file_speeds)
+   :return: Tuple containing (total_time_minutes, total_bytes_copied, avg_speed_Bps, file_speeds)
    """
 
    verbose_output(f"{BackgroundColors.GREEN}Copying files from {BackgroundColors.CYAN}{src_dir}{BackgroundColors.GREEN} to {BackgroundColors.CYAN}{dst_dir}{Style.RESET_ALL}") # Output the verbose message
 
-   file_speeds = [] # (timestamp_since_start, speed_MBps)
+   file_speeds = [] # (timestamp_since_start, speed_Bps)
    total_bytes_copied = 0 # Total bytes copied
    start_time = time.time() # Start time of the copy process
 
@@ -282,7 +282,7 @@ def copy_and_track_files(src_dir, dst_dir):
 
          if top_dir != current_top_dir: # If the top-level directory has changed
             current_top_dir = top_dir # Update the current top-level directory
-            pbar.set_description(f"{BackgroundColors.GREEN}Copying: {BackgroundColors.CYAN}{current_top_dir or "root"}{Style.RESET_ALL}") # Update the progress bar description
+            pbar.set_description(f"{BackgroundColors.GREEN}Copying: {BackgroundColors.CYAN}{current_top_dir or 'root'}{Style.RESET_ALL}") # Update the progress bar description
 
          dst_file = os.path.join(dst_dir, relative_path) # Get the destination file path
 
@@ -294,21 +294,21 @@ def copy_and_track_files(src_dir, dst_dir):
 
             file_end = time.time() # End time of the file copy
             elapsed = file_end - file_start # Elapsed time of the file copy
-            speed_MBps = calculate_speed(file_size, elapsed) # Calculate the speed of the file copy
+            speed_Bps = file_size / elapsed if elapsed > 0 else 0 # Calculate the speed in Bytes/s
 
-            file_speeds.append((file_end - start_time, speed_MBps)) # Append the speed to the list
+            file_speeds.append((file_end - start_time, speed_Bps)) # Append the speed to the list
             total_bytes_copied += file_size # Add the size of the file to the total bytes copied
 
-            pbar.set_postfix({"Speed (MB/s)": f"{speed_MBps:.2f}"}) # Update the progress bar postfix with the speed
+            pbar.set_postfix({"Speed": format_size(speed_Bps) + "/s"}) # Update the progress bar postfix with the formatted speed
             pbar.update(1) # Update the progress bar
          except Exception as e: # If an error occurs (e.g., permission denied)
             print(f"{BackgroundColors.RED}Error copying {src_file}: {e}{Style.RESET_ALL}") # Output the error message
 
    end_time = time.time() # End time of the copy process
    total_time_minutes = (end_time - start_time) / 60 # Total time in minutes
-   avg_speed_MBps = (total_bytes_copied / (1024 * 1024)) / (end_time - start_time) # Average speed in MB/s
+   avg_speed_Bps = total_bytes_copied / (end_time - start_time) # Average speed in Bytes/s
 
-   return total_time_minutes, total_bytes_copied, avg_speed_MBps, file_speeds # Return the total time, total bytes copied, average speed, and file speeds
+   return total_time_minutes, total_bytes_copied, avg_speed_Bps, file_speeds # Return the total time, total bytes copied, average speed, and file speeds
 
 def format_duration(minutes):
    """
