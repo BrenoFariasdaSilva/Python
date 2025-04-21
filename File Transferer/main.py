@@ -33,7 +33,14 @@ DST_DIR = r"E:\My Files\Backup" # Destination directory to copy files to
 IGNORE_DIRS = {
    "Linux": [".boxsync", "TeraBox/Downloads/", "venv", "node_modules"], # Linux Ignore directories
    "Windows": [".boxsync", "GitHub", "TeraBox/Downloads/", "venv", "node_modules"], # Windows Ignore directories
-   "Darwin": [".boxsync", "TeraBox/Downloads/", "venv", "node_modules"] # MacOS Ignore directories
+   "Darwin": [".boxsync", "TeraBox/Downloads/", "venv", "node_modules"], # MacOS Ignore directories
+}
+
+# Functions to run
+RUN_FUNCTIONS = {
+   "Plotting": True, # Set to True to plot the copy speed
+   "Save Plot": False, # Set to True to save the plot
+   "Play Sound": True, # Set to True to play a sound when the program finishes
 }
 
 def verbose_output(true_string="", false_string=""):
@@ -474,13 +481,13 @@ def main():
    total_time, total_bytes, avg_speed, speeds = copy_and_track_files(SRC_DIR, DST_DIR) # Copy files and track the speed
    print_summary(total_time, total_bytes, avg_speed) # Print the summary of the copy operation
 
-   fig = generate_copy_speed_plot(speeds, avg_speed) # Generate the copy speed plot
-   save_copy_speed_plot(fig) # Save the copy speed plot if RUN_FUNCTIONS["Save Plot"] is True
-   show_copy_speed_plot(fig) # Show the copy speed plot if RUN_FUNCTIONS["Plotting"] is True
+   fig = generate_copy_speed_plot(speeds, avg_speed) if RUN_FUNCTIONS["Plotting"] or RUN_FUNCTIONS["Save Plot"] else None # Generate the plot if the RUN_FUNCTIONS["Plotting"] or RUN_FUNCTIONS["Save Plot"] is set to True
+   save_copy_speed_plot(fig) if RUN_FUNCTIONS["Save Plot"] else None # Save the plot if the RUN_FUNCTIONS["Save Plot"] is set to True
+   show_copy_speed_plot(fig) if RUN_FUNCTIONS["Plotting"] else None # Show the plot if the RUN_FUNCTIONS["Plotting"] is set to True
 
    print(f"\n{BackgroundColors.BOLD}{BackgroundColors.GREEN}Program finished.{Style.RESET_ALL}")
 
-   atexit.register(play_sound) # Register the function to play a sound when the program finishes
+   atexit.register(play_sound) if RUN_FUNCTIONS["Play Sound"] else None # Register the play_sound function to be called at exit
 
 if __name__ == "__main__":
    """
