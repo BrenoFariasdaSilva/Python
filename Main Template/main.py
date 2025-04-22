@@ -20,6 +20,11 @@ VERBOSE = False # Set to True to output verbose messages
 SOUND_COMMANDS = {"Darwin": "afplay", "Linux": "aplay", "Windows": "start"} # The commands to play a sound for each operating system
 SOUND_FILE = "./.assets/Sounds/NotificationSound.wav" # The path to the sound file
 
+# RUN_FUNCTIONS:
+RUN_FUNCTIONS = {
+   "Play Sound": True, # Set to True to play a sound when the program finishes
+}
+
 def verbose_output(true_string="", false_string=""):
    """
    Outputs a message if the VERBOSE constant is set to True.
@@ -72,7 +77,7 @@ def main():
 
    print(f"\n{BackgroundColors.BOLD}{BackgroundColors.GREEN}Program finished.{Style.RESET_ALL}") # Output the end of the program message
 
-   atexit.register(play_sound) # Register the function to play a sound when the program finishes
+   atexit.register(play_sound) if RUN_FUNCTIONS["Play Sound"] else None # Register the play_sound function to be called when the program finishes
 
 if __name__ == "__main__":
    """
