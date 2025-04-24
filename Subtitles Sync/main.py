@@ -63,7 +63,7 @@ def get_directories():
    :return: List of directories
    """
 
-   return [d for d in os.listdir(INPUT_DIRECTORY) if os.path.isdir(os.path.join(INPUT_DIRECTORY, d))] # Return a list of directories inside INPUT_DIRECTORY
+   return [os.path.join(INPUT_DIRECTORY, d) for d in os.listdir(INPUT_DIRECTORY) if os.path.isdir(os.path.join(INPUT_DIRECTORY, d))] # Return a list of directories inside INPUT_DIRECTORY
 
 def get_mkv_files(directory):
    """
