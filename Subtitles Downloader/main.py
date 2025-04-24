@@ -2,6 +2,7 @@ import atexit # For playing a sound when the program finishes
 import importlib # For importing a module
 import os # For running a command in the terminal
 import platform # For getting the operating system name
+import shutil # For checking if a command exists in the system path
 import subprocess # Import subprocess for running commands
 import sys # For getting the system path
 from colorama import Style # For coloring the terminal
@@ -135,10 +136,16 @@ def download_subtitles(directory):
 
    languages = ["pt-BR", "eng"] # Add any additional language codes here
 
+   venv_bin = os.path.join(sys.prefix, "bin" if os.name != "nt" else "Scripts") # The path to the virtual environment bin directory
+   subliminal_cmd = os.path.join(venv_bin, "subliminal") # The path to the subliminal command
+
+   if not shutil.which(subliminal_cmd): # If subliminal command does not exist in the virtual environment
+      subliminal_cmd = "subliminal" # fallback to system-wide installation
+
    for lang in languages: # Loop through the languages
       print(f"{BackgroundColors.GREEN}Downloading subtitles in {BackgroundColors.YELLOW}{lang}{BackgroundColors.GREEN} for {BackgroundColors.CYAN}{directory}{BackgroundColors.GREEN}...{Style.RESET_ALL}")
       
-      command = f'subliminal download -l {lang} -m 50 "{directory}"' # The command to download subtitles using subliminal
+      command = f'"{subliminal_cmd}" download -l {lang} -m 50 "{directory}"' # The command to download subtitles using subliminal
       
       try: # Try to run the command in the terminal
          subprocess.run(command, shell=True, check=True) # Run the command in the terminal
@@ -182,9 +189,9 @@ def main():
 
    print(f"{BackgroundColors.CLEAR_TERMINAL}{BackgroundColors.BOLD}{BackgroundColors.GREEN}Welcome to the {BackgroundColors.CYAN}Subtitles Downloader{BackgroundColors.GREEN}!{Style.RESET_ALL}", end="\n\n") # Output the Welcome message
 
-   check_and_install_package() # Check and install the subliminal package
-
    os.makedirs(INPUT_DIRECTORY, exist_ok=True) # Create the input directory if it does
+   
+   check_and_install_package() # Check and install the subliminal package
 
    dirs = get_directories() # Get all directories in the current directory, excluding the specified ones
 
