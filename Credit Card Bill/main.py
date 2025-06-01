@@ -1,5 +1,7 @@
-import pandas as pd # Pandas is used to read and write the CSV files
+import atexit # For registering the play_sound function to be called when the program finishes
 import os # For checking if the file exists
+import pandas as pd # Pandas is used to read and write the CSV files
+import platform # For checking the operating system
 from colorama import Style # For coloring the terminal
 
 # Macros:
@@ -19,10 +21,48 @@ INPUT_CSV_FILE = f"{INPUT_CSV_FOLDER}/{INPUT_CSV_FILENAME}" # The CSV file to be
 OUTPUT_CSV_FILENAME = "debits_sum.csv" # The CSV file to be written
 OUTPUT_CSV_FILE = f"{INPUT_CSV_FOLDER}/{OUTPUT_CSV_FILENAME}" # The CSV file to be written
 
+# Execution Constants:
+VERBOSE = False # Set to True to output verbose messages
+
+# Sound Constants:
+SOUND_COMMANDS = {"Darwin": "afplay", "Linux": "aplay", "Windows": "start"} # The commands to play a sound for each operating system
+SOUND_FILE = "./.assets/Sounds/NotificationSound.wav" # The path to the sound file
+
+# RUN_FUNCTIONS:
+RUN_FUNCTIONS = {
+   "Play Sound": True, # Set to True to play a sound when the program finishes
+}
+
+def verbose_output(true_string="", false_string=""):
+   """
+   Outputs a message if the VERBOSE constant is set to True.
+
+   :param true_string: The string to be outputted if the VERBOSE constant is set to True.
+   :param false_string: The string to be outputted if the VERBOSE constant is set to False.
+   :return: None
+   """
+
+   if VERBOSE and true_string != "": # If the VERBOSE constant is set to True and the true_string is set
+      print(true_string) # Output the true statement string
+   elif false_string != "": # If the false_string is set
+      print(false_string) # Output the false statement string
+
+def verify_filepath_exists(filepath):
+   """
+   Verify if a file or folder exists at the specified path.
+
+   :param filepath: Path to the file or folder
+   :return: True if the file or folder exists, False otherwise
+   """
+
+   verbose_output(f"{BackgroundColors.GREEN}Verifying if the file or folder exists at the path: {BackgroundColors.CYAN}{filepath}{Style.RESET_ALL}") # Output the verbose message
+
+   return os.path.exists(filepath) # Return True if the file or folder exists, False otherwise
+
 def debits_csv_exists(file_name):
 	"""
 	Verify if the debits CSV file exists.
-
+     
 	:param file_name: The name of the file to be verified
 	:return: True if the file exists, False otherwise
 	"""
@@ -34,7 +74,7 @@ def debits_csv_exists(file_name):
 def remove_rows(df):
 	"""
 	Remove specified rows from the DataFrame based on the "Estabelecimento" column.
-
+     
 	:param df: The DataFrame to filter
 	:return: A filtered DataFrame with specified rows removed
 	"""
@@ -48,7 +88,7 @@ def remove_rows(df):
 def reais_to_float(reais):
 	"""
 	Convert a string with the format "R$ 1,00" to a float.
-
+     
 	:param reais: A string with the format "R$ 1,00"
 	:return: A float with the value 1.00
 	"""
@@ -60,7 +100,7 @@ def reais_to_float(reais):
 def get_cash_and_credit_payments(df):
 	"""
 	Get the number of cash and credit payments from the DataFrame.
-
+     
 	:param df: The DataFrame to analyze
 	:return: A tuple containing the number of cash payments and credit payments
 	"""
@@ -75,7 +115,7 @@ def get_cash_and_credit_payments(df):
 def process_dates(df, date_column_name="Data", format="%d/%m/%Y"):
 	"""
 	Process dates in a DataFrame by converting them to datetime objects, sorting, and formatting.
-
+     
 	:param df: The DataFrame to process
 	:param date_column_name: The name of the column containing date strings (default is "Data")
 	:param format: The format of the date strings in the column (default is "%d/%m/%Y")
@@ -96,6 +136,21 @@ def process_dates(df, date_column_name="Data", format="%d/%m/%Y"):
 
 	return sorted_df # Return the sorted DataFrame
 
+def play_sound():
+   """
+   Plays a sound when the program finishes.
+
+   :return: None
+   """
+
+   if verify_filepath_exists(SOUND_FILE): # If the sound file exists
+      if platform.system() in SOUND_COMMANDS: # If the platform.system() is in the SOUND_COMMANDS dictionary
+         os.system(f"{SOUND_COMMANDS[platform.system()]} {SOUND_FILE}") # Play the sound
+      else: # If the platform.system() is not in the SOUND_COMMANDS dictionary
+         print(f"{BackgroundColors.RED}The {BackgroundColors.CYAN}platform.system(){BackgroundColors.RED} is not in the {BackgroundColors.CYAN}SOUND_COMMANDS dictionary{BackgroundColors.RED}. Please add it!{Style.RESET_ALL}")
+   else: # If the sound file does not exist
+      print(f"{BackgroundColors.RED}Sound file {BackgroundColors.CYAN}{SOUND_FILE}{BackgroundColors.RED} not found. Make sure the file exists.{Style.RESET_ALL}")
+
 def main():
 	"""
    Main function.
@@ -105,7 +160,7 @@ def main():
    
 	print(f"{BackgroundColors.CLEAR_TERMINAL}{BackgroundColors.BOLD}{BackgroundColors.GREEN}Welcome to {BackgroundColors.CYAN}Credit Card Bill{BackgroundColors.GREEN}!{Style.RESET_ALL}", end="\n\n") # Print the welcome message
 	
-	verify_bills_folder() # Verify if the input folder exists
+	verify_filepath_exists(f"{INPUT_CSV_FOLDER}") # Verify if the input folder exists
       
 	if not debits_csv_exists(f"{INPUT_CSV_FILE}"): # Verify if the "debits.csv" file exists
 		print(f"{BackgroundColors.RED}The file {BackgroundColors.CYAN}\"{INPUT_CSV_FILE}\"{BackgroundColors.RED} does not exist inside the {BackgroundColors.CYAN}\"{INPUT_CSV_FOLDER}\"{BackgroundColors.RED} folder.{Style.RESET_ALL}")
@@ -131,6 +186,8 @@ def main():
 	print(f"{BackgroundColors.GREEN}Total Sum of the {BackgroundColors.CYAN}\"Valor\"{BackgroundColors.GREEN} column: {BackgroundColors.CYAN}R$ {sorted_df['Valor'].sum():.2f}{BackgroundColors.GREEN}.{Style.RESET_ALL}")
 	print(f"{BackgroundColors.GREEN}Total Purchases: {BackgroundColors.CYAN}{sorted_df.shape[0]}{BackgroundColors.GREEN}. Cash Payments: {BackgroundColors.CYAN}{cash_payments}{BackgroundColors.GREEN}. Credit Payments: {BackgroundColors.CYAN}{credit_payments}{BackgroundColors.GREEN}.{Style.RESET_ALL}", end="\n\n")
 	print(f"{BackgroundColors.BOLD}{BackgroundColors.GREEN}Execution finished.{Style.RESET_ALL}", end="\n\n")
+   
+	atexit.register(play_sound) if RUN_FUNCTIONS["Play Sound"] else None # Register the play_sound function to be called when the program finishes
  
 if __name__ == "__main__":
    """
@@ -140,4 +197,3 @@ if __name__ == "__main__":
    """
 
    main() # Call the main function
-	
