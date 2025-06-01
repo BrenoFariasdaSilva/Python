@@ -114,8 +114,8 @@ def get_cash_and_credit_payments(df):
 
 def process_dates(df, date_column_name="Data", format="%d/%m/%Y"):
 	"""
-	Process dates in a DataFrame by converting them to datetime objects, sorting, and formatting.
-     
+	Process dates in a DataFrame by converting them to datetime objects, sorting by date, and reversing the original order within each date.
+
 	:param df: The DataFrame to process
 	:param date_column_name: The name of the column containing date strings (default is "Data")
 	:param format: The format of the date strings in the column (default is "%d/%m/%Y")
@@ -124,17 +124,14 @@ def process_dates(df, date_column_name="Data", format="%d/%m/%Y"):
 
 	verbose_output(true_string=f"{BackgroundColors.GREEN}Processing dates in the DataFrame.{Style.RESET_ALL}")
 
+	df["OriginalIndex"] = df.index # Preserve original row order
 	df[date_column_name] = pd.to_datetime(df[date_column_name], format=format) # Convert the date strings to datetime objects
 
-	df["SecondsSinceEpoch"] = (df[date_column_name] - pd.Timestamp("01-01-1970")).dt.total_seconds() # Calculate seconds since the Unix epoch for each date
+	sorted_df = df.sort_values(by=[date_column_name, "OriginalIndex"], ascending=[True, False]).copy() # Sort the DataFrame by date ascending and original index descending
+	sorted_df.drop("OriginalIndex", axis=1, inplace=True) # Drop the "OriginalIndex" column as it's no longer needed
+	sorted_df[date_column_name] = sorted_df[date_column_name].dt.strftime("%d/%m/%Y") # Format the date column as "dd/mm/yyyy"
 
-	sorted_df = df.sort_values(by="SecondsSinceEpoch", ascending=True) # Sort the DataFrame by the "SecondsSinceEpoch" column in ascending order
-
-	sorted_df.drop("SecondsSinceEpoch", axis=1, inplace=True) # Remove the "SecondsSinceEpoch" column if it's no longer needed
-
-	sorted_df["Data"] = sorted_df["Data"].dt.strftime("%d/%m/%Y") # Change the data format from "yyyy-mm-dd" to "dd/mm/yyyy"
-
-	return sorted_df # Return the sorted DataFrame
+	return sorted_df # Return the sorted DataFrame with formatted dates
 
 def play_sound():
    """
