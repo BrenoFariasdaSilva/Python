@@ -19,107 +19,125 @@ INPUT_CSV_FILE = f"{INPUT_CSV_FOLDER}/{INPUT_CSV_FILENAME}" # The CSV file to be
 OUTPUT_CSV_FILENAME = "debits_sum.csv" # The CSV file to be written
 OUTPUT_CSV_FILE = f"{INPUT_CSV_FOLDER}/{OUTPUT_CSV_FILENAME}" # The CSV file to be written
 
-# @brief: This function verifies if the /Bills folder exists, if not, it creates it.
-# @param: None
-# @return: None
-def verify_bills_folder():
-	if not os.path.isdir(f"{INPUT_CSV_FOLDER}"):
-		os.mkdir(f"{INPUT_CSV_FOLDER}")
-
-# @brief: This function verifies if the debits csv file exists.
-# @param: file_name is the name of the file to be verified
-# @return: True if the file exists, False otherwise
 def debits_csv_exists(file_name):
-	return os.path.isfile(f"{file_name}")
+	"""
+	Verify if the debits CSV file exists.
 
-# @brief: This function removes specified rows from the DataFrame
-# @param: df is a DataFrame
-# @return: A filtered DataFrame
+	:param file_name: The name of the file to be verified
+	:return: True if the file exists, False otherwise
+	"""
+
+	verbose_output(true_string=f"{BackgroundColors.GREEN}Verifying if the {BackgroundColors.CYAN}\"{file_name}\"{BackgroundColors.GREEN} file exists.{Style.RESET_ALL}")
+
+	return os.path.isfile(f"{file_name}") # Return True if the file exists, False otherwise
+
 def remove_rows(df):
-	# Remove rows where "Estabelecimento" column contains "Pagamentos Validos Normais"
-	df_filtered = df[df["Estabelecimento"] != "Pagamentos Validos Normais"].copy()
+	"""
+	Remove specified rows from the DataFrame based on the "Estabelecimento" column.
+
+	:param df: The DataFrame to filter
+	:return: A filtered DataFrame with specified rows removed
+	"""
+
+	verbose_output(true_string=f"{BackgroundColors.GREEN}Removing specified rows from the DataFrame.{Style.RESET_ALL}")
+
+	df_filtered = df[df["Estabelecimento"] != "Pagamentos Validos Normais"].copy() # Remove rows where "Estabelecimento" column contains "Pagamentos Validos Normais"
 
 	return df_filtered # Return the filtered DataFrame
 
-# @brief: This function converts a string with the format "R$ 1,00" to a float
-# @param: reais is a string with the format "R$ 1,00"
-# @return: a float with the value 1
 def reais_to_float(reais):
-	return float(reais.replace("R$ ", "").replace(".", "").replace(",", "."))
+	"""
+	Convert a string with the format "R$ 1,00" to a float.
 
-# @brief: This function gets the cash and credit payments from the DataFrame
-# @param: df is a DataFrame
-# @return: The number of cash and credit payments
+	:param reais: A string with the format "R$ 1,00"
+	:return: A float with the value 1.00
+	"""
+
+	verbose_output(true_string=f"{BackgroundColors.GREEN}Converting the string {BackgroundColors.CYAN}\"{reais}\"{BackgroundColors.GREEN} to a float.{Style.RESET_ALL}")
+
+	return float(reais.replace("R$ ", "").replace(".", "").replace(",", ".")) # Return a float with the value 1.00
+
 def get_cash_and_credit_payments(df):
-	cash_payments = df[df["Parcela"] == "-"].shape[0]
-	credit_payments = df[df["Parcela"] != "-"].shape[0]
+	"""
+	Get the number of cash and credit payments from the DataFrame.
+
+	:param df: The DataFrame to analyze
+	:return: A tuple containing the number of cash payments and credit payments
+	"""
+
+	verbose_output(true_string=f"{BackgroundColors.GREEN}Calculating the number of cash and credit payments.{Style.RESET_ALL}")
+
+	cash_payments = df[df["Parcela"] == "-"].shape[0] # Count the number of cash payments (where "Parcela" is "-")
+	credit_payments = df[df["Parcela"] != "-"].shape[0] # Count the number of credit payments (where "Parcela" is not "-")
 
 	return cash_payments, credit_payments # Return the number of cash and credit payments
 
-# @brief: This function processes dates in a DataFrame: Convert to datetime, sort, and optionally remove sorting column.
-# @param: df is a DataFrame to process
-# @param: date_column_name is the name of the column containing date strings
 def process_dates(df, date_column_name="Data", format="%d/%m/%Y"):
-	# Convert the date column to datetime objects
-	df[date_column_name] = pd.to_datetime(df[date_column_name], format=format)
+	"""
+	Process dates in a DataFrame by converting them to datetime objects, sorting, and formatting.
 
-	# Calculate seconds since the Unix epoch for each date
-	df["SecondsSinceEpoch"] = (df[date_column_name] - pd.Timestamp("01-01-1970")).dt.total_seconds()
+	:param df: The DataFrame to process
+	:param date_column_name: The name of the column containing date strings (default is "Data")
+	:param format: The format of the date strings in the column (default is "%d/%m/%Y")
+	:return: A DataFrame with dates converted to datetime objects, sorted by date, and formatted as "dd/mm/yyyy"
+	"""
 
-	# Sort the DataFrame by the "SecondsSinceEpoch" column in ascending order
-	sorted_df = df.sort_values(by="SecondsSinceEpoch", ascending=True)
+	verbose_output(true_string=f"{BackgroundColors.GREEN}Processing dates in the DataFrame.{Style.RESET_ALL}")
 
-	# Remove the "SecondsSinceEpoch" column if it's no longer needed
-	sorted_df.drop("SecondsSinceEpoch", axis=1, inplace=True)
+	df[date_column_name] = pd.to_datetime(df[date_column_name], format=format) # Convert the date strings to datetime objects
 
-	# Change the data format from "yyyy-mm-dd" to "dd/mm/yyyy"
-	sorted_df["Data"] = sorted_df["Data"].dt.strftime("%d/%m/%Y")
+	df["SecondsSinceEpoch"] = (df[date_column_name] - pd.Timestamp("01-01-1970")).dt.total_seconds() # Calculate seconds since the Unix epoch for each date
+
+	sorted_df = df.sort_values(by="SecondsSinceEpoch", ascending=True) # Sort the DataFrame by the "SecondsSinceEpoch" column in ascending order
+
+	sorted_df.drop("SecondsSinceEpoch", axis=1, inplace=True) # Remove the "SecondsSinceEpoch" column if it's no longer needed
+
+	sorted_df["Data"] = sorted_df["Data"].dt.strftime("%d/%m/%Y") # Change the data format from "yyyy-mm-dd" to "dd/mm/yyyy"
 
 	return sorted_df # Return the sorted DataFrame
 
-# @brief: This is the main function.
-# @param: None
-# @return: None
 def main():
+	"""
+   Main function.
+
+   :return: None
+   """
+   
 	print(f"{BackgroundColors.CLEAR_TERMINAL}{BackgroundColors.BOLD}{BackgroundColors.GREEN}Welcome to {BackgroundColors.CYAN}Credit Card Bill{BackgroundColors.GREEN}!{Style.RESET_ALL}", end="\n\n") # Print the welcome message
 	
-	# Verify if the "Bills" folder exists
-	verify_bills_folder()
-
-	# Verify if the "debits.csv" file exists
-	if not debits_csv_exists(f"{INPUT_CSV_FILE}"):
+	verify_bills_folder() # Verify if the input folder exists
+      
+	if not debits_csv_exists(f"{INPUT_CSV_FILE}"): # Verify if the "debits.csv" file exists
 		print(f"{BackgroundColors.RED}The file {BackgroundColors.CYAN}\"{INPUT_CSV_FILE}\"{BackgroundColors.RED} does not exist inside the {BackgroundColors.CYAN}\"{INPUT_CSV_FOLDER}\"{BackgroundColors.RED} folder.{Style.RESET_ALL}")
-		exit(1)
+		exit(1) # Exit the program if the file does not exist
 	
-	# Read the CSV file using the ";" delimiter
-	df = pd.read_csv(f"{INPUT_CSV_FILE}", sep=";")
+	df = pd.read_csv(f"{INPUT_CSV_FILE}", sep=";") # Read the CSV file using the ";" delimiter
 
-	# Remove specified rows from the dataframe
-	filtered_df = remove_rows(df)
+	filtered_df = remove_rows(df) # Remove specified rows from the dataframe
 
-	# Apply the function that converts the "Valor" column to a float
-	filtered_df["Valor"] = filtered_df["Valor"].apply(reais_to_float)
+	filtered_df["Valor"] = filtered_df["Valor"].apply(reais_to_float) # Apply the function that converts the "Valor" column to a float
 
-	# Write it to the CSV file using the comma separator
-	filtered_df.to_csv(f"{OUTPUT_CSV_FILE}", sep=",", index=False)
+	filtered_df.to_csv(f"{OUTPUT_CSV_FILE}", sep=",", index=False) # Write it to the CSV file using the comma separator
 
-	# Process the dates and sort the DataFrame
-	sorted_df = process_dates(filtered_df, "Data", "%d/%m/%Y")
+	sorted_df = process_dates(filtered_df, "Data", "%d/%m/%Y") # Process the dates and sort the DataFrame
 
-	# Calculate the cumulative sum of the "Valor" column and round it to 2 decimal places
-	sorted_df["Sum"] = sorted_df["Valor"].cumsum().round(2)
+	sorted_df["Sum"] = sorted_df["Valor"].cumsum().round(2) # Calculate the cumulative sum of the "Valor" column and round it to 2 decimal places
 
-	# Write the DataFrame with comma separator
-	sorted_df.to_csv(f"{OUTPUT_CSV_FILE}", sep=",", index=False)
+	sorted_df.to_csv(f"{OUTPUT_CSV_FILE}", sep=",", index=False) # Write the DataFrame with comma separator
 
-	# Get the number of Cash payments and the number of Credit payments
-	cash_payments, credit_payments = get_cash_and_credit_payments(sorted_df)
+	cash_payments, credit_payments = get_cash_and_credit_payments(sorted_df) # Get the number of Cash payments and the number of Credit payments
 
 	# Print the total sum of the "Valor" column
 	print(f"{BackgroundColors.GREEN}Total Sum of the {BackgroundColors.CYAN}\"Valor\"{BackgroundColors.GREEN} column: {BackgroundColors.CYAN}R$ {sorted_df['Valor'].sum():.2f}{BackgroundColors.GREEN}.{Style.RESET_ALL}")
 	print(f"{BackgroundColors.GREEN}Total Purchases: {BackgroundColors.CYAN}{sorted_df.shape[0]}{BackgroundColors.GREEN}. Cash Payments: {BackgroundColors.CYAN}{cash_payments}{BackgroundColors.GREEN}. Credit Payments: {BackgroundColors.CYAN}{credit_payments}{BackgroundColors.GREEN}.{Style.RESET_ALL}", end="\n\n")
 	print(f"{BackgroundColors.BOLD}{BackgroundColors.GREEN}Execution finished.{Style.RESET_ALL}", end="\n\n")
  
-# This is the standard boilerplate that calls the main() function
 if __name__ == "__main__":
-	main() # Call the main function
+   """
+   This is the standard boilerplate that calls the main() function.
+
+   :return: None
+   """
+
+   main() # Call the main function
+	
