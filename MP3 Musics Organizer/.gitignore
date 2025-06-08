@@ -14,7 +14,7 @@ desktop.ini
 *.rar
 *.gz
 *.7z
-.tar.gz
+*.tar.gz
 
 # Ignore the Data Directories
 */Dados/
@@ -25,11 +25,23 @@ desktop.ini
 */data/
 */dataset/
 */results/
+*/Input/
+*/input/
 
 # Ignore the Data Files
 *.csv
 *.xlsx
-.txt
+*.txt
+
+# Ignore Music / Audio Files
+*.mp3
+*.wav
+*.flac
+*.aac
+*.ogg
+*.wma
+*.m4a
+*.alac
 
 # Environments
 .env
