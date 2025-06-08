@@ -85,6 +85,16 @@ def clean_song_name(name):
 
    return name.strip() # Strip any leading or trailing whitespace from the cleaned name
 
+def fix_apostrophes(text):
+   """
+   Fixes apostrophes in the text by converting uppercase letters after apostrophes to lowercase.
+
+   :param text: The text to fix
+   :return: The fixed text
+   """
+
+   return re.sub(r"(?<=')([A-Z])", lambda m: m.group(1).lower(), text) # Convert uppercase letters after apostrophes to lowercase
+
 def organize_mp3_files(input_dir=INPUT_DIR):
    """
    Organizes all .mp3 files from the ./Input directory into folders by artist inside the same directory
@@ -102,10 +112,10 @@ def organize_mp3_files(input_dir=INPUT_DIR):
          if len(parts) < 2:
             continue # Skip if not in expected format
 
-         artist = parts[0].strip() # Get the artist name
+         artist = fix_apostrophes(parts[0].strip().title()) # Get the artist name and capitalize it
          full_song_part = parts[1].strip() # Get the raw song part
 
-         song_name = clean_song_name(full_song_part) + ".mp3" # Clean the song name and add extension
+         song_name = fix_apostrophes(clean_song_name(full_song_part).title()) + ".mp3" # Clean the song name and add extension
 
          artist_dir = os.path.join(input_dir, artist) # Artist folder inside ./Input
          if not os.path.exists(artist_dir): # Verify if the artist directory exists
