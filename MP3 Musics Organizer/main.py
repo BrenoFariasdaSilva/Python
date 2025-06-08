@@ -64,9 +64,14 @@ def clean_song_name(name):
    """
 
    blacklist = [
-      r"\(.*?(official|clip|video|remaster|remastered|version|edit|mix|from|single).*?\)", # (Official Video), etc.
-      r"-.*?(official|clip|video|remaster|remastered|version|edit|mix|from|single).*?", # - 2005 Remastered Version
-      r"\b\d{4}\b", # Years like 2005
+      # Parentheses or brackets containing keywords (case-insensitive)
+      r"\s*[\(\[\{].*?\b(official|clip|video|remaster(ed)?|version|edit|full mix|mix|from|single|lyrics|audio|hd|live|remix|radio|clean|explicit|bonus track|demo|instrumental|karaoke|acoustic|cover|feat\.?|ft\.?|with|vs\.?|intro|outro|rework|extended|session|take|uncut|uncensored|dub|radio edit|tv size|original|album version|alternative|b-side|promo|single version|mono|stereo|highlight|sample|snippet|preview|clean version|explicit version|dubstep|trap|drum and bass|dub mix|vinyl|bootleg|re-recorded|re-release|video clip|music video|concert|festival|remastered edition|version 2|version 3)\b.*?[\)\]\}]",
+      # Dash or hyphen followed by keywords
+      r"\s*-\s*.*?\b(official|clip|video|remaster(ed)?|version|edit|full mix|mix|from|single|lyrics|audio|hd|live|remix|radio|clean|explicit|bonus track|demo|instrumental|karaoke|acoustic|cover|feat\.?|ft\.?|with|vs\.?|intro|outro|rework|extended|session|take|uncut|uncensored|dub|radio edit|tv size|original|album version|alternative|b-side|promo|single version|mono|stereo|highlight|sample|snippet|preview|clean version|explicit version|dubstep|trap|drum and bass|dub mix|vinyl|bootleg|re-recorded|re-release|video clip|music video|concert|festival|remastered edition|version 2|version 3)\b.*?$",
+      # Years, e.g. 2005, 1999
+      r"\b(19|20)\d{2}\b",
+      # Common standalone descriptors often appended to song names
+      r"\b(hd|official|lyrics|video|audio|live|remix|edit|version|clip|feat\.?|ft\.?|acoustic|cover|instrumental|clean|explicit|radio|demo|karaoke|bonus track|uncut|rework|extended|session|take|vinyl|bootleg|re-recorded|re-release|concert|festival|remastered|album version|alternative|promo|b-side)\b",
    ]
 
    for pattern in blacklist: # Iterate over each pattern in the blacklist
