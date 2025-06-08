@@ -58,6 +58,7 @@ def clean_song_name(name):
    """
    Cleans the song name by removing unwanted suffixes and patterns,
    and collapses multiple spaces into a single space.
+   Ensures no trailing space or dash before the file extension.
 
    :param name: The original song name
    :return: The cleaned song name
@@ -79,7 +80,9 @@ def clean_song_name(name):
 
    name = re.sub(r"\s+", " ", name) # Collapse multiple consecutive whitespace characters into a single space
 
-   return name.strip() # Return the cleaned and whitespace-normalized name
+   name = re.sub(r"[\s\-]+(?=\.\w{2,4}$)", "", name) # Remove trailing spaces or dashes BEFORE file extension (e.g. ".mp3", ".flac", ".wav", ".ogg")
+
+   return name.strip() # Strip any leading or trailing whitespace from the cleaned name
 
 def organize_mp3_files(input_dir=INPUT_DIR):
    """
