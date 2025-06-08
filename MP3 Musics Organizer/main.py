@@ -56,13 +56,14 @@ def verify_filepath_exists(filepath):
 
 def clean_song_name(name):
    """
-   Cleans the song name by removing unwanted suffixes and patterns,
-   and collapses multiple spaces into a single space.
+   Cleans the song name by replacing dollar signs with 's', removing unwanted suffixes and patterns, collapses multiple spaces into a single space.
    Ensures no trailing space or dash before the file extension.
 
    :param name: The original song name
    :return: The cleaned song name
    """
+
+   name = name.replace("$", "s") # Replace dollar signs with 's'
 
    blacklist = [
       # Parentheses, brackets, braces containing keywords or phrases
