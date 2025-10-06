@@ -29,6 +29,7 @@ desktop.ini
 */data/*
 */dataset/*
 */datasets/*
+!.assets/*
 
 # Ignore the Data Files
 *.csv
@@ -38,6 +39,13 @@ desktop.ini
 *.xlsx
 *.txt
 *.parquet
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.bmp
+*.tiff
+*.svg
 !requirements.txt
 !README.md
 
