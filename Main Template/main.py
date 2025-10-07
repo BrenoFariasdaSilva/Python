@@ -104,6 +104,8 @@ def verify_filepath_exists(filepath):
 def play_sound():
    """
    Plays a sound when the program finishes and skips if the operating system is Windows.
+
+   :param: None
    :return: None
    """
 
@@ -123,6 +125,7 @@ def main():
    """
    Main function.
 
+   :param: None
    :return: None
    """
 
