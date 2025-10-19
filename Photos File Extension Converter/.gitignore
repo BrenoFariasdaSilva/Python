@@ -9,49 +9,50 @@ __pycache__/
 desktop.ini
 
 # Ignore the Compressed Files
-*.zip
-*.rar
-*.gz
-*.7z
-.tar.gz
+**.zip
+**.rar
+**.gz
+**.7z
+**.tar.gz
 
 # Ignore the Data Directories
-*/Dados/
-*/Data/
-*/Dataset/
-*/Results/
-*/dados/
-*/data/
-*/dataset/
-*/results/
-*/Input/
-*/input/
-*/Inputs/
-*/inputs/
-*/Output/
-*/output/
-*/Outputs/
-*/outputs/
-*/Temp/
+**/Dados/
+**/Data/
+**/Dataset/
+**/Results/
+**/dados/
+**/data/
+**/dataset/
+**/results/
+**/Input/
+**/input/
+**/Inputs/
+**/inputs/
+**/Output/
+**/output/
+**/Outputs/
+**/outputs/
+**/Temp/
+**/My Photos/**
 
 # Ignore the Data Files
-*.csv
-*.xlsx
-.txt
+**.csv
+**.xlsx
+**.txt
 
 # Ignore any photo fileformats
-*.jpg
-*.jpeg
-*.png
-*.gif
-*.bmp
-*.tiff
-*.tif
-*.svg
-*.webp
-*.heic
-*.heif
-*.HEIC
+**.jpg
+**.jpeg
+**.png
+**.gif
+**.bmp
+**.tiff
+**.tif
+**.svg
+**.webp
+**.heic
+**.heif
+**.HEIC
 
 # Environments
 .env
