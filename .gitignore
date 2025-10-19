@@ -142,8 +142,8 @@ Dagster/tmp*/
 Non\ Repetitive\ Combinations/non_repetitive_combinations.txt
 
 # System Files
-.DS_Store
-Thumbs.db
+**/.DS_Store/**
+**/Thumbs.db/**
 Icon? # match Icon<CR>
 **/Icon? # explicit: match at any nested level
 
@@ -172,9 +172,9 @@ PyDriller/repositories
 /RefactoringMiner/json_files/
 
 # Ignore any 7z or tar.gz or zip file
-*.7z
-*.tar.gz
-*.zip
+**.7z
+**.tar.gz
+**.zip
 
 # Ignore any .csv or .txt file inside the URLs List Filter and Magnet Links from URL folders
 URLs\ List\ Filter/*.txt
@@ -183,17 +183,17 @@ Magnet\ Links\ from\ URL/*.txt
 Magnet\ Links\ from\ URL/*.csv
 
 # Ignore any .txt file inside the Files Without Extension folder
-Files\ Without\ Extension/*.txt
+**/Files\ Without\ Extension/*.txt
 
 # Ignore any files from Steam Games folder
-*/Steam\ Games/*
+**/Steam\ Games/**
 
 # Ignore the Data Directories
-*/dataset/
-*/Dados/
-*/Data/
-*/Dataset/
-*/Results/
-*/Images/
-*/Input/
-*/Output/
+**/dataset/**
+**/Dados/**
+**/Data/**
+**/Dataset/**
+**/Results/**
+**/Images/**
+**/Input/**
+**/Output/**
