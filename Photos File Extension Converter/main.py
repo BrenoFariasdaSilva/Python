@@ -18,6 +18,7 @@ class BackgroundColors: # Colors for the terminal
 # Execution Constants:
 VERBOSE = False # Set to True to output verbose messages
 SAME_PLACE_CONVERSION = True # Set to True to convert files in the same folder and use the suffix for the output files
+INPUT_FILE_EXTENSIONS = [".heic", ".jpg", ".jpeg", ".webp"] # Extensions to convert
 OUTPUT_FILE_EXTENSION = ".png" # The output file extension to save as
 OUTPUT_FILE_SUFFIX = "_converted" # The suffix to add to the output file name
 
@@ -76,9 +77,9 @@ def create_directory(full_directory_name, relative_directory_name):
    except OSError: # If the directory cannot be created
       print(f"{BackgroundColors.GREEN}The creation of the {BackgroundColors.CYAN}{relative_directory_name}{BackgroundColors.GREEN} directory failed.{Style.RESET_ALL}")
 
-def convert_heic_to_specified_format(input_folder=FULL_INPUT_FOLDER, output_folder=FULL_OUTPUT_FOLDER, file_extension=OUTPUT_FILE_EXTENSION):
+def convert_heic_to_specified_format_keep_quality(input_folder=FULL_INPUT_FOLDER, output_folder=FULL_OUTPUT_FOLDER, file_extension=OUTPUT_FILE_EXTENSION):
    """
-   Converts HEIC files to the specified target format (e.g., PNG, JPEG).
+   Converts HEIC files to the specified target format (e.g., PNG, JPEG) while preserving the original image quality.
 
    :param input_folder: The folder containing the HEIC files.
    :param output_folder: The folder to save the converted files, if the SAME_PLACE_CONVERSION constant is False.
@@ -86,14 +87,14 @@ def convert_heic_to_specified_format(input_folder=FULL_INPUT_FOLDER, output_fold
    :return: Number of files converted.
    """
 
-   verbose_output(f"{BackgroundColors.YELLOW}Converting HEIC files to PNG files in the folder: {BackgroundColors.CYAN}{input_folder}{Style.RESET_ALL}") # Output the verbose message
+   verbose_output(f"{BackgroundColors.YELLOW}Converting HEIC files to {file_extension.upper()} files (preserving quality) in the folder: {BackgroundColors.CYAN}{input_folder}{Style.RESET_ALL}") # Output the verbose message
 
    file_count = 0 # The number of files converted
 
    for filename in os.listdir(input_folder): # For each file in the input folder
       if filename.lower().endswith(".heic"): # If the file is a HEIC file
          file_count += 1 # Increment the file count
-         print(f"{BackgroundColors.GREEN}{file_count:.02d} - Converting {BackgroundColors.CYAN}{filename}{BackgroundColors.GREEN} to a PNG file...{Style.RESET_ALL}") # Output the message
+         print(f"{BackgroundColors.GREEN}{file_count:.02d} - Converting {BackgroundColors.CYAN}{filename}{BackgroundColors.GREEN} to a {file_extension.upper()} file (keeping quality)...{Style.RESET_ALL}") # Output the message
          
          heif_file = pyheif.read(os.path.join(input_folder, filename)) # Read the HEIC file
          
@@ -106,8 +107,8 @@ def convert_heic_to_specified_format(input_folder=FULL_INPUT_FOLDER, output_fold
             heif_file.stride, # The stride of the image
          )
          
-         output_name = f"{os.path.splitext(filename)[0]}{OUTPUT_FILE_SUFFIX}{file_extension.lower()}" if SAME_PLACE_CONVERSION else os.path.join(output_folder, f"{os.path.splitext(filename)[0]}{file_extension.lower()}")
-         image.save(output_name, file_extension.lower()) # Save the image in the specified format
+         output_name = f"{os.path.splitext(filename)[0]}{OUTPUT_FILE_SUFFIX}{file_extension.lower()}" if SAME_PLACE_CONVERSION else os.path.join(output_folder, f"{os.path.splitext(filename)[0]}{file_extension.lower()}") # Define the output name according to conversion mode
+         image.save(output_name, file_extension.lower(), quality=100) # Save the image in the specified format, keeping full quality
 
    return file_count # Return the number of files converted
 
@@ -136,12 +137,12 @@ def main():
    :return: None
    """
 
-   print(f"{BackgroundColors.CLEAR_TERMINAL}{BackgroundColors.BOLD}{BackgroundColors.GREEN}Welcome to the {BackgroundColors.CLEAR_TERMINAL}HEIC to PNG Converter{BackgroundColors.GREEN}!{Style.RESET_ALL}", end="\n\n") # Output the welcome message
+   print(f"{BackgroundColors.CLEAR_TERMINAL}{BackgroundColors.BOLD}{BackgroundColors.GREEN}Welcome to the {BackgroundColors.CYAN}Photo File Extension Converter{BackgroundColors.GREEN}!{Style.RESET_ALL}\n") # Output the welcome message
 
    create_directory(FULL_INPUT_FOLDER, RELATIVE_INPUT_FOLDER) # Create the input directory
    create_directory(FULL_OUTPUT_FOLDER, RELATIVE_OUTPUT_FOLDER) # Create the output directory
    
-   converted_files_count = convert_heic_to_specified_format(FULL_INPUT_FOLDER, FULL_OUTPUT_FOLDER, OUTPUT_FILE_EXTENSION) # Convert the HEIC files to the specified
+   converted_files_count = convert_heic_to_specified_format_keep_quality() # Convert the HEIC files to PNG files and get the number of files converted
 
    if converted_files_count == 0: # If no files were converted
       print(f"{BackgroundColors.RED}No HEIC files found in the folder: {BackgroundColors.CYAN}{RELATIVE_INPUT_FOLDER}{Style.RESET_ALL}")
