@@ -77,38 +77,63 @@ def create_directory(full_directory_name, relative_directory_name):
    except OSError: # If the directory cannot be created
       print(f"{BackgroundColors.GREEN}The creation of the {BackgroundColors.CYAN}{relative_directory_name}{BackgroundColors.GREEN} directory failed.{Style.RESET_ALL}")
 
-def convert_heic_to_specified_format_keep_quality(input_folder=FULL_INPUT_FOLDER, output_folder=FULL_OUTPUT_FOLDER, file_extension=OUTPUT_FILE_EXTENSION):
+def convert_photos_to_specified_format(input_folder=FULL_INPUT_FOLDER, output_folder=FULL_OUTPUT_FOLDER, searched_extensions=INPUT_FILE_EXTENSIONS, output_extension=OUTPUT_FILE_EXTENSION):
    """
-   Converts HEIC files to the specified target format (e.g., PNG, JPEG) while preserving the original image quality.
+   Converts photos to the specified format while preserving quality. Searches recursively within the input folder.
 
-   :param input_folder: The folder containing the HEIC files.
+   :param input_folder: The folder containing the photos in the INPUT_FILE_EXTENSIONS formats.
    :param output_folder: The folder to save the converted files, if the SAME_PLACE_CONVERSION constant is False.
-   :param target_format: The target image format (e.g., "PNG", "JPEG").
+   :param searched_extensions: List of file extensions to search for.
+   :param output_extension: The target image format (e.g., "PNG", "JPEG").
    :return: Number of files converted.
    """
 
-   verbose_output(f"{BackgroundColors.YELLOW}Converting HEIC files to {file_extension.upper()} files (preserving quality) in the folder: {BackgroundColors.CYAN}{input_folder}{Style.RESET_ALL}") # Output the verbose message
+   verbose_output(f"{BackgroundColors.YELLOW}Converting photos to {BackgroundColors.CYAN}{output_extension.upper()}{BackgroundColors.YELLOW} format while preserving quality (recursive search)...{Style.RESET_ALL}") # Output the verbose message
 
    file_count = 0 # The number of files converted
 
-   for filename in os.listdir(input_folder): # For each file in the input folder
-      if filename.lower().endswith(".heic"): # If the file is a HEIC file
-         file_count += 1 # Increment the file count
-         print(f"{BackgroundColors.GREEN}{file_count:.02d} - Converting {BackgroundColors.CYAN}{filename}{BackgroundColors.GREEN} to a {file_extension.upper()} file (keeping quality)...{Style.RESET_ALL}") # Output the message
-         
-         heif_file = pyheif.read(os.path.join(input_folder, filename)) # Read the HEIC file
-         
-         image = Image.frombytes( # Create an image from the HEIC file
-            heif_file.mode, # The mode of the image
-            heif_file.size, # The size of the image
-            heif_file.data, # The data of the image
-            "raw", # The raw mode
-            heif_file.mode, # The mode of the image
-            heif_file.stride, # The stride of the image
-         )
-         
-         output_name = f"{os.path.splitext(filename)[0]}{OUTPUT_FILE_SUFFIX}{file_extension.lower()}" if SAME_PLACE_CONVERSION else os.path.join(output_folder, f"{os.path.splitext(filename)[0]}{file_extension.lower()}") # Define the output name according to conversion mode
-         image.save(output_name, file_extension.lower(), quality=100) # Save the image in the specified format, keeping full quality
+   for root, dirs, files in os.walk(input_folder): # Walk recursively through all directories and files
+      for filename in files: # For each file found
+         if filename.lower().endswith(tuple(searched_extensions)): # If the file has a searched extension
+            file_count += 1 # Increment the file count
+
+            input_path = os.path.join(root, filename) # Get the full path of the input file
+
+            try: # Try to open and process the image
+               if filename.lower().endswith(".heic"): # Only HEIC needs pyheif
+                  heif_file = pyheif.read(input_path) # Read the HEIC file
+                  image = Image.frombytes( # Create an image from the HEIC file
+                     heif_file.mode,
+                     heif_file.size,
+                     heif_file.data,
+                     "raw",
+                     heif_file.mode,
+                     heif_file.stride,
+                  )
+               else:
+                  image = Image.open(input_path) # For other formats, use PIL directly
+                  image = image.convert("RGB") # Ensure consistent mode
+
+               if SAME_PLACE_CONVERSION: # If the conversion should happen in the same place
+                  output_name = f"{os.path.splitext(input_path)[0]}{OUTPUT_FILE_SUFFIX}{output_extension.lower()}" # Save in the same folder with suffix
+                  relative_input_path = os.path.relpath(input_path, input_folder) # Relative path for printing
+                  relative_output_name = os.path.relpath(output_name, input_folder) # Relative path for printing
+               else: # Otherwise, save in the output folder maintaining relative structure
+                  relative_path = os.path.relpath(root, input_folder) # Get relative subpath
+                  output_dir = os.path.join(output_folder, relative_path) # Create corresponding subdirectory in output
+                  os.makedirs(output_dir, exist_ok=True) # Create output directory if it doesn't exist
+                  output_name = os.path.join(output_dir, f"{os.path.splitext(filename)[0]}{output_extension.lower()}") # Define output file path
+                  relative_input_path = os.path.relpath(input_path, input_folder) # Relative path for printing
+                  relative_output_name = os.path.relpath(output_name, output_folder) # Relative path for printing
+
+               print(f"{BackgroundColors.GREEN}{file_count:02d} - Converting {BackgroundColors.CYAN}{relative_input_path}{BackgroundColors.GREEN} to {BackgroundColors.CYAN}{relative_output_name}{BackgroundColors.GREEN}.{Style.RESET_ALL}") 
+
+               image.save(output_name, output_extension.strip(".").upper(), quality=100) # Save the image in the specified format, keeping full quality
+
+            except Exception as e: # Skip files that cannot be processed
+               relative_input_path = os.path.relpath(input_path, input_folder) # Relative path for printing
+               print(f"{BackgroundColors.RED}Skipping file {BackgroundColors.CYAN}{relative_input_path}{BackgroundColors.RED}: {e}{Style.RESET_ALL}")
+               continue # Move to the next file
 
    return file_count # Return the number of files converted
 
@@ -142,12 +167,12 @@ def main():
    create_directory(FULL_INPUT_FOLDER, RELATIVE_INPUT_FOLDER) # Create the input directory
    create_directory(FULL_OUTPUT_FOLDER, RELATIVE_OUTPUT_FOLDER) # Create the output directory
    
-   converted_files_count = convert_heic_to_specified_format_keep_quality() # Convert the HEIC files to PNG files and get the number of files converted
+   converted_files_count = convert_photos_to_specified_format(input_folder=FULL_INPUT_FOLDER, output_folder=FULL_OUTPUT_FOLDER, searched_extensions=INPUT_FILE_EXTENSIONS, output_extension=OUTPUT_FILE_EXTENSION) # Convert the photos and get the number of files converted
 
    if converted_files_count == 0: # If no files were converted
-      print(f"{BackgroundColors.RED}No HEIC files found in the folder: {BackgroundColors.CYAN}{RELATIVE_INPUT_FOLDER}{Style.RESET_ALL}")
+      print(f"{BackgroundColors.RED}No photo files found in the folder: {BackgroundColors.CYAN}{RELATIVE_INPUT_FOLDER}{Style.RESET_ALL}")
    else: # If files were converted
-      print(f"{BackgroundColors.GREEN}Successfully converted {converted_files_count} HEIC file(s) to {OUTPUT_FILE_EXTENSION.lower()} format.{Style.RESET_ALL}")
+      print(f"{BackgroundColors.GREEN}Successfully converted {converted_files_count} photo file(s) to {OUTPUT_FILE_EXTENSION.lower()} format.{Style.RESET_ALL}")
 
    print(f"\n{BackgroundColors.BOLD}{BackgroundColors.GREEN}Program finished.{Style.RESET_ALL}") # Output the end of the program message
 
