@@ -17,12 +17,14 @@ class BackgroundColors: # Colors for the terminal
 
 # Execution Constants:
 VERBOSE = False # Set to True to output verbose messages
+SAME_PLACE_CONVERSION = True # Set to True to convert files in the same folder and use the suffix for the output files
 OUTPUT_FILE_EXTENSION = ".png" # The output file extension to save as
+OUTPUT_FILE_SUFFIX = "_converted" # The suffix to add to the output file name
 
 # Path Constants:
 START_PATH = os.getcwd() # The path where the program is executed
-RELATIVE_INPUT_FOLDER = "Inputs" # The relative path to the input folder
-RELATIVE_OUTPUT_FOLDER = "Outputs" # The relative path to the output folder
+RELATIVE_INPUT_FOLDER = "./Inputs/" # The relative path to the input folder
+RELATIVE_OUTPUT_FOLDER = "./Outputs/" # The relative path to the output folder
 FULL_INPUT_FOLDER = os.path.join(START_PATH, RELATIVE_INPUT_FOLDER) # The full path to the input folder
 FULL_OUTPUT_FOLDER = os.path.join(START_PATH, RELATIVE_OUTPUT_FOLDER) # The full path to the output folder
 
@@ -79,7 +81,7 @@ def convert_heic_to_specified_format(input_folder=FULL_INPUT_FOLDER, output_fold
    Converts HEIC files to the specified target format (e.g., PNG, JPEG).
 
    :param input_folder: The folder containing the HEIC files.
-   :param output_folder: The folder to save the converted files.
+   :param output_folder: The folder to save the converted files, if the SAME_PLACE_CONVERSION constant is False.
    :param target_format: The target image format (e.g., "PNG", "JPEG").
    :return: Number of files converted.
    """
@@ -92,7 +94,9 @@ def convert_heic_to_specified_format(input_folder=FULL_INPUT_FOLDER, output_fold
       if filename.lower().endswith(".heic"): # If the file is a HEIC file
          file_count += 1 # Increment the file count
          print(f"{BackgroundColors.GREEN}{file_count:.02d} - Converting {BackgroundColors.CYAN}{filename}{BackgroundColors.GREEN} to a PNG file...{Style.RESET_ALL}") # Output the message
+         
          heif_file = pyheif.read(os.path.join(input_folder, filename)) # Read the HEIC file
+         
          image = Image.frombytes( # Create an image from the HEIC file
             heif_file.mode, # The mode of the image
             heif_file.size, # The size of the image
@@ -101,8 +105,9 @@ def convert_heic_to_specified_format(input_folder=FULL_INPUT_FOLDER, output_fold
             heif_file.mode, # The mode of the image
             heif_file.stride, # The stride of the image
          )
-         output_path = os.path.join(output_folder, f"{os.path.splitext(filename)[0]}.{file_extension.lower()}") # The path to save the converted file
-         image.save(output_path, file_extension.lower()) # Save the image in the specified format
+         
+         output_name = f"{os.path.splitext(filename)[0]}{OUTPUT_FILE_SUFFIX}{file_extension.lower()}" if SAME_PLACE_CONVERSION else os.path.join(output_folder, f"{os.path.splitext(filename)[0]}{file_extension.lower()}")
+         image.save(output_name, file_extension.lower()) # Save the image in the specified format
 
    return file_count # Return the number of files converted
 
@@ -135,6 +140,7 @@ def main():
 
    create_directory(FULL_INPUT_FOLDER, RELATIVE_INPUT_FOLDER) # Create the input directory
    create_directory(FULL_OUTPUT_FOLDER, RELATIVE_OUTPUT_FOLDER) # Create the output directory
+   
    converted_files_count = convert_heic_to_specified_format(FULL_INPUT_FOLDER, FULL_OUTPUT_FOLDER, OUTPUT_FILE_EXTENSION) # Convert the HEIC files to the specified
 
    if converted_files_count == 0: # If no files were converted
