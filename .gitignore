@@ -197,3 +197,5 @@ Magnet\ Links\ from\ URL/*.csv
 **/Images/**
 **/Input/**
 **/Output/**
+
+!**/requirements.txt
