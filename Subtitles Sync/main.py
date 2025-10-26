@@ -245,8 +245,6 @@ def process_directory(directory):
    :return: None
    """
    
-   print(f"{BackgroundColors.GREEN}Processing the directory: {BackgroundColors.CYAN}{directory}{Style.RESET_ALL}") # Output the verbose message
-
    directory_abs = os.path.normpath(os.path.abspath(directory)) # Ensure we operate using absolute, normalized directory paths and print the absolute directory
 
    video_files = get_video_files(directory_abs) # Get all video files in the directory
