@@ -151,10 +151,13 @@ def get_directories():
    """
    Get all directories inside the input directory, excluding the specified ones.
 
-   :return: List of directories
+   :param none
+   :return: List of directories in absolute paths
    """
 
-   return [os.path.join(INPUT_DIRECTORY, d) for d in os.listdir(INPUT_DIRECTORY) if os.path.isdir(os.path.join(INPUT_DIRECTORY, d))] # Return a list of directories inside INPUT_DIRECTORY
+   input_dir_abs = os.path.abspath(INPUT_DIRECTORY) # Ensure input directory is absolute and normalized
+
+   return [os.path.normpath(os.path.join(input_dir_abs, d)) for d in os.listdir(input_dir_abs) if os.path.isdir(os.path.join(input_dir_abs, d))] # Return a list of directories inside INPUT_DIRECTORY
 
 def get_video_files(directory):
    """
