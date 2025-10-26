@@ -20,7 +20,7 @@ class BackgroundColors: # Colors for the terminal
 
 # Execution Constants:
 VERBOSE = False # Set to True to output verbose messages
-VIDEO_EXTENSIONS = [".mkv", ".mp4", ".avi"] # List of video file extensions to process
+VIDEO_FILE_EXTENSIONS = [".mkv", ".mp4", ".avi"] # List of video file extensions to process
 
 # Sound Constants:
 SOUND_COMMANDS = {"Darwin": "afplay", "Linux": "aplay", "Windows": "start"} # The commands to play a sound for each operating system
@@ -161,17 +161,17 @@ def get_directories():
 
 def get_video_files(directory):
    """
-   Returns a list of video files (as defined in VIDEO_EXTENSIONS) in a directory, excluding specified files.
+   Returns a list of video files (as defined in VIDEO_FILE_EXTENSIONS) in a directory, excluding specified files.
 
    :param directory: The directory to search for video files.
    :return: List of video files
    """
 
    directory_abs = os.path.abspath(directory) # Get the absolute path of the directory
-   verbose_output(f"{BackgroundColors.GREEN}Getting all video files ({', '.join(VIDEO_EXTENSIONS)}) in the directory: {BackgroundColors.CYAN}{directory_abs}{Style.RESET_ALL}") # Output the verbose message
+   verbose_output(f"{BackgroundColors.GREEN}Getting all video files ({', '.join(VIDEO_FILE_EXTENSIONS)}) in the directory: {BackgroundColors.CYAN}{directory_abs}{Style.RESET_ALL}") # Output the verbose message
 
    files = [] # List to store video files
-   for ext in VIDEO_EXTENSIONS: # Collect files for each configured extension
+   for ext in VIDEO_FILE_EXTENSIONS: # Collect files for each configured extension
       pattern = os.path.join(directory_abs, f"*{ext}") # Pattern to match files with the current extension
       files.extend([os.path.normpath(f) for f in glob.glob(pattern)]) # Add matched files to the list
 
