@@ -20,18 +20,36 @@ Icon? # match Icon<CR>
 **/*.tar.gz
 
 # Ignore the Data Directories
+# Input folders
+**/Input/*
+**/Inputs/*
+**/input/*
+**/inputs/*
+
+# Output folders
+**/Output/*
+**/Outputs/*
+**/output/*
+**/outputs/*
+
+# Data folders
 **/Dados/*
 **/Data/*
-**/Dataset/*
-**/Datasets/*
-**/Results/*
-**/Result/*
-**/result/*
-**/results/*
 **/dados/*
 **/data/*
+
+# Dataset folders
+**/Dataset/*
+**/Datasets/*
 **/dataset/*
 **/datasets/*
+
+# Results folders
+**/Result/*
+**/Results/*
+**/result/*
+**/results/*
+
 !.assets/*
 
 # Ignore the Data Files
