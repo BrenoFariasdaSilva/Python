@@ -6,7 +6,7 @@ import platform # For getting the operating system name
 import warnings # For ignoring warnings
 from colorama import Style # For coloring the terminal
 from PIL import Image # For opening images
-from tqdm import tqdm
+from tqdm import tqdm # For showing a progress bar
 
 # Macros:
 class BackgroundColors: # Colors for the terminal
