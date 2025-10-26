@@ -265,7 +265,7 @@ def process_all_directories(directories):
    :return: None
    """
 
-   for directory in tqdm(directories, desc=f"{BackgroundColors.GREEN}Processing Directories", unit="dir"): # Loop through each directory
+   for directory in directories: # Loop through each directory
       process_directory(directory) # Process the directory
 
    print(f"\n{BackgroundColors.BOLD}{BackgroundColors.GREEN}All Directories Subtitle Synchronization Completed.{Style.RESET_ALL}") # Output the end of the program message
