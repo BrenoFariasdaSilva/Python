@@ -2,7 +2,9 @@ import atexit # For playing a sound when the program finishes
 import glob # For getting files in a directory
 import os # For running a command in the terminal
 import platform # For getting the operating system name
+import shutil # For checking if a command exists
 import subprocess # For running terminal commands
+import sys # For running terminal commands
 from colorama import Style # For coloring the terminal
 from tqdm import tqdm # Import tqdm for progress bar
 
@@ -43,6 +45,26 @@ def verbose_output(true_string="", false_string=""):
       print(true_string) # Output the true statement string
    elif false_string != "": # If the false_string is set
       print(false_string) # Output the false statement string
+
+def verify_ffsubsync_installed():
+   """
+   Verifies if 'ffsubsync' (ffs command) is installed and accessible.
+   Automatically installs ffmpeg and ffsubsync if missing.
+
+   :param none
+   :return: None
+   """
+
+   verbose_output(f"{BackgroundColors.GREEN}Verifying if 'ffsubsync' command is installed and accessible...{Style.RESET_ALL}") # Output the verbose message
+
+   if shutil.which("ffsubsync") is None: # If ffsubsync is not installed
+      print(f"{BackgroundColors.RED}The 'ffsubsync' command is not installed or not in PATH.{Style.RESET_ALL}")
+      install_ffmpeg() # Install ffmpeg first
+      install_ffsubsync() # Then install ffsubsync
+
+      if shutil.which("ffsubsync") is None: # If ffsubsync is still not installed
+         print(f"{BackgroundColors.RED}Installation failed. 'ffsubsync' is still not accessible. Exiting.{Style.RESET_ALL}")
+         sys.exit(1) # Exit the program with an error code
 
 def verify_filepath_exists(filepath):
    """
@@ -188,6 +210,8 @@ def main():
    """
 
    print(f"{BackgroundColors.CLEAR_TERMINAL}{BackgroundColors.BOLD}{BackgroundColors.GREEN}Welcome to the {BackgroundColors.CYAN}Subtitles Sync{BackgroundColors.GREEN} program!{Style.RESET_ALL}") # Output the welcome message
+
+   verify_ffsubsync_installed() # Verify if ffsubsync is installed
 
    os.makedirs(INPUT_DIRECTORY, exist_ok=True) # Create the input directory if it does
 
