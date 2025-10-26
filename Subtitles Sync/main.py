@@ -88,16 +88,16 @@ def install_ffmpeg():
 
    if current_os == "Darwin": # MacOS
       print(f"{BackgroundColors.GREEN}Installing {BackgroundColors.CYAN}ffmpeg{BackgroundColors.GREEN} via {BackgroundColors.CYAN}Homebrew{BackgroundColors.GREEN}...{Style.RESET_ALL}")
-      os.system("brew install ffmpeg")
+      os.system("brew install ffmpeg") # Install ffmpeg via Homebrew
    elif current_os == "Linux": # Linux
       print(f"{BackgroundColors.GREEN}Installing {BackgroundColors.CYAN}ffmpeg{BackgroundColors.GREEN} via {BackgroundColors.CYAN}apt{BackgroundColors.GREEN}...{Style.RESET_ALL}")
-      os.system("sudo apt update && sudo apt install -y ffmpeg")
+      os.system("sudo apt update -y && sudo apt install -y ffmpeg") # Install ffmpeg via apt
    elif current_os == "Windows": # Windows via Chocolatey
       if shutil.which("choco") is None: # If Chocolatey is not installed
          install_chocolatey() # Install Chocolatey first
       print(f"{BackgroundColors.GREEN}Installing {BackgroundColors.CYAN}ffmpeg{BackgroundColors.GREEN} via {BackgroundColors.CYAN}Chocolatey{BackgroundColors.GREEN}...{Style.RESET_ALL}")
-      os.system("choco install ffmpeg -y") # Install ffmpeg via Chocolatey
-   else:
+      subprocess.run(["choco", "install", "ffmpeg", "-y"], check=True) # Install ffmpeg via Chocolatey
+   else: # Unsupported OS
       print(f"{BackgroundColors.RED}Unsupported OS for automatic ffmpeg installation.{Style.RESET_ALL}")
 
 def install_ffsubsync():
