@@ -8,6 +8,7 @@ all: run
 
 # Main Scripts:
 run: $(VENV)
+	clear;
 	time $(PYTHON) ./main.py
 
 # Setup Virtual Environment and Install Dependencies
