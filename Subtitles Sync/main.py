@@ -204,20 +204,28 @@ def get_srt_file(base_name):
 
    return next((srt for srt in srt_options if os.path.exists(srt)), None) # Return the first existing subtitle file
 
-def sync_subtitle(mkv_file, srt_file):
+def sync_subtitle(video_file, srt_file):
    """
    Runs the ffsubsync command to synchronize the subtitle.
    
-   :param mkv_file: The .mkv file to synchronize the subtitle with
+   :param video_file: The video file to synchronize the subtitle with
    :param srt_file: The subtitle file to synchronize
    :return: None
    """
 
-   verbose_output(f"{BackgroundColors.GREEN}Synchronizing the subtitle file: {BackgroundColors.CYAN}{srt_file}{BackgroundColors.GREEN} with the .mkv file: {BackgroundColors.CYAN}{mkv_file}{Style.RESET_ALL}") # Output the verbose message
-   
-   synced_srt_file = srt_file.replace(".srt", "-synced.srt") # Create a new synced subtitle file name
-   command = f'ffsubsync "{mkv_file}" -i "{srt_file}" -o "{synced_srt_file}"' # Create the command to synchronize the subtitle
-   subprocess.run(command, shell=True) # Run the command
+   verbose_output(f"{BackgroundColors.GREEN}Synchronizing the subtitle file: {BackgroundColors.CYAN}{srt_file}{BackgroundColors.GREEN} with the video file: {BackgroundColors.CYAN}{video_file}{Style.RESET_ALL}") # Output the verbose message
+
+   video_file_abs = os.path.normpath(os.path.abspath(video_file)) # Get the absolute path of the video file
+   srt_file_abs = os.path.normpath(os.path.abspath(srt_file)) # Get the absolute path of the subtitle file
+   synced_srt_file_abs = os.path.splitext(srt_file_abs)[0] + "-synced.srt" # Get the absolute path of the synced subtitle file
+
+   command = ["ffsubsync", video_file_abs, "-i", srt_file_abs, "-o", synced_srt_file_abs] # Command to run ffsubsync
+
+   try: # Try to run the command
+      result = subprocess.run(command, check=True, capture_output=True, text=True) # Run the command
+      verbose_output(f"{BackgroundColors.GREEN}ffsubsync output:{Style.RESET_ALL}\n{result.stdout}") # Output the ffsubsync output
+   except subprocess.CalledProcessError as e: # If the command fails
+      print(f"{BackgroundColors.RED}ffsubsync failed:\n{e.stderr}{Style.RESET_ALL}") # Output the error message
 
 def cleanup_subtitles(directory):
    """
