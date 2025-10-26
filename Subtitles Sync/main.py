@@ -93,7 +93,7 @@ def get_srt_file(base_name):
 
 def sync_subtitle(mkv_file, srt_file):
    """
-   Runs the ffs command to synchronize the subtitle.
+   Runs the ffsubsync command to synchronize the subtitle.
    
    :param mkv_file: The .mkv file to synchronize the subtitle with
    :param srt_file: The subtitle file to synchronize
@@ -103,7 +103,7 @@ def sync_subtitle(mkv_file, srt_file):
    verbose_output(f"{BackgroundColors.GREEN}Synchronizing the subtitle file: {BackgroundColors.CYAN}{srt_file}{BackgroundColors.GREEN} with the .mkv file: {BackgroundColors.CYAN}{mkv_file}{Style.RESET_ALL}") # Output the verbose message
    
    synced_srt_file = srt_file.replace(".srt", "-synced.srt") # Create a new synced subtitle file name
-   command = f'ffs "{mkv_file}" -i "{srt_file}" -o "{synced_srt_file}"' # Create the command to synchronize the subtitle
+   command = f'ffsubsync "{mkv_file}" -i "{srt_file}" -o "{synced_srt_file}"' # Create the command to synchronize the subtitle
    subprocess.run(command, shell=True) # Run the command
 
 def cleanup_subtitles(directory):
