@@ -46,6 +46,29 @@ def verbose_output(true_string="", false_string=""):
    elif false_string != "": # If the false_string is set
       print(false_string) # Output the false statement string
 
+def install_chocolatey():
+   """
+   Installs Chocolatey on Windows if it is not already installed.
+
+   :param none
+   :return: None
+   """
+
+   if shutil.which("choco") is not None: # Chocolatey already installed
+      verbose_output(f"{BackgroundColors.GREEN}Chocolatey is already installed.{Style.RESET_ALL}")
+      return
+
+   print(f"{BackgroundColors.GREEN}Installing {BackgroundColors.CYAN}Chocolatey{BackgroundColors.GREEN} via {BackgroundColors.CYAN}PowerShell{BackgroundColors.GREEN}...{Style.RESET_ALL}")
+
+   command = ( # PowerShell command to install Chocolatey
+      'powershell -NoProfile -InputFormat None -ExecutionPolicy Bypass -Command '
+      '"Set-ExecutionPolicy Bypass -Scope Process -Force; '
+      '[System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; '
+      'iex ((New-Object System.Net.WebClient).DownloadString(\'https://community.chocolatey.org/install.ps1\'))"'
+   )
+
+   os.system(command) # Run the command to install Chocolatey
+
 def install_ffmpeg():
    """
    Installs ffmpeg according to the OS.
