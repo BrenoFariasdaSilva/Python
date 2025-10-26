@@ -27,10 +27,10 @@ SOUND_COMMANDS = {"Darwin": "afplay", "Linux": "aplay", "Windows": "start"} # Th
 SOUND_FILE = "./.assets/Sounds/NotificationSound.wav" # The path to the sound file
 
 # List of directories and files to exclude
-EXCLUDE_DIRS = {"..assets", ".venv"} # Directories to exclude
+EXCLUDE_DIRS = {".assets", ".venv"} # Directories to exclude
 EXCLUDE_FILES = {"./main.py", "./Makefile", "./requirements.txt"} # Files to exclude
 
-# Input Direectory:
+# Input Directory:
 INPUT_DIRECTORY = "./Input" # The input directory
 
 def verbose_output(true_string="", false_string=""):
