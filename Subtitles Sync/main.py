@@ -46,6 +46,36 @@ def verbose_output(true_string="", false_string=""):
    elif false_string != "": # If the false_string is set
       print(false_string) # Output the false statement string
 
+def install_ffmpeg():
+   """
+   Installs ffmpeg according to the OS.
+
+   :param none
+   :return: None
+   """
+
+   current_os = platform.system() # Get the current operating system
+
+   verbose_output(f"{BackgroundColors.GREEN}Installing ffmpeg in the current operating system: {BackgroundColors.CYAN}{current_os}{Style.RESET_ALL}") # Output the verbose message
+
+   if shutil.which("ffmpeg") is not None: # If ffmpeg is already installed
+      verbose_output(f"{BackgroundColors.GREEN}ffmpeg is already installed.{Style.RESET_ALL}")
+      return
+
+   if current_os == "Darwin": # MacOS
+      print(f"{BackgroundColors.GREEN}Installing {BackgroundColors.CYAN}ffmpeg{BackgroundColors.GREEN} via {BackgroundColors.CYAN}Homebrew{BackgroundColors.GREEN}...{Style.RESET_ALL}")
+      os.system("brew install ffmpeg")
+   elif current_os == "Linux": # Linux
+      print(f"{BackgroundColors.GREEN}Installing {BackgroundColors.CYAN}ffmpeg{BackgroundColors.GREEN} via {BackgroundColors.CYAN}apt{BackgroundColors.GREEN}...{Style.RESET_ALL}")
+      os.system("sudo apt update && sudo apt install -y ffmpeg")
+   elif current_os == "Windows": # Windows via Chocolatey
+      if shutil.which("choco") is None: # If Chocolatey is not installed
+         install_chocolatey() # Install Chocolatey first
+      print(f"{BackgroundColors.GREEN}Installing {BackgroundColors.CYAN}ffmpeg{BackgroundColors.GREEN} via {BackgroundColors.CYAN}Chocolatey{BackgroundColors.GREEN}...{Style.RESET_ALL}")
+      os.system("choco install ffmpeg -y") # Install ffmpeg via Chocolatey
+   else:
+      print(f"{BackgroundColors.RED}Unsupported OS for automatic ffmpeg installation.{Style.RESET_ALL}")
+
 def verify_ffsubsync_installed():
    """
    Verifies if 'ffsubsync' (ffs command) is installed and accessible.
