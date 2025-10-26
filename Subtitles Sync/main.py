@@ -20,6 +20,7 @@ class BackgroundColors: # Colors for the terminal
 
 # Execution Constants:
 VERBOSE = False # Set to True to output verbose messages
+VIDEO_EXTENSIONS = [".mkv", ".mp4", ".avi"] # List of video file extensions to process
 
 # Sound Constants:
 SOUND_COMMANDS = {"Darwin": "afplay", "Linux": "aplay", "Windows": "start"} # The commands to play a sound for each operating system
@@ -155,17 +156,35 @@ def get_directories():
 
    return [os.path.join(INPUT_DIRECTORY, d) for d in os.listdir(INPUT_DIRECTORY) if os.path.isdir(os.path.join(INPUT_DIRECTORY, d))] # Return a list of directories inside INPUT_DIRECTORY
 
-def get_mkv_files(directory):
+def get_video_files(directory):
    """
-   Returns a list of .mkv files in a directory, excluding specified files.
+   Returns a list of video files (as defined in VIDEO_EXTENSIONS) in a directory, excluding specified files.
 
-   :param directory: The directory to search for .mkv files.
-   :return: List of .mkv files
+   :param directory: The directory to search for video files.
+   :return: List of video files
    """
 
-   verbose_output(f"{BackgroundColors.GREEN}Getting all .mkv files in the directory: {BackgroundColors.CYAN}{directory}{Style.RESET_ALL}") # Output the verbose message
+   directory_abs = os.path.abspath(directory) # Get the absolute path of the directory
+   verbose_output(f"{BackgroundColors.GREEN}Getting all video files ({', '.join(VIDEO_EXTENSIONS)}) in the directory: {BackgroundColors.CYAN}{directory_abs}{Style.RESET_ALL}") # Output the verbose message
 
-   return [f for f in glob.glob(os.path.join(directory, "*.mkv")) if f not in EXCLUDE_FILES] # Return a list of .mkv files in the directory
+   files = [] # List to store video files
+   for ext in VIDEO_EXTENSIONS: # Collect files for each configured extension
+      pattern = os.path.join(directory_abs, f"*{ext}") # Pattern to match files with the current extension
+      files.extend([os.path.normpath(f) for f in glob.glob(pattern)]) # Add matched files to the list
+
+
+   exclude_abs = {os.path.normpath(os.path.abspath(f)) for f in EXCLUDE_FILES} # Set of absolute paths to exclude
+
+   seen = set() # Set to track seen files to remove duplicates
+   result = [] # List to store the final video files
+   for f in files: # For each file found
+      if f in seen: # If the file has already been seen
+         continue
+      seen.add(f) # Mark the file as seen
+      if f not in exclude_abs: # If the file is not in the exclude list
+         result.append(f) # Add the file to the result list
+
+   return result # Return a list of video files in the directory
 
 def get_srt_file(base_name):
    """
@@ -225,16 +244,14 @@ def process_directory(directory):
    
    print(f"{BackgroundColors.GREEN}Processing the directory: {BackgroundColors.CYAN}{directory}{Style.RESET_ALL}") # Output the verbose message
 
-   os.chdir(directory) # Change to the directory
-   
-   mkv_files = get_mkv_files(directory) # Get all .mkv files in the directory
+   directory_abs = os.path.normpath(os.path.abspath(directory)) # Ensure we operate using absolute, normalized directory paths and print the absolute directory
 
-   for mkv_file in mkv_files: # For each .mkv file
-      base_name = os.path.splitext(mkv_file)[0] # Get the base name of the file
-      srt_file = get_srt_file(base_name) # Get the appropriate subtitle file
-      
-      if srt_file: # If the subtitle file exists
-         sync_subtitle(mkv_file, srt_file) # Synchronize the subtitle
+   video_files = get_video_files(directory_abs) # Get all video files in the directory
+   for video_file in tqdm(video_files, desc=f"{BackgroundColors.GREEN}Processing video files in {BackgroundColors.CYAN}{os.path.basename(directory_abs)}", unit="file"): # For each video file in the directory
+      base_name = os.path.splitext(os.path.basename(video_file))[0] # Use basename
+      srt_file = get_srt_file(os.path.join(directory_abs, base_name)) # Get the appropriate subtitle file
+      if srt_file: # If a subtitle file is found
+         sync_subtitle(video_file, srt_file) # Synchronize the subtitle
    
    cleanup_subtitles(directory) # Cleanup the subtitles
    os.chdir("..") # Change back to the parent directory
