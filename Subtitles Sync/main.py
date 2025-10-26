@@ -297,7 +297,7 @@ def main():
    :return: None
    """
 
-   print(f"{BackgroundColors.CLEAR_TERMINAL}{BackgroundColors.BOLD}{BackgroundColors.GREEN}Welcome to the {BackgroundColors.CYAN}Subtitles Sync{BackgroundColors.GREEN} program!{Style.RESET_ALL}") # Output the welcome message
+   print(f"{BackgroundColors.CLEAR_TERMINAL}{BackgroundColors.BOLD}{BackgroundColors.GREEN}Welcome to the {BackgroundColors.CYAN}Subtitles Sync{BackgroundColors.GREEN} program!{Style.RESET_ALL}", end="\n\n") # Output the welcome message
 
    verify_ffsubsync_installed() # Verify if ffsubsync is installed
 
