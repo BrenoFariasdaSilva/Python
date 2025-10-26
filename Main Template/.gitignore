@@ -13,11 +13,11 @@ Icon? # match Icon<CR>
 **/desktop.ini
 
 # Ignore the Compressed Files
-*.zip
-*.rar
-*.gz
-*.7z
-.tar.gz
+**/.zip
+**/.rar
+**/*.gz
+**/*.7z
+**/*.tar.gz
 
 # Ignore the Data Directories
 **/Dados/*
@@ -35,30 +35,30 @@ Icon? # match Icon<CR>
 !.assets/*
 
 # Ignore the Data Files
-*.csv
-*.json
-*.xml
-*.xls
-*.xlsx
-*.txt
-*.parquet
-*.arff
-*.png
-*.jpg
-*.jpeg
-*.gif
-*.bmp
-*.tiff
-*.svg
-*.~lock*
-!requirements.txt
-!README.md
+**/*.csv
+**/*.json
+**/*.xml
+**/*.xls
+**/*.xlsx
+**/*.txt
+**/*.parquet
+**/*.arff
+**/*.png
+**/*.jpg
+**/*.jpeg
+**/*.gif
+**/*.bmp
+**/*.tiff
+**/*.svg
+**/*.~lock*
+!**/requirements.txt
+!**/README.md
 
 # Environments
-.env
-.venv
-env/
-venv/
-ENV/
-env.bak/
-venv.bak/
+**/.env
+**/.venv
+**/env/
+**/venv/
+**/ENV/
+**/env.bak/
+**/venv.bak/
