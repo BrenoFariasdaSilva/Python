@@ -99,6 +99,21 @@ def install_ffmpeg():
    else:
       print(f"{BackgroundColors.RED}Unsupported OS for automatic ffmpeg installation.{Style.RESET_ALL}")
 
+def install_ffsubsync():
+   """
+   Installs ffsubsync via pip.
+
+   :param none
+   :return: None
+   """
+
+   current_os = platform.system() # Get the current operating system
+
+   verbose_output(f"{BackgroundColors.GREEN}Installing ffsubsync in the current operating system: {BackgroundColors.CYAN}{current_os}{Style.RESET_ALL}") # Output the verbose message
+
+   print(f"{BackgroundColors.GREEN}Installing ffsubsync via pip...{Style.RESET_ALL}") 
+   os.system(f"{sys.executable} -m pip install ffsubsync") # Install ffsubsync via pip
+
 def verify_ffsubsync_installed():
    """
    Verifies if 'ffsubsync' (ffs command) is installed and accessible.
