@@ -3,39 +3,80 @@ __pycache__/
 *.py[cod]
 *$py.class
 
-# Ignore the MacOS DS_Store Files
-.DS_Store
+# System Files
+**/.DS_Store
+**/Thumbs.db
+Icon? # match Icon<CR>
+**/Icon? # explicit: match at any nested level
 
 # Ignore the Windows .Desktop Files
-desktop.ini
+**/desktop.ini
 
 # Ignore the Compressed Files
-*.zip
-*.rar
-*.gz
-*.7z
-.tar.gz
+**/.zip
+**/.rar
+**/*.gz
+**/*.7z
+**/*.tar.gz
 
 # Ignore the Data Directories
-*/Dados/
-*/Data/
-*/Dataset/
-*/Results/
-*/dados/
-*/data/
-*/dataset/
-*/results/
+# Input folders
+**/Input/*
+**/Inputs/*
+**/input/*
+**/inputs/*
+
+# Output folders
+**/Output/*
+**/Outputs/*
+**/output/*
+**/outputs/*
+
+# Data folders
+**/Dados/*
+**/Data/*
+**/dados/*
+**/data/*
+
+# Dataset folders
+**/Dataset/*
+**/Datasets/*
+**/dataset/*
+**/datasets/*
+
+# Results folders
+**/Result/*
+**/Results/*
+**/result/*
+**/results/*
+
+!.assets/*
 
 # Ignore the Data Files
-*.csv
-*.xlsx
-.txt
+**/*.csv
+**/*.json
+**/*.xml
+**/*.xls
+**/*.xlsx
+**/*.txt
+**/*.parquet
+**/*.arff
+**/*.png
+**/*.jpg
+**/*.jpeg
+**/*.gif
+**/*.bmp
+**/*.tiff
+**/*.svg
+**/*.~lock*
+!**/requirements.txt
+!**/README.md
 
 # Environments
-.env
-.venv
-env/
-venv/
-ENV/
-env.bak/
-venv.bak/
+**/.env
+**/.venv
+**/env/
+**/venv/
+**/ENV/
+**/env.bak/
+**/venv.bak/
