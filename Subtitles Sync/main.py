@@ -193,13 +193,14 @@ def get_srt_file(base_name):
    """
    Returns the appropriate subtitle file name if it exists.
    
-   :param base_name: The base name of the .mkv file
+   :param base_name: The base name of the video file
    :return: The subtitle file name if it exists, None otherwise
    """
 
    verbose_output(f"{BackgroundColors.GREEN}Getting the appropriate subtitle file for the base name: {BackgroundColors.CYAN}{base_name}{Style.RESET_ALL}") # Output the verbose message
-   
-   srt_options = [f"{base_name}.srt", f"{base_name}.pt-BR.srt"] # List of possible subtitle files
+
+   base_abs = os.path.abspath(base_name) # Get the absolute path of the base name
+   srt_options = [f"{base_abs}.srt", f"{base_abs}.pt-BR.srt"] # List of possible subtitle files
 
    return next((srt for srt in srt_options if os.path.exists(srt)), None) # Return the first existing subtitle file
 
