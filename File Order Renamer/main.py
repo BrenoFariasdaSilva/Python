@@ -16,6 +16,7 @@ class BackgroundColors: # Colors for the terminal
 
 # Execution Constants:
 VERBOSE = False # Set to True to output verbose messages
+INPUT_DIRECTORY = "./Input" # The input directory to process files from
 
 # Ignored Files and Directories:
 IGNORED_FILES = {"Makefile", "main.py", "requirements.txt"} # Files to be ignored
@@ -55,6 +56,19 @@ def verify_filepath_exists(filepath):
    verbose_output(f"{BackgroundColors.GREEN}Verifying if the file or folder exists at the path: {BackgroundColors.CYAN}{filepath}{Style.RESET_ALL}") # Output the verbose message
 
    return os.path.exists(filepath) # Return True if the file or folder exists, False otherwise
+
+def get_directories():
+   """
+   Get all subdirectories inside the input directory. 
+   Excludes the INPUT_DIRECTORY itself if it contains subdirectories.
+
+   :return: List of absolute paths to subdirectories
+   """
+   
+   dirs = [os.path.normpath(os.path.abspath(root)) for root, _, _ in os.walk(INPUT_DIRECTORY)] # Collect all directories
+   if len(dirs) > 1 and os.path.normpath(os.path.abspath(INPUT_DIRECTORY)) in dirs: # If root dir has subdirs, remove itself
+      dirs.remove(os.path.normpath(os.path.abspath(INPUT_DIRECTORY))) # Remove the root input directory
+   return dirs # Return only valid subdirectories
 
 def getFileFormat(file):
    """
@@ -271,7 +285,11 @@ def main():
 
    print(f"{BackgroundColors.GREEN}Welcome to the {BackgroundColors.CYAN}File Order Renamer{BackgroundColors.GREEN}!{Style.RESET_ALL}", end="\n\n")
 
-   current_path = os.getcwd() # Get the current path
+   if not verify_filepath_exists(INPUT_DIRECTORY): # If the input directory does not exist
+      print(f"{BackgroundColors.RED}Input directory {BackgroundColors.CYAN}{INPUT_DIRECTORY}{BackgroundColors.RED} not found. Please create the directory and add files to it.{Style.RESET_ALL}") # Output the error message
+      return # Exit the program
+   
+   dirs = get_directories() # Get all directories inside the input directory
 
    for dir_path, subdirs, files in os.walk(current_path): # Walk through the current path
       if any(ignored_dir in dir_path for ignored_dir in IGNORED_DIRS): # If the directory is in the ignored directories
