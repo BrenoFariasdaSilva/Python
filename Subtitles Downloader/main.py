@@ -119,13 +119,16 @@ def check_and_install_package(package_name="subliminal"):
 
 def get_directories():
    """
-   Get all directories (including subdirectories) inside the input directory.
+   Get all subdirectories inside the input directory. 
+   Excludes the INPUT_DIRECTORY itself if it contains subdirectories.
 
-   :param none
-   :return: List of directories in absolute paths
+   :return: List of absolute paths to subdirectories
    """
-
-   return [os.path.normpath(os.path.abspath(root)) for root, dirs, files in os.walk(INPUT_DIRECTORY)] # Return a list of all directories (including subdirectories) inside INPUT_DIRECTORY
+   
+   dirs = [os.path.normpath(os.path.abspath(root)) for root, _, _ in os.walk(INPUT_DIRECTORY)] # Collect all directories
+   if len(dirs) > 1 and os.path.normpath(os.path.abspath(INPUT_DIRECTORY)) in dirs: # If root dir has subdirs, remove itself
+      dirs.remove(os.path.normpath(os.path.abspath(INPUT_DIRECTORY))) # Remove the root input directory
+   return dirs # Return only valid subdirectories
 
 def download_subtitles(directory):
    """
