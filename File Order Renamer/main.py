@@ -184,24 +184,34 @@ def find_related_subtitle(file_list, i, number_of_files):
    
    return None # Return None if no related subtitle is found
 
-def rename_with_subtitle(file_list, i, file_number, dir_path, current_file_format, related_subtitle):
+def rename_with_subtitle(file_number, dir_path, related_subtitle):
    """
-   Renames the movie and subtitle files when a related subtitle is found.
+   Renames a related subtitle file with a language code suffix.
+   The movie file is NOT renamed here to prevent multiple renaming errors.
 
-   :param file_list: The list of files to rename.
-   :param i: The index of the movie file in the list.
    :param file_number: The formatted file number to be used in the renaming.
    :param dir_path: The directory path where the files are located.
-   :param current_file_format: The format of the movie file.
    :param related_subtitle: The related subtitle file.
    :return: None
    """
 
-   print(f"Renaming with Subtitle: {BackgroundColors.CYAN}{file_list[i]}{BackgroundColors.GREEN} -> {BackgroundColors.CYAN}{file_number}.{current_file_format}{Style.RESET_ALL}")
-   print(f"Renaming with Subtitle: {BackgroundColors.CYAN}{related_subtitle}{BackgroundColors.GREEN} -> {BackgroundColors.CYAN}{file_number}.srt{Style.RESET_ALL}")
+   sub_base = getFileNameWithoutExtension(related_subtitle) # Get the base name of the subtitle without extension
 
-   os.rename(os.path.join(dir_path, file_list[i]), os.path.join(dir_path, f"{file_number}.{current_file_format}")) # Rename the movie file
-   os.rename(os.path.join(dir_path, related_subtitle), os.path.join(dir_path, f"{file_number}.srt")) # Rename the related subtitle file
+   lang_code = "other" # Default language code
+
+   for lang_family, variants in SUBTITLE_VARIATION.items(): # Loop through each language family and its variants
+      for variant in variants: # Loop through each variant of the language family
+         if variant in sub_base: # If the variant is found in the subtitle base name
+            lang_code = variant # Set the language code to the found variant
+            break # Break the inner loop if a variant is found
+      if lang_code != "other": # If a language code has been found
+         break # Break the outer loop
+
+   new_sub_name = f"{file_number}-{lang_code}.srt" # Prepare new subtitle name with language code suffix
+
+   print(f"Renaming subtitle: {BackgroundColors.CYAN}{related_subtitle}{BackgroundColors.GREEN} -> {BackgroundColors.CYAN}{new_sub_name}{Style.RESET_ALL}")
+
+   os.rename(os.path.join(dir_path, related_subtitle), os.path.join(dir_path, new_sub_name)) # Rename the subtitle file
 
 def rename_file(file_list, i, dir_path, current_file_format, file_number):
    """
