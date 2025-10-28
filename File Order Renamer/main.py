@@ -25,7 +25,10 @@ IGNORED_DIRS = {".assets", "venv"} # Directories to be ignored
 # File Constants:
 MOVIES_FILE_FORMAT = ["avi", "mkv", "mov", "mp4"] # The extensions of the movies
 SUBTITLES_FILE_FORMAT = ["srt"] # The extensions of the subtitles
-SUBTITLE_VARIATION = ["pt-BR", "en-US", "eng", "pt"] # The variations of the subtitles
+SUBTITLE_VARIATION = { # Dictionary of languages and their possible subtitle codes
+   "Portuguese": ["pt-BR", "pt", "pt-PT"], # Portuguese subtitle codes
+   "English": ["eng", "en", "en-US"] # English subtitle codes
+}
 
 # Sound Constants:
 SOUND_COMMANDS = {"Darwin": "afplay", "Linux": "aplay", "Windows": "start"} # The commands to play a sound for each operating system
