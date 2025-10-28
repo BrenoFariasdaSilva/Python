@@ -20,6 +20,7 @@ class BackgroundColors: # Colors for the terminal
 
 # Execution Constants:
 VERBOSE = False # Set to True to output verbose messages
+SKIP_EVERY_LANGUAGES_IF_FOUND = False # Set to True to skip other language families if subtitles are found in one
 LANGUAGES = { # Dictionary of languages and their possible subtitle codes
    "Portuguese": ["pt-BR", "pt", "pt-PT"], # Portuguese subtitle codes
    "English": ["eng"] # English subtitle codes
@@ -164,6 +165,9 @@ def download_subtitles(directory, languages=LANGUAGES):
             if result.returncode == 0: # If the command executed successfully
                print(f"{BackgroundColors.GREEN}Successfully downloaded subtitles for {BackgroundColors.CYAN}{directory}{BackgroundColors.GREEN} using {BackgroundColors.CYAN}{variant}{Style.RESET_ALL}") # Output the success message for the variant
                success = True # Mark success for this language family
+               if SKIP_EVERY_LANGUAGES_IF_FOUND: # If configured to stop processing after finding subtitles for one language family
+                  verbose_output(f"{BackgroundColors.CYAN}{lang_family}{BackgroundColors.GREEN} subtitles found; skipping remaining language families for {BackgroundColors.CYAN}{directory}.{Style.RESET_ALL}") # Verbose message for global skip
+                  return # Stop the entire subtitle downloading process
                break # Stop trying other variants of this language family after success
             else: # If the command did not succeed
                verbose_output(f"{BackgroundColors.YELLOW}No subtitles found for {BackgroundColors.CYAN}{variant}.{Style.RESET_ALL}") # Verbose message when variant yields no subtitles
