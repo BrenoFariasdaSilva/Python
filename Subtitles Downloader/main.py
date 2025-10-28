@@ -20,6 +20,10 @@ class BackgroundColors: # Colors for the terminal
 
 # Execution Constants:
 VERBOSE = False # Set to True to output verbose messages
+LANGUAGES = { # Dictionary of languages and their possible subtitle codes
+   "Portuguese": ["pt-BR", "pt", "pt-PT"], # Portuguese subtitle codes
+   "English": ["eng"] # English subtitle codes
+}
 
 # Sound Constants:
 SOUND_COMMANDS = {"Darwin": "afplay", "Linux": "aplay", "Windows": "start"} # The commands to play a sound for each operating system
@@ -130,31 +134,46 @@ def get_directories():
       dirs.remove(os.path.normpath(os.path.abspath(INPUT_DIRECTORY))) # Remove the root input directory
    return dirs # Return only valid subdirectories
 
-def download_subtitles(directory):
+def download_subtitles(directory, languages=LANGUAGES):
    """
-   Download subtitles for the specified directory in multiple languages.
+   Download subtitles for the specified directory in multiple language groups.
+   Tries language variants for each group until one variant succeeds, then
+   proceeds to the next language family.
 
    :param directory: The directory to download subtitles for
+   :param languages: Dictionary of language families and their variants
    :return: None
    """
 
-   languages = ["pt-BR", "eng"] # Add any additional language codes here
+   venv_bin = os.path.join(sys.prefix, "bin" if os.name != "nt" else "Scripts") # Define the virtual environment bin/Scripts path depending on OS
+   subliminal_cmd = os.path.join(venv_bin, "subliminal") # Define the path to the subliminal command inside the venv
 
-   venv_bin = os.path.join(sys.prefix, "bin" if os.name != "nt" else "Scripts") # The path to the virtual environment bin directory
-   subliminal_cmd = os.path.join(venv_bin, "subliminal") # The path to the subliminal command
+   if not shutil.which(subliminal_cmd): # If the subliminal command is not found in venv
+      subliminal_cmd = "subliminal" # Fallback to the system-wide installation
 
-   if not shutil.which(subliminal_cmd): # If subliminal command does not exist in the virtual environment
-      subliminal_cmd = "subliminal" # fallback to system-wide installation
+   for lang_family, variants in languages.items(): # Loop through each language family and its variants
+      print(f"{BackgroundColors.BOLD}{BackgroundColors.GREEN}Trying to download {BackgroundColors.CYAN}{lang_family}{BackgroundColors.GREEN} subtitles for {BackgroundColors.CYAN}{directory}{Style.RESET_ALL}") # Output the language family being processed
 
-   for lang in languages: # Loop through the languages
-      print(f"{BackgroundColors.GREEN}Downloading subtitles in {BackgroundColors.YELLOW}{lang}{BackgroundColors.GREEN} for {BackgroundColors.CYAN}{directory}{BackgroundColors.GREEN}...{Style.RESET_ALL}")
-      
-      command = f'"{subliminal_cmd}" download -l {lang} -m 50 "{directory}"' # The command to download subtitles using subliminal
-      
-      try: # Try to run the command in the terminal
-         subprocess.run(command, shell=True, check=True) # Run the command in the terminal
-      except subprocess.CalledProcessError: # If the process fails
-         print(f"{BackgroundColors.RED}Failed to download subtitles for {directory}{Style.RESET_ALL}")
+      success = False # Initialize success flag for the current language family
+
+      for variant in variants: # Loop through each variant of the current language family
+         command = f'"{subliminal_cmd}" download -l {variant} -m 50 "{directory}"' # Build the subliminal command with the current language variant
+
+         try: # Try to execute the command
+            result = subprocess.run(command, shell=True, check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) # Execute the subliminal command silently and store the result
+            if result.returncode == 0: # If the command executed successfully
+               print(f"{BackgroundColors.GREEN}Successfully downloaded subtitles for {BackgroundColors.CYAN}{directory}{BackgroundColors.GREEN} using {BackgroundColors.CYAN}{variant}{Style.RESET_ALL}") # Output the success message for the variant
+               success = True # Mark success for this language family
+               break # Stop trying other variants of this language family after success
+            else: # If the command did not succeed
+               verbose_output(f"{BackgroundColors.YELLOW}No subtitles found for {BackgroundColors.CYAN}{variant}.{Style.RESET_ALL}") # Verbose message when variant yields no subtitles
+         except subprocess.CalledProcessError: # Handle command execution errors
+            verbose_output(f"{BackgroundColors.RED}Error while downloading subtitles for {BackgroundColors.CYAN}{variant}.{Style.RESET_ALL}") # Verbose message on command error
+
+      if not success: # If no variant succeeded for the current language family
+         verbose_output(f"{BackgroundColors.YELLOW}No subtitles found for {BackgroundColors.CYAN}{lang_family}{BackgroundColors.YELLOW} in {BackgroundColors.CYAN}{directory}.{Style.RESET_ALL}") # Verbose warning for the language family
+      else: # If at least one variant succeeded for the current language family
+         verbose_output(f"{BackgroundColors.CYAN}{lang_family}{BackgroundColors.GREEN} subtitles found; moving to next language family.{Style.RESET_ALL}") # Verbose info that we will continue to next language family
 
 def process_directories(dirs):
    """
