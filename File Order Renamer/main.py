@@ -231,45 +231,46 @@ def rename_file(file_list, i, dir_path, current_file_format, file_number):
 
 def rename_movies(file_list, dir_path):
    """
-   This function renames the movies and subtitles in the directory.
+   Renames movie files and their related subtitles with language code suffix.
+   Movie files are renamed exactly once after their subtitles are processed.
 
-   :param file_list: The list of files to rename.
-   :param dir_path: The directory path.
+   :param file_list: List of files in the directory.
+   :param dir_path: Path of the directory.
    :return: None
    """
-   
-   verbose_output(f"{BackgroundColors.YELLOW}Renaming the files in the directory: {BackgroundColors.CYAN}{dir_path}{Style.RESET_ALL}")
-   
-   movie_files = [file for file in file_list if getFileFormat(file) not in SUBTITLES_FILE_FORMAT] # Get the movie files
-   subtitle_files = [file for file in file_list if getFileFormat(file) in SUBTITLES_FILE_FORMAT] # Get the subtitle files
 
-   movie_files.sort() # Sort the movie files
-   subtitle_files.sort() # Sort the subtitle files
+   verbose_output(f"{BackgroundColors.GREEN}Renaming the files in the directory: {BackgroundColors.CYAN}{dir_path}{Style.RESET_ALL}")
 
-   file_order = 1 # Initialize the file order for renaming
+   movie_files = [file for file in file_list if getFileFormat(file) not in SUBTITLES_FILE_FORMAT] # Movie files
+   subtitle_files = [file for file in file_list if getFileFormat(file) in SUBTITLES_FILE_FORMAT] # Subtitle files
 
-   for movie_file in movie_files: # Loop through the movie files to rename them
-      current_file_format = getFileFormat(movie_file) # Get the format of the current movie file
-      file_number = get_file_number(file_order) # Get the formatted file number
+   movie_files.sort() # Sort movie files
+   subtitle_files.sort() # Sort subtitle files
 
-      related_subtitle = find_related_subtitle(file_list, file_list.index(movie_file), len(file_list)) # Find related subtitle
-      
-      if related_subtitle: # If a related subtitle is found
-         rename_with_subtitle(file_list, file_list.index(movie_file), file_number, dir_path, current_file_format, related_subtitle) # Rename both movie and subtitle files
-         file_order += 1 # Increment the file order for the next renaming
-         continue # Skip incrementing "file_order" here since the subtitle is handled
+   file_order = 1 # Initialize file numbering
 
-      else: # If no related subtitle is found
-         rename_file(file_list, file_list.index(movie_file), dir_path, current_file_format, file_number) # Rename the movie file
-         file_order += 1 # Increment the file order for the next renaming
+   # Loop through each movie file
+   for movie_file in movie_files:
+      current_file_format = getFileFormat(movie_file) # Get movie file format
+      file_number = get_file_number(file_order) # Get formatted file number
 
-   subtitle_file_order = 1 # For subtitle files, we can start fresh
-   for subtitle_file in subtitle_files: # Loop through the subtitle files to rename them
-      current_file_format = getFileFormat(subtitle_file) # Get the format of the current subtitle file
-      file_number = get_file_number(subtitle_file_order) # Get the formatted file number
+      related_subs = [sub for sub in subtitle_files if is_related_movie_subtitle(movie_file, sub)] # Find all related subtitles for this movie
 
-      rename_file(file_list, file_list.index(subtitle_file), dir_path, current_file_format, file_number) # Rename the subtitle file
-      subtitle_file_order += 1 # Increment the subtitle file order for the next renaming
+      for sub in related_subs: # Rename all related subtitles with language code suffix
+         rename_with_subtitle(file_number, dir_path, sub) # Rename the related subtitle
+         if sub in subtitle_files: # If the subtitle is still in the list
+            subtitle_files.remove(sub) # Remove renamed subtitle from the list
+
+      print(f"Renaming movie: {BackgroundColors.CYAN}{movie_file}{BackgroundColors.GREEN} -> {BackgroundColors.CYAN}{file_number}.{current_file_format}{Style.RESET_ALL}")
+      os.rename(os.path.join(dir_path, movie_file), os.path.join(dir_path, f"{file_number}.{current_file_format}")) # Rename the movie file
+
+      file_order += 1 # Increment file order
+
+   for sub in subtitle_files: # Loop through leftover subtitle files
+      current_file_format = getFileFormat(sub) # Get subtitle file format
+      file_number = get_file_number(file_order) # Get formatted file number
+      rename_file(file_list, file_list.index(sub), dir_path, current_file_format, file_number) # Rename the leftover subtitle file
+      file_order += 1 # Increment file order
 
 def play_sound():
    """
