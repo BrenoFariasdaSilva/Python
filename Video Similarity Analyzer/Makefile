@@ -1,21 +1,46 @@
-# Name of the virtual environment directory
+# Variables
 VENV := venv
-# Python command to use
-PYTHON := python3
+OS := $(shell uname 2>/dev/null || echo Windows)
 
-.PHONY: all venv dependencies run
+# Detect correct Python and Pip commands based on OS
+ifeq ($(OS), Windows)
+	PYTHON := $(VENV)/Scripts/python.exe
+	PIP := $(VENV)/Scripts/pip.exe
+	PYTHON_CMD := python
+	CLEAR_CMD := cls
+	TIME_CMD :=
+else
+	PYTHON := $(VENV)/bin/python3
+	PIP := $(VENV)/bin/pip
+	PYTHON_CMD := python3
+	CLEAR_CMD := clear
+	TIME_CMD := time
+endif
 
-all: venv dependencies run
+# Main target that runs the scripts
+all: run
 
-venv: $(VENV)/bin/activate
+# Main Scripts:
+run: $(VENV)
+	$(CLEAR_CMD)
+	$(TIME_CMD) $(PYTHON) ./main.py
 
-$(VENV)/bin/activate:
-	$(PYTHON) -m venv $(VENV)
-	$(VENV)/bin/pip install --upgrade pip
-	touch $(VENV)/bin/activate
+# Setup Virtual Environment and Install Dependencies
+$(VENV):
+	$(PYTHON_CMD) -m venv $(VENV)
+	$(PIP) install -r requirements.txt
 
-run:
-	clear; time $(VENV)/bin/python ./main.py
+# Install the project dependencies
+dependencies: $(VENV)
 
-dependencies:
-	$(VENV)/bin/pip install colorama imagehash opencv-python Pillow tqdm
+# Generate requirements.txt from the current venv
+generate_requirements: $(VENV)
+	$(PIP) freeze > requirements.txt
+
+# Utility rule for cleaning the project
+clean:
+	rm -rf $(VENV)
+	find . -type f -name '*.pyc' -delete || del /S /Q *.pyc 2>nul
+	find . -type d -name '__pycache__' -delete || rmdir /S /Q __pycache__ 2>nul
+
+.PHONY: run clean dependencies generate_requirements imagehash opencv-python Pillow tqdm
