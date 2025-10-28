@@ -23,7 +23,7 @@ VERBOSE = False # Set to True to output verbose messages
 SKIP_EVERY_LANGUAGES_IF_FOUND = False # Set to True to skip other language families if subtitles are found in one
 LANGUAGES = { # Dictionary of languages and their possible subtitle codes
    "Portuguese": ["pt-BR", "pt", "pt-PT"], # Portuguese subtitle codes
-   "English": ["eng"] # English subtitle codes
+   "English": ["eng", "en", "en-US"] # English subtitle codes
 }
 
 # Sound Constants:
