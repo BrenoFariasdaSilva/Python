@@ -184,15 +184,17 @@ def find_related_subtitle(file_list, i, number_of_files):
    
    return None # Return None if no related subtitle is found
 
-def rename_with_subtitle(file_number, dir_path, related_subtitle):
+def rename_with_subtitle(file_number, dir_path, related_subtitle, has_portuguese):
    """
    Renames a related subtitle file with a language code suffix.
    The movie file is NOT renamed here to prevent multiple renaming errors.
+   The first Portuguese subtitle found will be named exactly like the movie, without a suffix.
 
    :param file_number: The formatted file number to be used in the renaming.
    :param dir_path: The directory path where the files are located.
    :param related_subtitle: The related subtitle file.
-   :return: None
+   :param has_portuguese: Boolean flag indicating whether a Portuguese subtitle has already been processed.
+   :return: Updated has_portuguese flag (True if a Portuguese subtitle was just renamed without suffix)
    """
 
    sub_base = getFileNameWithoutExtension(related_subtitle) # Get the base name of the subtitle without extension
@@ -207,11 +209,18 @@ def rename_with_subtitle(file_number, dir_path, related_subtitle):
       if lang_code != "other": # If a language code has been found
          break # Break the outer loop
 
-   new_sub_name = f"{file_number}-{lang_code}.srt" # Prepare new subtitle name with language code suffix
+   # If it's the first Portuguese subtitle, rename it without suffix
+   if lang_code in SUBTITLE_VARIATION["Portuguese"] and not has_portuguese:
+      new_sub_name = f"{file_number}.srt" # Portuguese subtitle without suffix
+      has_portuguese = True # Mark that a Portuguese subtitle has already been used
+   else:
+      new_sub_name = f"{file_number}-{lang_code}.srt" # Subtitle with language code suffix
 
    print(f"Renaming subtitle: {BackgroundColors.CYAN}{related_subtitle}{BackgroundColors.GREEN} -> {BackgroundColors.CYAN}{new_sub_name}{Style.RESET_ALL}")
 
    os.rename(os.path.join(dir_path, related_subtitle), os.path.join(dir_path, new_sub_name)) # Rename the subtitle file
+
+   return has_portuguese # Return updated Portuguese flag
 
 def rename_file(file_list, i, dir_path, current_file_format, file_number):
    """
@@ -232,6 +241,7 @@ def rename_file(file_list, i, dir_path, current_file_format, file_number):
 def rename_movies(file_list, dir_path):
    """
    Renames movie files and their related subtitles with language code suffix.
+   The first Portuguese subtitle found for each movie is renamed without suffix.
    Movie files are renamed exactly once after their subtitles are processed.
 
    :param file_list: List of files in the directory.
@@ -256,8 +266,10 @@ def rename_movies(file_list, dir_path):
 
       related_subs = [sub for sub in subtitle_files if is_related_movie_subtitle(movie_file, sub)] # Find all related subtitles for this movie
 
+      has_portuguese = False # Track if a Portuguese subtitle was already renamed without suffix
+
       for sub in related_subs: # Rename all related subtitles with language code suffix
-         rename_with_subtitle(file_number, dir_path, sub) # Rename the related subtitle
+         has_portuguese = rename_with_subtitle(file_number, dir_path, sub, has_portuguese) # Rename the related subtitle and update flag
          if sub in subtitle_files: # If the subtitle is still in the list
             subtitle_files.remove(sub) # Remove renamed subtitle from the list
 
