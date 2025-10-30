@@ -127,20 +127,35 @@ def extract_season_episode(file_name):
    """
    This function extracts the season and episode numbers from a file name.
    
+   It supports two patterns:
+   - "S{season}E{episode}" (e.g., S01E01)
+   - "{episode:02}.{extension}" (e.g., 01.mkv) where season defaults to 1
+   
    :param file_name: The file name to extract the season and episode from.
    :return: A tuple (season, episode) if found, otherwise None.
    """
 
-   verbose_output(f"{BackgroundColors.YELLOW}Extracting the season and episode numbers from the file name: {BackgroundColors.CYAN}{file_name}{Style.RESET_ALL}") # Output the verbose message
+   verbose_output(f"{BackgroundColors.GREEN}Extracting the season and episode numbers from the file name: {BackgroundColors.CYAN}{file_name}{Style.RESET_ALL}") # Output the verbose message
 
-   pattern = r"S(\d+)E(\d+)" # Pattern to match season and episode (e.g., S01E01)
-   match = re.search(pattern, file_name, re.IGNORECASE) # Search for the pattern in the file name
+   # First try the classic SxxExx pattern
+   pattern_season_episode = r"S(\d+)E(\d+)" # Pattern to match season and episode (e.g., S01E01)
+   match = re.search(pattern_season_episode, file_name, re.IGNORECASE) # Search for the SxxExx pattern in the file name
 
-   if match: # If the pattern is found
+   if match: # If the SxxExx pattern is found
       season = int(match.group(1)) # Extract the season number
       episode = int(match.group(2)) # Extract the episode number
       return season, episode # Return the season and episode numbers as a tuple
-   return None
+
+   # Fallback to the simplified two-digit prefix pattern (e.g., 01.mkv)
+   pattern_two_digit = r"(\d{2})\.(\w+)$" # Pattern to match a two-digit number before the file extension (e.g., 01.mkv)
+   match2 = re.search(pattern_two_digit, file_name) # Search for the two-digit pattern in the file name
+
+   if match2: # If the two-digit pattern is found
+      season = 1 # Default season number set to 1 for simplified naming convention
+      episode = int(match2.group(1)) # Extract the episode number from the two-digit match
+      return season, episode # Return the season and episode numbers as a tuple
+
+   return None # Return None if no pattern matched
 
 def is_related_movie_subtitle(movie_file, subtitle_file):
    """
