@@ -106,23 +106,21 @@ def install_ffmpeg():
 
 def install_ffsubsync():
    """
-   Installs ffsubsync via pip inside the virtual environment and globally.
+   Installs ffsubsync via pip in the current environment.
 
-   :param none
-   :return: None
+   This follows the official documentation:
+   - Works with Python >= 3.6
+   - Installs using pip in the current Python environment
    """
 
-   current_os = platform.system() # Get the current operating system
+   verbose_output(f"{BackgroundColors.GREEN}Installing ffsubsync via pip...{Style.RESET_ALL}")
 
-   verbose_output(f"{BackgroundColors.GREEN}Installing ffsubsync in the current operating system: {BackgroundColors.CYAN}{current_os}{Style.RESET_ALL}") # Output the verbose message
-
-   print(f"{BackgroundColors.GREEN}Installing ffsubsync via pip in the virtual environment...{Style.RESET_ALL}") # Print installation message for venv
-   os.system(f"{sys.executable} -m pip install ffsubsync") # Install ffsubsync inside the virtual environment
-
-   python_cmd = "python3" if current_os != "Windows" else "python" # Choose correct python command for global installation
-
-   print(f"{BackgroundColors.GREEN}Installing ffsubsync globally using {python_cmd}...{Style.RESET_ALL}") # Print installation message for global environment
-   os.system(f"{python_cmd} -m pip install ffsubsync") # Install ffsubsync globally (outside venv)
+   try: # Try to install ffsubsync via pip
+      subprocess.run([sys.executable, "-m", "pip", "install", "ffsubsync"], check=True) # Install ffsubsync via pip
+      verbose_output(f"{BackgroundColors.GREEN}ffsubsync installed successfully.{Style.RESET_ALL}")
+   except subprocess.CalledProcessError as e: # If the installation fails
+      print(f"{BackgroundColors.RED}Failed to install ffsubsync: {e}{Style.RESET_ALL}")
+      sys.exit(1) # Exit the program with an error code
 
 def verify_ffsubsync_installed():
    """
