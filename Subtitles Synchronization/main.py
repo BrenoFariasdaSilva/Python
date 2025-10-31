@@ -124,23 +124,31 @@ def install_ffsubsync():
 
 def verify_ffsubsync_installed():
    """
-   Verifies if 'ffsubsync' (ffs command) is installed and accessible.
-   Automatically installs ffmpeg and ffsubsync if missing.
+   Verifies that 'ffsubsync' is installed and accessible.
+   If missing, installs ffmpeg and ffsubsync.
 
-   :param none
-   :return: None
+   Uses shutil.which to detect the executable.
    """
 
-   verbose_output(f"{BackgroundColors.GREEN}Verifying if 'ffsubsync' command is installed and accessible...{Style.RESET_ALL}") # Output the verbose message
+   verbose_output(f"{BackgroundColors.GREEN}Verifying ffsubsync installation...{Style.RESET_ALL}")
 
-   if shutil.which("ffsubsync") is None: # If ffsubsync is not installed
-      print(f"{BackgroundColors.RED}The 'ffsubsync' command is not installed or not in PATH.{Style.RESET_ALL}")
-      install_ffmpeg() # Install ffmpeg first
-      install_ffsubsync() # Then install ffsubsync
+   ffsubsync_path = shutil.which("ffsubsync") # Check if ffsubsync is in PATH
+   if ffsubsync_path is None: # If ffsubsync is not found
+      install_ffmpeg() # Ensure ffmpeg is installed
+      install_ffsubsync() # Install ffsubsync
 
-      if shutil.which("ffsubsync") is None: # If ffsubsync is still not installed
-         print(f"{BackgroundColors.RED}Installation failed. 'ffsubsync' is still not accessible. Exiting.{Style.RESET_ALL}")
+      ffsubsync_path = shutil.which("ffsubsync") # Check again if ffsubsync is in PATH
+      if ffsubsync_path is None: # If still not found
+         possible_path = os.path.expanduser(r"~\AppData\Roaming\Python\Python312\Scripts\ffsubsync.exe") # Possible path on Windows
+         if os.path.exists(possible_path): # If the possible path exists
+            ffsubsync_path = possible_path # Set ffsubsync_path to the possible path
+
+      if ffsubsync_path is None: # If ffsubsync is still not found
+         print(f"{BackgroundColors.RED}ffsubsync is still not accessible. Exiting.{Style.RESET_ALL}")
          sys.exit(1) # Exit the program with an error code
+
+      verbose_output(f"{BackgroundColors.GREEN}ffsubsync is installed and accessible at: {BackgroundColors.CYAN}{ffsubsync_path}{Style.RESET_ALL}")
+      return ffsubsync_path # Return the path to ffsubsync
 
 def verify_filepath_exists(filepath):
    """
