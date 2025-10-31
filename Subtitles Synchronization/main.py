@@ -229,6 +229,31 @@ def get_srt_file(base_name):
 
    return next((srt for srt in srt_options if os.path.exists(srt)), None) # Return the first existing subtitle file
 
+def find_ffsubsync():
+   """
+   Finds the ffsubsync executable.
+   Returns the absolute path if found, otherwise None.
+   """
+
+   path = shutil.which("ffsubsync") # Check if ffsubsync is in PATH
+   if path: # If found in PATH
+      return path # Return the path
+
+   possible_path = os.path.expanduser(r"~\AppData\Roaming\Python\Python312\Scripts\ffsubsync.exe") # Possible path on Windows
+   if os.path.exists(possible_path): # If the possible path exists
+      return possible_path # Return the possible path
+
+   print(
+      f"{BackgroundColors.RED}⚠️ Could not find ffsubsync executable.{Style.RESET_ALL}\n"
+      f"Please install it via pip if not installed:\n"
+      f"    python -m pip install ffsubsync\n\n"
+      f"Or add it to your PATH so it can be found by this program. On Windows, you can run:\n"
+      f"    setx PATH \"%PATH%;{possible_path}\"\n\n"
+      f"After that, restart your terminal or IDE and run the program again."
+   )
+   
+   return None
+
 def sync_subtitle(video_file, srt_file):
    """
    Runs the ffsubsync command to synchronize the subtitle.
@@ -243,8 +268,13 @@ def sync_subtitle(video_file, srt_file):
    video_file_abs = os.path.normpath(os.path.abspath(video_file)) # Get the absolute path of the video file
    srt_file_abs = os.path.normpath(os.path.abspath(srt_file)) # Get the absolute path of the subtitle file
    synced_srt_file_abs = os.path.splitext(srt_file_abs)[0] + "-synced.srt" # Get the absolute path of the synced subtitle file
+   
+   ffsubsync_path = find_ffsubsync() # Find the ffsubsync executable
+   if not ffsubsync_path: # If ffsubsync is not found
+      print(f"{BackgroundColors.RED}Skipping subtitle synchronization for {srt_file}{Style.RESET_ALL}")
+      return
 
-   command = ["ffsubsync", video_file_abs, "-i", srt_file_abs, "-o", synced_srt_file_abs] # Command to run ffsubsync
+   command = [ffsubsync_path, video_file_abs, "-i", srt_file_abs, "-o", synced_srt_file_abs] # Command to run ffsubsync
 
    try: # Try to run the command
       result = subprocess.run(command, check=True, capture_output=True, text=True) # Run the command
