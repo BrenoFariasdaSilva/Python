@@ -21,6 +21,10 @@ class BackgroundColors: # Colors for the terminal
 # Execution Constants:
 VERBOSE = False # Set to True to output verbose messages
 VIDEO_FILE_EXTENSIONS = [".mkv", ".mp4", ".avi"] # List of video file extensions to process
+SRT_OPTIONS = { # Dictionary of languages and their possible subtitle codes
+   "Portuguese": ["pt-BR", "pt", "pt-PT"], # Portuguese subtitle codes
+   "English": ["eng", "en", "en-US"] # English subtitle codes
+}
 
 # Sound Constants:
 SOUND_COMMANDS = {"Darwin": "afplay", "Linux": "aplay", "Windows": "start"} # The commands to play a sound for each operating system
@@ -210,7 +214,12 @@ def get_srt_file(base_name):
    verbose_output(f"{BackgroundColors.GREEN}Getting the appropriate subtitle file for the base name: {BackgroundColors.CYAN}{base_name}{Style.RESET_ALL}") # Output the verbose message
 
    base_abs = os.path.abspath(base_name) # Get the absolute path of the base name
-   srt_options = [f"{base_abs}.srt", f"{base_abs}.pt-BR.srt"] # List of possible subtitle files
+
+   srt_options = [f"{base_abs}.srt"] # Initialize the list with the default .srt option
+
+   for lang_family, variants in SRT_OPTIONS.items(): # Loop through each language and its variants
+      for variant in variants: # Loop through each variant of the language
+         srt_options.append(f"{base_abs}.{variant}.srt") # Add each possible variant subtitle file
 
    return next((srt for srt in srt_options if os.path.exists(srt)), None) # Return the first existing subtitle file
 
