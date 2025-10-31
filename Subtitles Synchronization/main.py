@@ -102,7 +102,7 @@ def install_ffmpeg():
 
 def install_ffsubsync():
    """
-   Installs ffsubsync via pip.
+   Installs ffsubsync via pip inside the virtual environment and globally.
 
    :param none
    :return: None
@@ -112,8 +112,13 @@ def install_ffsubsync():
 
    verbose_output(f"{BackgroundColors.GREEN}Installing ffsubsync in the current operating system: {BackgroundColors.CYAN}{current_os}{Style.RESET_ALL}") # Output the verbose message
 
-   print(f"{BackgroundColors.GREEN}Installing ffsubsync via pip...{Style.RESET_ALL}") 
-   os.system(f"{sys.executable} -m pip install ffsubsync") # Install ffsubsync via pip
+   print(f"{BackgroundColors.GREEN}Installing ffsubsync via pip in the virtual environment...{Style.RESET_ALL}") # Print installation message for venv
+   os.system(f"{sys.executable} -m pip install ffsubsync") # Install ffsubsync inside the virtual environment
+
+   python_cmd = "python3" if current_os != "Windows" else "python" # Choose correct python command for global installation
+
+   print(f"{BackgroundColors.GREEN}Installing ffsubsync globally using {python_cmd}...{Style.RESET_ALL}") # Print installation message for global environment
+   os.system(f"{python_cmd} -m pip install ffsubsync") # Install ffsubsync globally (outside venv)
 
 def verify_ffsubsync_installed():
    """
