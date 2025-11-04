@@ -67,7 +67,7 @@ class BackgroundColors: # Colors for the terminal
 
 # Execution Constants:
 VERBOSE = False # Set to True to output verbose messages
-INPUT_DIR = "D:\Sem Backup\Download\Silicon Valley" # Root directory to search for videos
+INPUT_DIR = "./Input/" # Root directory to search for videos
 VIDEO_FILE_EXTENSIONS = [".mkv", ".mp4", ".avi"] # List of video file extensions to process
 
 # Sound Constants:
