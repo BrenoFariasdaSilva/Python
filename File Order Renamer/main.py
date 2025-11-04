@@ -337,8 +337,6 @@ def main():
          continue # Skip the directory if it is in the ignored directories
 
       files = os.listdir(dir_path) # List all files in the current directory
-      if not any(getFileFormat(file).lower() in SUBTITLES_FILE_FORMAT for file in files): # Skip directories without subtitle files
-         continue # Skip the directory if it does not contain any .srt file
 
       file_list = [file for file in files if file not in IGNORED_FILES and (getFileFormat(file) in MOVIES_FILE_FORMAT or getFileFormat(file) in SUBTITLES_FILE_FORMAT)] # Get the list of files in the directory
       file_list.sort() # Sort the list of files
