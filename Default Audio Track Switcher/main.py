@@ -235,19 +235,16 @@ def select_audio_track(tracks):
          return tracks[int(choice)]["index"] # Return the selected track index
       print(f"{BackgroundColors.RED}Invalid selection. Please try again.{Style.RESET_ALL}")
 
-def swap_audio_tracks(video_path):
+def get_audio_track_info(video_path):
    """
-   Swap the default audio track in the video with the non-default track.
-   Automatically detects and prioritizes English audio tracks.
-   Requires ffmpeg and ffprobe installed and available in PATH.
+   Retrieve audio track information from a video file using ffprobe.
 
    :param video_path: Path to the video file
-   :return: None
+   :return: List of audio track strings (format: index,language,default_flag)
    """
 
-   verbose_output(f"{BackgroundColors.GREEN}Swapping audio tracks for video: {BackgroundColors.CYAN}{video_path}{Style.RESET_ALL}") # Output the verbose message
+   verbose_output(f"{BackgroundColors.GREEN}Retrieving audio track information for: {BackgroundColors.CYAN}{video_path}{Style.RESET_ALL}") # Output the verbose message
 
-   # Get audio track information with disposition using ffprobe
    probe_cmd = [
       "ffprobe",
       "-v", "error",
@@ -258,14 +255,16 @@ def swap_audio_tracks(video_path):
    ]
 
    result = subprocess.run(probe_cmd, capture_output=True, text=True) # Run ffprobe and capture output
-   audio_tracks = result.stdout.strip().splitlines() # Get audio track info
+   return result.stdout.strip().splitlines() # Get audio track info
 
-   num_tracks = len(audio_tracks) # Number of audio tracks found
-   if num_tracks == 0: # If no audio tracks found
-      print(f"{BackgroundColors.YELLOW}No audio tracks found for: {BackgroundColors.CYAN}{video_path}{Style.RESET_ALL}")
-      return # Skip this file
+def is_english_track_default(audio_tracks):
+   """
+   Check if an English audio track is already set as default.
 
-   # Check if English track is already the default
+   :param audio_tracks: List of audio track strings
+   :return: True if English track is default, False otherwise
+   """
+
    for i, track in enumerate(audio_tracks):
       # Extract track info (format: index,language,default_flag)
       track_info = track.split(',')
@@ -273,42 +272,94 @@ def swap_audio_tracks(video_path):
          language = track_info[1].lower().strip() if len(track_info[1].strip()) > 0 else "und"
          is_default = track_info[2].strip() == "1"
          # If English track is already default, nothing to do
-         if is_default and language in ["english", "eng" ]:
-            verbose_output(f"{BackgroundColors.GREEN}English audio track is already default for: {BackgroundColors.CYAN}{video_path}{Style.RESET_ALL}")
-            return # Skip this file
+         if is_default and language in ["english", "eng"]:
+            return True # English track is already default
+   
+   return False # English track is not default
 
-   # Try to automatically detect English audio track
-   english_track_index = None
+def find_english_track_index(audio_tracks):
+   """
+   Find the index of the first English audio track.
+
+   :param audio_tracks: List of audio track strings
+   :return: Index of English track if found, None otherwise
+   """
+
    for i, track in enumerate(audio_tracks):
-      # Extract language from track info (format is typically "index,language")
+      # Extract language from track info (format: index,language,default_flag)
       track_info = track.split(',')
       if len(track_info) >= 2:
          language = track_info[1].lower().strip()
          # Check if language is English (case-insensitive)
          if language in ["english", "eng"]:
-            english_track_index = i
             verbose_output(f"{BackgroundColors.GREEN}Automatically detected English audio track at index {i}{Style.RESET_ALL}")
-            break
+            return i # Return the English track index
+   
+   return None # No English track found
+
+def prompt_user_track_selection(audio_tracks, video_path):
+   """
+   Prompt the user to manually select an audio track.
+
+   :param audio_tracks: List of audio track strings
+   :param video_path: Path to the video file (for display)
+   :return: Selected track index, or None if invalid input
+   """
+
+   print(f"\n{BackgroundColors.CYAN}Audio tracks found in:{BackgroundColors.GREEN} {video_path}{Style.RESET_ALL}")
+   for i, track in enumerate(audio_tracks):
+      print(f"   [{i}] {track}")
+   
+   try:
+      default_track_index = int(input(f"{BackgroundColors.YELLOW}Select the track index to set as default:{Style.RESET_ALL} "))
+   except ValueError:
+      print(f"{BackgroundColors.RED}Invalid input. Skipping file.{Style.RESET_ALL}")
+      return None
+   
+   if default_track_index < 0 or default_track_index >= len(audio_tracks):
+      print(f"{BackgroundColors.RED}Invalid track index. Skipping file.{Style.RESET_ALL}")
+      return None
+   
+   return default_track_index
+
+def determine_default_track(audio_tracks, video_path):
+   """
+   Determine which audio track should be set as default.
+   Prioritizes English tracks, then prompts user if needed.
+
+   :param audio_tracks: List of audio track strings
+   :param video_path: Path to the video file
+   :return: Index of the track to set as default, or None if operation should be skipped
+   """
+
+   num_tracks = len(audio_tracks) # Number of audio tracks found
+
+   # Try to automatically detect English audio track
+   english_track_index = find_english_track_index(audio_tracks)
 
    # If English track was found, use it automatically
    if english_track_index is not None:
-      default_track_index = english_track_index
       print(f"{BackgroundColors.GREEN}Automatically selected English audio track for: {BackgroundColors.CYAN}{video_path}{Style.RESET_ALL}")
+      return english_track_index
+   
    # Otherwise, ask for user input if more than two tracks
-   elif num_tracks > 2:
-      print(f"\n{BackgroundColors.CYAN}Audio tracks found in:{BackgroundColors.GREEN} {video_path}{Style.RESET_ALL}")
-      for i, track in enumerate(audio_tracks):
-         print(f"   [{i}] {track}")
-      try:
-         default_track_index = int(input(f"{BackgroundColors.YELLOW}Select the track index to set as default:{Style.RESET_ALL} "))
-      except ValueError:
-         print(f"{BackgroundColors.RED}Invalid input. Skipping file.{Style.RESET_ALL}")
-         return
-      if default_track_index < 0 or default_track_index >= num_tracks:
-         print(f"{BackgroundColors.RED}Invalid track index. Skipping file.{Style.RESET_ALL}")
-         return
-   else:
-      default_track_index = 1 if num_tracks == 2 else 0 # Swap only if there are 2 tracks
+   if num_tracks > 2:
+      return prompt_user_track_selection(audio_tracks, video_path)
+   
+   # For 1 or 2 tracks, swap only if there are 2 tracks
+   return 1 if num_tracks == 2 else 0
+
+def apply_audio_track_default(video_path, audio_tracks, default_track_index):
+   """
+   Apply the default audio track disposition to the video file using ffmpeg.
+
+   :param video_path: Path to the video file
+   :param audio_tracks: List of audio track strings
+   :param default_track_index: Index of the track to set as default
+   :return: None
+   """
+
+   num_tracks = len(audio_tracks) # Number of audio tracks
 
    root, ext = os.path.splitext(video_path) # Split the file path and extension
    ext = ext.lower() # Ensure lowercase extension
@@ -333,6 +384,41 @@ def swap_audio_tracks(video_path):
       return # Exit the function to prevent file replacement
 
    os.replace(temp_file, video_path) # Replace the original file with the modified file
+
+def swap_audio_tracks(video_path):
+   """
+   Swap the default audio track in the video with the non-default track.
+   Automatically detects and prioritizes English audio tracks.
+   Requires ffmpeg and ffprobe installed and available in PATH.
+
+   :param video_path: Path to the video file
+   :return: None
+   """
+
+   verbose_output(f"{BackgroundColors.GREEN}Swapping audio tracks for video: {BackgroundColors.CYAN}{video_path}{Style.RESET_ALL}") # Output the verbose message
+
+   # Get audio track information using ffprobe
+   audio_tracks = get_audio_track_info(video_path)
+
+   # Check if any audio tracks were found
+   if len(audio_tracks) == 0:
+      print(f"{BackgroundColors.YELLOW}No audio tracks found for: {BackgroundColors.CYAN}{video_path}{Style.RESET_ALL}")
+      return # Skip this file
+
+   # Check if English track is already the default
+   if is_english_track_default(audio_tracks):
+      verbose_output(f"{BackgroundColors.GREEN}English audio track is already default for: {BackgroundColors.CYAN}{video_path}{Style.RESET_ALL}")
+      return # Skip this file
+
+   # Determine which track should be set as default
+   default_track_index = determine_default_track(audio_tracks, video_path)
+
+   # If no valid track was selected, skip this file
+   if default_track_index is None:
+      return # Skip this file
+
+   # Apply the default disposition to the selected track
+   apply_audio_track_default(video_path, audio_tracks, default_track_index)
 
 def play_sound():
    """
