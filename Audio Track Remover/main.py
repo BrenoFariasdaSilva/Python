@@ -50,6 +50,7 @@ import platform # For getting the operating system name
 import shutil # For checking if a program is installed
 import subprocess # For running terminal commands
 from colorama import Style # For coloring the terminal
+from tqdm import tqdm # For progress bar
 
 # Macros:
 class BackgroundColors: # Colors for the terminal
@@ -264,13 +265,14 @@ def run_ffmpeg_command(cmd, file_path, temp_output):
             pass # Ignore cleanup failure
       return False # Indicate failure
 
-def replace_original_file(file_path, temp_output):
+def replace_original_file(file_path, temp_output, pbar=None):
    """
    Replace the original file with the cleaned file if DELETE_OLD_FILES is True.
    Otherwise, keep both files.
 
    :param file_path: The path of the original file
    :param temp_output: The path of the cleaned file
+   :param pbar: Optional progress bar object for status updates
    :return: None
    """
 
@@ -278,22 +280,31 @@ def replace_original_file(file_path, temp_output):
       try: # Attempt to replace the original file
          os.remove(file_path) # Remove the original file
          os.rename(temp_output, file_path) # Rename temp file to original name
+         if pbar: # Update progress bar if available
+            pbar.set_postfix_str("Replaced original", refresh=True) # Update progress bar
       except Exception as e: # If replacement fails
-         print(f"{BackgroundColors.RED}Failed to replace original file for {file_path}: {e}{Style.RESET_ALL}")
+         if pbar: # Update progress bar if available
+            pbar.set_postfix_str("Failed to replace", refresh=True) # Update progress bar
+         else: # Print error message if no progress bar
+            print(f"{BackgroundColors.RED}Failed to replace original file for {file_path}: {e}{Style.RESET_ALL}")
          if os.path.exists(temp_output): # Attempt cleanup
             try: # Remove temp file
                os.remove(temp_output) # Remove temp file
             except Exception: # If cleanup fails
                pass
    else: # Keep both versions
-      print(f"{BackgroundColors.GREEN}Saved cleaned file as: {temp_output}{Style.RESET_ALL}")
+      if pbar: # Update progress bar if available
+         pbar.set_postfix_str("Saved clean version", refresh=True) # Update progress bar
+      else: # Print message if no progress bar
+         print(f"{BackgroundColors.GREEN}Saved cleaned file as: {temp_output}{Style.RESET_ALL}")
 
-def remove_other_audio_tracks(file_path):
+def remove_other_audio_tracks(file_path, pbar=None):
    """
    Keeps only the default audio track (as identified by get_default_audio_index())
    and removes all other audio streams. Subtitle tracks and all other stream types are preserved.
 
    :param file_path: The full path of the video file to process
+   :param pbar: Optional progress bar object for status updates
    :return: None
    """
 
@@ -303,7 +314,9 @@ def remove_other_audio_tracks(file_path):
    audio_indices = get_audio_stream_indices(file_path) # Retrieve all audio stream indices
    if not audio_indices: # If no audio tracks are found
       verbose_output(f"{BackgroundColors.YELLOW}No audio streams found in {file_path}{Style.RESET_ALL}")
-      return
+      if pbar: # Update progress bar if available
+         pbar.set_postfix_str("No audio streams", refresh=True)
+      return # Exit the function
 
    ffmpeg_map_args = build_audio_map_arguments(default_track, audio_indices) # Build '-map' exclusion arguments
    temp_output = build_clean_output_path(file_path) # Prepare temporary output filename
@@ -311,7 +324,9 @@ def remove_other_audio_tracks(file_path):
    cmd = ["ffmpeg", "-i", file_path] + ffmpeg_map_args + ["-c", "copy", temp_output, "-y"] # Build ffmpeg command
 
    if run_ffmpeg_command(cmd, file_path, temp_output): # If ffmpeg executed successfully
-      replace_original_file(file_path, temp_output) # Replace or keep original depending on settings
+      replace_original_file(file_path, temp_output, pbar) # Replace or keep original depending on settings
+   elif pbar: # If ffmpeg failed and progress bar is available
+      pbar.set_postfix_str("Processing failed", refresh=True) # Update progress bar
 
 def process_videos_in_directory():
    """
@@ -322,12 +337,27 @@ def process_videos_in_directory():
    :return: None
    """
 
+   # First, collect all video files
+   video_files = []
    for root, _, files in os.walk(INPUT_DIR): # Walk through the input directory
       for file in files: # Loop through all files
          if file.lower().endswith((".mkv", ".mp4", ".avi", ".mov")): # Check for video file extensions
             full_path = os.path.join(root, file) # Get the full file path
-            print(f"{BackgroundColors.GREEN}Processing: {BackgroundColors.CYAN}{full_path}{Style.RESET_ALL}") # Output the processing message
-            remove_other_audio_tracks(full_path) # Remove non-default audio tracks from the video file
+            video_files.append(full_path) # Add to the list
+
+   # Process files with a progress bar
+   if video_files:
+      with tqdm(total=len(video_files), desc="Processing videos", unit="file", 
+                bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}]',
+                colour='green') as pbar:
+         for full_path in video_files:
+            # Update progress bar description with current file
+            filename = os.path.basename(full_path)
+            pbar.set_description(f"Processing: {filename[:50]}")  # Limit filename length
+            remove_other_audio_tracks(full_path, pbar) # Remove non-default audio tracks
+            pbar.update(1) # Update progress bar
+   else:
+      print(f"{BackgroundColors.YELLOW}No video files found in {INPUT_DIR}{Style.RESET_ALL}")
 
 def play_sound():
    """
