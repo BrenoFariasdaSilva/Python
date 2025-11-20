@@ -201,12 +201,13 @@ def get_subtitle_streams(file_path):
    
    verbose_output(f"{BackgroundColors.GREEN}Getting subtitle streams for file: {BackgroundColors.CYAN}{file_path}{Style.RESET_ALL}") # Output the verbose message
    
-   cmd = [ # ffprobe command to get subtitle streams in JSON format
+   # ffprobe command to get subtitle streams in JSON format
+   cmd = [ # ffprobe command
       "ffprobe", "-v", "error", # Suppress unnecessary output
       "-select_streams", "s", # Select only subtitle streams
-      "-show_entries", "stream=index,codec_type:stream_tags=language,title", # Show index, codec_type, and tags
-      "-of", "json", # Output format JSON
-      file_path # Input file path
+      "-show_entries", "stream=index,codec_type,tags", # Show specific entries
+      "-of", "json", # Output format as JSON
+      file_path # Path to the video file
    ]
    
    try: # Run ffprobe command
