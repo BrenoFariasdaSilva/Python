@@ -90,6 +90,20 @@ def verbose_output(true_string="", false_string=""):
    elif false_string != "": # If the false_string is set
       print(false_string) # Output the false statement string
 
+def calculate_execution_time(start_time, finish_time):
+   """
+   Calculates the execution time between start and finish times and formats it as hh:mm:ss.
+
+   :param start_time: The start datetime object
+   :param finish_time: The finish datetime object
+   :return: String formatted as hh:mm:ss representing the execution time
+   """
+
+   delta = finish_time - start_time # Calculate the time difference
+   hours, remainder = divmod(delta.seconds, 3600) # Calculate the hours, minutes and seconds
+   minutes, seconds = divmod(remainder, 60) # Calculate the minutes and seconds
+   return f"{hours:02d}:{minutes:02d}:{seconds:02d}" # Format the execution time
+
 def verify_filepath_exists(filepath):
    """
    Verify if a file or folder exists at the specified path.
@@ -136,9 +150,7 @@ def main():
    # Your code goes here
 
    finish_time = datetime.datetime.now() # Get the finish time of the program
-   print(f"\n{BackgroundColors.BOLD}{BackgroundColors.GREEN}Program finished.{Style.RESET_ALL}") # Output the end of the program message
-   print(f"Start time: {start_time.strftime('%d/%m/%Y - %H:%M:%S')}")
-   print(f"Finish time: {finish_time.strftime('%d/%m/%Y - %H:%M:%S')}")
+   print(f"{BackgroundColors.GREEN}Start time: {BackgroundColors.CYAN}{start_time.strftime('%d/%m/%Y - %H:%M:%S')}\n{BackgroundColors.GREEN}Finish time: {BackgroundColors.CYAN}{finish_time.strftime('%d/%m/%Y - %H:%M:%S')}\n{BackgroundColors.GREEN}Execution time: {BackgroundColors.CYAN}{calculate_execution_time(start_time, finish_time)}{Style.RESET_ALL}") # Output the start and finish times
 
    atexit.register(play_sound) if RUN_FUNCTIONS["Play Sound"] else None # Register the play_sound function to be called when the program finishes
 
