@@ -136,7 +136,7 @@ def main():
    # Your code goes here
 
    finish_time = datetime.datetime.now() # Get the finish time of the program
-   print(f"\n{BackgroundColors.BOLD}{BackgroundColors.GREEN}Program finished at {finish_time.strftime('%d/%m/%Y - %H:%M:%S')}.{Style.RESET_ALL}") # Output the end of the program message
+   print(f"\n{BackgroundColors.BOLD}{BackgroundColors.GREEN}Program finished.{Style.RESET_ALL}") # Output the end of the program message
    print(f"Start time: {start_time.strftime('%d/%m/%Y - %H:%M:%S')}")
    print(f"Finish time: {finish_time.strftime('%d/%m/%Y - %H:%M:%S')}")
 
