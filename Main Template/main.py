@@ -47,6 +47,7 @@ Assumptions & Notes:
 """
 
 import atexit # For playing a sound when the program finishes
+import datetime # For getting the current date and time
 import os # For running a command in the terminal
 import platform # For getting the operating system name
 from colorama import Style # For coloring the terminal
@@ -130,8 +131,14 @@ def main():
    """
 
    print(f"{BackgroundColors.CLEAR_TERMINAL}{BackgroundColors.BOLD}{BackgroundColors.GREEN}Welcome to the {BackgroundColors.CYAN}Main Template Python{BackgroundColors.GREEN} program!{Style.RESET_ALL}", end="\n\n") # Output the welcome message
+   start_time = datetime.datetime.now() # Get the start time of the program
+   
+   # Your code goes here
 
-   print(f"\n{BackgroundColors.BOLD}{BackgroundColors.GREEN}Program finished.{Style.RESET_ALL}") # Output the end of the program message
+   finish_time = datetime.datetime.now() # Get the finish time of the program
+   print(f"\n{BackgroundColors.BOLD}{BackgroundColors.GREEN}Program finished at {finish_time.strftime('%d/%m/%Y - %H:%M:%S')}.{Style.RESET_ALL}") # Output the end of the program message
+   print(f"Start time: {start_time.strftime('%d/%m/%Y - %H:%M:%S')}")
+   print(f"Finish time: {finish_time.strftime('%d/%m/%Y - %H:%M:%S')}")
 
    atexit.register(play_sound) if RUN_FUNCTIONS["Play Sound"] else None # Register the play_sound function to be called when the program finishes
 
