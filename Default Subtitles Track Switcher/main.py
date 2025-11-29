@@ -205,14 +205,23 @@ def get_subtitle_streams(file_path):
    cmd = [ # ffprobe command
       "ffprobe", "-v", "error", # Suppress unnecessary output
       "-select_streams", "s", # Select only subtitle streams
-      "-show_entries", "stream=index,codec_type,tags", # Show specific entries
+      "-show_streams", # Show full stream blocks (includes tags, disposition, codec info)
       "-of", "json", # Output format as JSON
       file_path # Path to the video file
    ]
    
+   verbose_output(f"{BackgroundColors.GREEN}Running ffprobe command: {BackgroundColors.CYAN}{' '.join(cmd)}{Style.RESET_ALL}") # Output the verbose message
+   
    try: # Run ffprobe command
       proc = subprocess.run(cmd, capture_output=True, text=True, check=True) # Capture output
-      info = json.loads(proc.stdout or "{}") # Parse JSON output
+      out = proc.stdout or "" # Get stdout output
+      json_start = out.find("{") # Find the first "{"" character
+      json_text = out[json_start:] if json_start != -1 else out # Extract JSON text
+      try: # Parse JSON output
+         info = json.loads(json_text or "{}") # Load JSON data
+      except json.JSONDecodeError: # Handle JSON parsing errors
+         verbose_output(f"{BackgroundColors.YELLOW}ffprobe output not valid JSON, falling back to empty streams for {file_path}.{Style.RESET_ALL}")
+         info = {}
    except subprocess.CalledProcessError as e: # Handle ffprobe errors
       verbose_output(f"{BackgroundColors.RED}ffprobe failed for {file_path}: {e.stderr}{Style.RESET_ALL}")
       return [] # Return empty list on error
@@ -221,17 +230,15 @@ def get_subtitle_streams(file_path):
    subs = [] # List to hold subtitle stream info
    sub_pos = 0 # Subtitle position index
    
-   for stream in streams: # Loop through each stream
-      if stream.get("codec_type") != "subtitle": # Skip non-subtitle streams
-         continue # Continue to next stream
-      tags = stream.get("tags") or {} # Get stream tags
-      lang = (tags.get("language") or "").strip() # Get language tag
-      title = (tags.get("title") or "").strip() # Get title tag
+   for stream in streams: # Loop through each stream (we already limited ffprobe to subtitle streams)
+      tags = stream.get("tags") or stream.get("stream_tags") or {} # Get tags dict (may be under "tags" or "stream_tags")
+      lang = (tags.get("language") or "").strip() # Get language tag (often under tags.language)
+      title = (tags.get("title") or "").strip() # Get title tag (may be empty)
       subs.append({ # Append subtitle stream info
-         "global_index": int(stream.get("index", -1)),
-         "lang": lang.lower(),
-         "title": title.lower(),
-         "sub_pos": sub_pos
+         "global_index": int(stream.get("index", -1)), # Global stream index
+         "lang": lang.lower(), # Store language in lowercase for easier comparison
+         "title": title.lower(), # Store title in lowercase for easier comparison
+         "sub_pos": sub_pos # 0-based position among subtitle streams
       })
       sub_pos += 1 # Increment subtitle position index
    return subs # Return list of subtitle streams
