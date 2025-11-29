@@ -82,7 +82,7 @@ INPUT_DIR = r"./Input" # Path to the directory with video files
 DELETE_OLD_FILES = True # Set to True to replace original files with cleaned versions
 FILES_FORMAT = (".mkv", ".mp4", ".avi", ".mov") # Tuple of video file extensions to process
 LANGUAGES = { # Dictionary of languages and their possible subtitle codes
-   "Portuguese": ["Brazilian Portuguese", "Portuguese", "pt-BR", "pt", "pt-PT"], # Portuguese subtitle codes
+   "Portuguese": ["Brazilian", "Brazilian Portuguese", "Portuguese", "pt-BR", "pt", "pt-PT"], # Portuguese subtitle codes
    "English": ["English", "eng", "en", "en-US"] # English subtitle codes
 }
 
