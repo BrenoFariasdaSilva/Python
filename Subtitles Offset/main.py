@@ -56,6 +56,23 @@ def verify_filepath_exists(filepath):
 
    return os.path.exists(filepath) # Return True if the file or folder exists, False otherwise
 
+def get_directories():
+   """
+   Get all directories (including subdirectories) inside the input directory that contain at least one .srt file.
+
+   :param none
+   :return: List of directories in absolute paths
+   """
+
+   input_dir_abs = os.path.abspath(INPUT_DIRECTORY) # Ensure input directory is absolute and normalized
+   matching_dirs = [] # Store directories that contain .srt files
+
+   for root, dirs, files in os.walk(input_dir_abs): # Walk through all subdirectories
+      if any(file.lower().endswith(".srt") for file in files): # Check if current dir has at least one .srt file
+         matching_dirs.append(os.path.normpath(os.path.abspath(root))) # Add the directory if it qualifies
+
+   return matching_dirs # Return the list of directories that contain .srt files
+
 def parse_offset(offset_str):
    """
    Parses an offset string like +00h00m00s0500ms into milliseconds.
