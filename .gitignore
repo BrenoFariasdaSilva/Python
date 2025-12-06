@@ -142,6 +142,7 @@ Dagster/tmp*/
 Non\ Repetitive\ Combinations/non_repetitive_combinations.txt
 
 # System Files
+.DS_Store
 **/.DS_Store/**
 **/Thumbs.db/**
 Icon? # match Icon<CR>
