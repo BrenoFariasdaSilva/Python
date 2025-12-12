@@ -4,3 +4,6 @@
 [submodule "Scientific-Research"]
 	path = Scientific-Research
 	url = https://github.com/BrenoFariasdaSilva/Scientific-Research
+[submodule "Multi-Format-Dataset-Converter"]
+	path = Multi-Format-Dataset-Converter
+	url = https://github.com/BrenoFariasdaSilva/Multi-Format-Dataset-Converter.git
