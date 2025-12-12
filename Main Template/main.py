@@ -50,7 +50,10 @@ import atexit # For playing a sound when the program finishes
 import datetime # For getting the current date and time
 import os # For running a command in the terminal
 import platform # For getting the operating system name
+import sys # For system-specific parameters and functions
 from colorama import Style # For coloring the terminal
+from Logger import Logger # For logging output to both terminal and file
+from pathlib import Path # For handling file paths
 
 # Macros:
 class BackgroundColors: # Colors for the terminal
@@ -64,6 +67,11 @@ class BackgroundColors: # Colors for the terminal
 
 # Execution Constants:
 VERBOSE = False # Set to True to output verbose messages
+
+# Logger Setup:
+logger = Logger(f"./Logs/{Path(__file__).stem}.log", clean=True) # Create a Logger instance
+sys.stdout = logger # Redirect stdout to the logger
+sys.stderr = logger # Redirect stderr to the logger
 
 # Sound Constants:
 SOUND_COMMANDS = {"Darwin": "afplay", "Linux": "aplay", "Windows": "start"} # The commands to play a sound for each operating system
