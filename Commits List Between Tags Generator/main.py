@@ -188,6 +188,46 @@ def write_commits_to_csv(commits_list, output_csv):
       for commit in commits_list: # Iterate over the commits list
          writer.writerow({"Commit Number": commit[0], "Commit Hash": commit[1], "Commit Date": commit[2], "Commit Message": commit[3]})
 
+def process_all_splits(repo_url, repo_name):
+   """
+   Handles the SPLIT_ALL feature:
+   Retrieves tags, builds ranges, runs analysis, writes separate CSV files.
+   """
+
+   print(f"{BackgroundColors.GREEN}SPLIT_ALL is enabled. Fetching repository tags...{Style.RESET_ALL}")
+   
+   tags = get_repository_tags(repo_url) # Retrieve all tags from the repository
+
+   if not tags: # If no tags are found
+      print(f"{BackgroundColors.RED}No tags found. Cannot perform SPLIT_ALL.{Style.RESET_ALL}")
+      return # Exit the function
+
+   print(f"{BackgroundColors.GREEN}Found {BackgroundColors.CYAN}{len(tags)}{BackgroundColors.GREEN} tags. Generating split CSVs...{Style.RESET_ALL}")
+
+   segments = [] # List to store the tag segments
+   previous = None # Initialize the previous tag as None
+
+   for tag in tags: # Iterate over each tag
+      segments.append((previous, tag)) # Append the segment (previous_tag, current_tag)
+      previous = tag # Update the previous tag to the current tag
+
+   segments.append((previous, None)) # Last_tag → HEAD
+
+   create_directory(FULL_OUTPUT_DIRECTORY_PATH, RELATIVE_OUTPUT_DIRECTORY_PATH) # Create the output directory
+
+   for index, (from_tag, to_tag) in enumerate(segments): # Iterate over each segment
+      label_from = from_tag if from_tag is not None else "start" # Label for the starting tag
+      label_to = to_tag if to_tag is not None else "HEAD" # Label for the ending tag
+
+      print(f"{BackgroundColors.GREEN}Processing split {BackgroundColors.CYAN}{index}{BackgroundColors.GREEN}: {BackgroundColors.CYAN}{label_from}{BackgroundColors.GREEN} to {BackgroundColors.CYAN}{label_to}{Style.RESET_ALL}")
+
+      commits_tuple_list = get_commits_information(repo_url, from_tag, to_tag) # Get the commits information for the segment
+
+      output_csv = f"{RELATIVE_OUTPUT_DIRECTORY_PATH}{index:03d}-{repo_name}-{label_from}_to_{label_to}-commits_list.csv" # The output CSV file path for the segment
+      write_commits_to_csv(commits_tuple_list, output_csv) # Generate the CSV file for the segment
+
+   print(f"{BackgroundColors.GREEN}All SPLIT_ALL CSV files generated successfully.{Style.RESET_ALL}")
+
 def main():
    """
    Main function to generate the CSV for the repository.
@@ -202,6 +242,11 @@ def main():
    
    from_tag = "" # The starting tag. if set to None or "", it will start from the beginning
    to_tag = "" # The ending tag. if set to None or "", it will go until the latest commit
+
+   if (from_tag in ("", None)) and (to_tag in ("", None)) and SPLIT_ALL: # If both tags are missing and SPLIT_ALL is enabled
+      process_all_splits(repo_url, repo_name) # Process all splits
+      print(f"\n{BackgroundColors.CYAN}Program finished.{Style.RESET_ALL}") # Indicate program completion
+      return # Exit the main function
 
    print(f"{BackgroundColors.GREEN}Generating commit CSV from {BackgroundColors.CYAN}{from_tag}{BackgroundColors.GREEN} to {BackgroundColors.CYAN}{to_tag}{BackgroundColors.GREEN} for the repository {BackgroundColors.CYAN}{repo_name}{BackgroundColors.GREEN}...{Style.RESET_ALL}")
    
