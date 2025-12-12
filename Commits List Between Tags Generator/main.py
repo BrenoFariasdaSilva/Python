@@ -2,6 +2,7 @@ import atexit # For playing a sound when the program finishes
 import os # For running a command in the terminal
 import platform # For getting the operating system name
 import csv # For writing to a CSV file
+import subprocess # For running git commands
 from colorama import Style # For coloring the terminal
 from pydriller import Repository # PyDriller is a Python framework that helps developers in analyzing Git repositories.
 
@@ -42,6 +43,23 @@ def play_sound():
       print(f"{BackgroundColors.RED}Sound file {BackgroundColors.CYAN}{SOUND_FILE}{BackgroundColors.RED} not found. Make sure the file exists.{Style.RESET_ALL}")
 
 atexit.register(play_sound) # Register the function to play a sound when the program finishes
+
+def verify_git_installed():
+   """
+   Verifies if git is installed on the system.
+
+   :return: True if git is installed, False otherwise
+   """
+   try:
+      proc = subprocess.run(["git", "--version"], capture_output=True, text=True, check=False) # Run the git command
+
+      if proc.returncode != 0: # Check if the git command was successful
+         return False # Git is not installed
+
+      return True # Git is installed
+
+   except Exception: # If an error occurs during the process
+      return False # Git is not installed
 
 def get_commits_information(repo_url, from_tag=None, to_tag=None):
    """
