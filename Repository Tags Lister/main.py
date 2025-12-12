@@ -46,46 +46,42 @@ def get_repository_tags(repo_url):
    :param repo_url: URL of the Git repository
    :return: list of tag names
    """
+   
    tags_list = [] # List to store the tag names
 
-   try:
-      # Use git ls-remote --tags to list remote tags without cloning
-      proc = subprocess.run(
-         ["git", "ls-remote", "--tags", repo_url],
-         capture_output=True,
-         text=True,
-         check=False
-      )
+   try: # Try to retrieve the tags using git ls-remote
+      proc = subprocess.run(["git", "ls-remote", "--tags", repo_url], capture_output=True, text=True, check=False) # Run the git command
 
-      if proc.returncode != 0:
-         # Git returned an error (network, auth, or invalid repo)
-         raise RuntimeError(proc.stderr.strip() or f"git exited with code {proc.returncode}")
+      if proc.returncode != 0: # Check if the git command was successful
+         raise RuntimeError(proc.stderr.strip() or f"git exited with code {proc.returncode}") # Raise an error if the command failed
 
-      lines = proc.stdout.splitlines()
-      # lines look like: "<hash>\trefs/tags/<tagname>" or "<hash>\trefs/tags/<tagname>^{}"
-      extracted = []
-      for line in lines:
-         if not line.strip():
-            continue
-         parts = line.split()
-         if len(parts) < 2:
-            continue
-         ref = parts[1]
-         if ref.startswith("refs/tags/"):
-            tag_part = ref[len("refs/tags/"):]
-            # Remove the '^{}' suffix that denotes peeled annotated tags
-            if tag_part.endswith("^{}"):
-               tag_part = tag_part[:-3]
-            extracted.append(tag_part)
+      lines = proc.stdout.splitlines() # Split the output into lines
+      extracted = [] # Temporary list to store extracted tag names
+      
+      for line in lines: # Iterate over each line of the output
+         if not line.strip(): # Skip empty lines
+            continue # Continue to the next line
+         
+         parts = line.split() # Split the line into parts
+         if len(parts) < 2: # Ensure there are at least two parts
+            continue # Skip lines that don't have enough parts
+         
+         ref = parts[1] # Get the reference part
+         if ref.startswith("refs/tags/"): # Check if the reference is a tag
+            tag_part = ref[len("refs/tags/"):] # Extract the tag name
+            
+            if tag_part.endswith("^{}"): # Handle annotated tags
+               tag_part = tag_part[:-3] # Remove the ^{} suffix
+               
+            extracted.append(tag_part) # Add the tag name to the temporary list
 
-      # Preserve order while removing duplicates (in case annotated+peeled refs appear)
-      seen = {}
-      for t in extracted:
-         if t not in seen:
-            seen[t] = True
-            tags_list.append(t)
+      seen = {} # Dictionary to track seen tags
+      for t in extracted: # Iterate over the extracted tag names
+         if t not in seen: # If the tag has not been seen yet
+            seen[t] = True # Mark the tag as seen
+            tags_list.append(t) # Add the tag name to the final list
 
-   except Exception as e:
+   except Exception as e: # If an error occurs during the process
       print(f"{BackgroundColors.RED}Failed to retrieve tags: {BackgroundColors.CYAN}{e}{Style.RESET_ALL}")
 
    return tags_list # Return the list of tag names
