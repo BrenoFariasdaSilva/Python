@@ -109,11 +109,12 @@ def main():
    """
 
    print(f"{BackgroundColors.CLEAR_TERMINAL}{BackgroundColors.BOLD}{BackgroundColors.GREEN}Welcome to the {BackgroundColors.CYAN}Commits List Between Tags Generator{BackgroundColors.GREEN}!{Style.RESET_ALL}")
-
-   repo_url = "https://github.com/BrenoFariasdaSilva/Worked-Example-Miner" # The URL of the GitHub repository
+   print(f"{BackgroundColors.GREEN}If you don't have the repository tags, you can generate them using the {BackgroundColors.CYAN}Repository Tags Lister{BackgroundColors.GREEN} program.{Style.RESET_ALL}\n")
+   
+   repo_url = "https://github.com/BrenoFariasdaSilva/DDoS-Detector" # The URL of the GitHub repository
    repo_name = repo_url.split("/")[-1] # Get the repository name
    from_tag = "v1.0" # The starting tag
-   to_tag = "v8.0" # The ending tag
+   to_tag = "v2.0" # The ending tag
 
    print(f"{BackgroundColors.GREEN}Generating commit CSV from {BackgroundColors.CYAN}{from_tag}{BackgroundColors.GREEN} to {BackgroundColors.CYAN}{to_tag}{BackgroundColors.GREEN} for the repository {BackgroundColors.CYAN}{repo_name}{BackgroundColors.GREEN}...{Style.RESET_ALL}")
    
@@ -122,7 +123,7 @@ def main():
    output_csv = f"{RELATIVE_OUTPUT_DIRECTORY_PATH}{repo_name}-{from_tag}_to_{to_tag}-commits_list.csv" # The output CSV file path
    write_commits_to_csv(commits_tuple_list, output_csv) # Generate the CSV file
 
-   print(f"{BackgroundColors.CYAN}Program finished.{Style.RESET_ALL}")
+   print(f"\n{BackgroundColors.CYAN}Program finished.{Style.RESET_ALL}")
 
 if __name__ == "__main__":
    """
