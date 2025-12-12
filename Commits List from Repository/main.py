@@ -118,7 +118,7 @@ def main():
    :return: None
    """
 
-   print(f"{BackgroundColors.CLEAR_TERMINAL}{BackgroundColors.BOLD}{BackgroundColors.GREEN}Welcome to the {BackgroundColors.CYAN}Commits List Generator{BackgroundColors.GREEN}!{Style.RESET_ALL}")
+   print(f"{BackgroundColors.CLEAR_TERMINAL}{BackgroundColors.BOLD}{BackgroundColors.GREEN}Welcome to the {BackgroundColors.CYAN}Commits List from Repository{BackgroundColors.GREEN}!{Style.RESET_ALL}")
 
    repo_url = "https://github.com/BrenoFariasdaSilva/DDoS-Detector" # The URL of the GitHub repository
    repo_name = repo_url.split("/")[-1] # Get the repository name
