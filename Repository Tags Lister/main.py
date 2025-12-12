@@ -1,7 +1,8 @@
 import atexit # For playing a sound when the program finishes
+import csv # For writing to a CSV file
 import os # For running a command in the terminal
 import platform # For getting the operating system name
-import csv # For writing to a CSV file
+import re # For regular expressions
 import subprocess # For running git commands
 from colorama import Style # For coloring the terminal
 
@@ -57,6 +58,17 @@ def verify_git_installed():
    except Exception: # If an error occurs during the process
       return False # Git is not installed
 
+def _tag_sort_key(t):
+   """
+   Key function for sorting tags in a human-friendly way.
+   
+   :param t: Tag name
+   :return: List of strings and integers for sorting
+   """
+   
+   parts = re.split(r"(\d+)", t) # Split the tag into parts of digits and non-digits
+   return [int(p) if p.isdigit() else p.lower() for p in parts] # Convert digit parts to integers for proper sorting
+
 def get_repository_tags(repo_url):
    """
    Retrieves all tag names from a remote Git repository using native git commands.
@@ -64,6 +76,10 @@ def get_repository_tags(repo_url):
    :param repo_url: URL of the Git repository
    :return: list of tag names
    """
+   
+   if not verify_git_installed(): # Verify if git is installed
+      print(f"{BackgroundColors.RED}Git is not installed on this system. Please install Git to retrieve repository tags.{Style.RESET_ALL}")
+      exit(1) # Exit the program
    
    tags_list = [] # List to store the tag names
 
@@ -101,6 +117,8 @@ def get_repository_tags(repo_url):
 
    except Exception as e: # If an error occurs during the process
       print(f"{BackgroundColors.RED}Failed to retrieve tags: {BackgroundColors.CYAN}{e}{Style.RESET_ALL}")
+
+   tags_list = sorted(tags_list, key=_tag_sort_key) # Sort tags from lowest → highest
 
    return tags_list # Return the list of tag names
 
