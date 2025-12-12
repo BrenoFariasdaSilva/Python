@@ -49,12 +49,25 @@ def get_commits_information(repo_url, from_tag=None, to_tag=None):
    :return: list of tuples with commit dates and messages
    """
 
-   commits_list = [] # List to store the commit dates and messages
-   for index, commit in enumerate(Repository(path_to_repo=repo_url, from_tag=from_tag, to_tag=to_tag).traverse_commits()): # Iterate over the commits
-      commit_date = commit.committer_date.strftime("%Y-%m-%d %H:%M:%S") # Get the commit date
-      commits_list.append((index + 1, commit.hash, commit_date, commit.msg)) # Append the index, commit date, and message to the list
+   from_tag = None if from_tag in ("", None) else from_tag # Normalize the starting tag
+   to_tag = None if to_tag in ("", None) else to_tag # Normalize the ending tag
 
-   return commits_list # Return the list of tuples with commit dates and messages
+   if from_tag is None and to_tag is None: # Check if both tags are missing
+      repo = Repository(path_to_repo=repo_url) # Analyze entire repository
+   elif from_tag is None and to_tag is not None: # Check if only to_tag exists
+      repo = Repository(path_to_repo=repo_url, to_tag=to_tag) # Analyze from beginning to to_tag
+   elif from_tag is not None and to_tag is None: # Check if only from_tag exists
+      repo = Repository(path_to_repo=repo_url, from_tag=from_tag) # Analyze from from_tag to HEAD
+   else: # Both tags exist
+      repo = Repository(path_to_repo=repo_url, from_tag=from_tag, to_tag=to_tag) # Analyze between both tags
+
+   commits_list = [] # List to store the commit dates and messages
+
+   for index, commit in enumerate(repo.traverse_commits()): # Iterate over the commits
+      commit_date = commit.committer_date.strftime("%Y-%m-%d %H:%M:%S") # Format the commit date
+      commits_list.append((index + 1, commit.hash, commit_date, commit.msg)) # Append commit data to the list
+
+   return commits_list # Return the list of commit tuples
 
 def create_directory(full_directory_name, relative_directory_name):
    """
