@@ -194,7 +194,7 @@ def process_all_splits(repo_url, repo_name):
    Retrieves tags, builds ranges, runs analysis, writes separate CSV files.
    """
 
-   print(f"{BackgroundColors.GREEN}SPLIT_ALL is enabled. Fetching repository tags...{Style.RESET_ALL}")
+   print(f"{BackgroundColors.CYAN}SPLIT_ALL{BackgroundColors.GREEN} is enabled. Fetching repository tags...{Style.RESET_ALL}")
    
    tags = get_repository_tags(repo_url) # Retrieve all tags from the repository
 
@@ -202,7 +202,7 @@ def process_all_splits(repo_url, repo_name):
       print(f"{BackgroundColors.RED}No tags found. Cannot perform SPLIT_ALL.{Style.RESET_ALL}")
       return # Exit the function
 
-   print(f"{BackgroundColors.GREEN}Found {BackgroundColors.CYAN}{len(tags)}{BackgroundColors.GREEN} tags. Generating split CSVs...{Style.RESET_ALL}")
+   print(f"{BackgroundColors.GREEN}Found {BackgroundColors.CYAN}{len(tags)}{BackgroundColors.GREEN} tags. Generating split CSVs...{Style.RESET_ALL}\n")
 
    segments = [] # List to store the tag segments
    previous = None # Initialize the previous tag as None
@@ -213,9 +213,12 @@ def process_all_splits(repo_url, repo_name):
 
    segments.append((previous, None)) # Last_tag → HEAD
 
+   total_segments = len(segments) # Total number of segments
+   width = max(2, len(str(total_segments))) # Minimum 2 digits of padding
+
    create_directory(FULL_OUTPUT_DIRECTORY_PATH, RELATIVE_OUTPUT_DIRECTORY_PATH) # Create the output directory
 
-   for index, (from_tag, to_tag) in enumerate(segments): # Iterate over each segment
+   for index, (from_tag, to_tag) in enumerate(segments, start=1): # Iterate over each segment
       label_from = from_tag if from_tag is not None else "start" # Label for the starting tag
       label_to = to_tag if to_tag is not None else "HEAD" # Label for the ending tag
 
@@ -223,10 +226,10 @@ def process_all_splits(repo_url, repo_name):
 
       commits_tuple_list = get_commits_information(repo_url, from_tag, to_tag) # Get the commits information for the segment
 
-      output_csv = f"{RELATIVE_OUTPUT_DIRECTORY_PATH}{index:03d}-{repo_name}-{label_from}_to_{label_to}-commits_list.csv" # The output CSV file path for the segment
+      output_csv = f"{RELATIVE_OUTPUT_DIRECTORY_PATH}{index:0{width}d}.{repo_name}-{label_from}_to_{label_to}-commits_list.csv" # The output CSV file path for the segment
       write_commits_to_csv(commits_tuple_list, output_csv) # Generate the CSV file for the segment
 
-   print(f"{BackgroundColors.GREEN}All SPLIT_ALL CSV files generated successfully.{Style.RESET_ALL}")
+   print(f"\n{BackgroundColors.GREEN}All SPLIT_ALL CSV files generated successfully.{Style.RESET_ALL}")
 
 def main():
    """
