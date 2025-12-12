@@ -5,6 +5,10 @@ import csv # For writing to a CSV file
 from colorama import Style # For coloring the terminal
 from pydriller import Repository # PyDriller is a Python framework that helps developers in analyzing Git repositories.
 
+# Execution Constant:
+REPO_URL = "https://github.com/BrenoFariasdaSilva/DDoS-Detector" # The URL of the GitHub repository
+SPLIT_ALL = True  # If both tags are empty and SPLIT_ALL == True, split by all tags instead of single run
+
 # Filepaths Constants:
 START_PATH = os.getcwd() # Get the current working directory
 RELATIVE_OUTPUT_DIRECTORY_PATH = "Output/" # The output directory path
@@ -124,11 +128,11 @@ def main():
    print(f"{BackgroundColors.CLEAR_TERMINAL}{BackgroundColors.BOLD}{BackgroundColors.GREEN}Welcome to the {BackgroundColors.CYAN}Commits List Between Tags Generator{BackgroundColors.GREEN}!{Style.RESET_ALL}")
    print(f"{BackgroundColors.GREEN}If you don't have the repository tags, you can generate them using the {BackgroundColors.CYAN}Repository Tags Lister{BackgroundColors.GREEN} program.{Style.RESET_ALL}\n")
    
-   repo_url = "https://github.com/BrenoFariasdaSilva/DDoS-Detector" # The URL of the GitHub repository
+   repo_url = REPO_URL # The URL of the GitHub repository
    repo_name = repo_url.split("/")[-1] # Get the repository name
    
-   from_tag = "v1.0" # The starting tag. if set to None or "", it will start from the beginning
-   to_tag = "v2.0" # The ending tag. if set to None or "", it will go until the latest commit
+   from_tag = "" # The starting tag. if set to None or "", it will start from the beginning
+   to_tag = "" # The ending tag. if set to None or "", it will go until the latest commit
 
    print(f"{BackgroundColors.GREEN}Generating commit CSV from {BackgroundColors.CYAN}{from_tag}{BackgroundColors.GREEN} to {BackgroundColors.CYAN}{to_tag}{BackgroundColors.GREEN} for the repository {BackgroundColors.CYAN}{repo_name}{BackgroundColors.GREEN}...{Style.RESET_ALL}")
    
