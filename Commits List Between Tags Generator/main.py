@@ -61,6 +61,57 @@ def verify_git_installed():
    except Exception: # If an error occurs during the process
       return False # Git is not installed
 
+def get_repository_tags(repo_url):
+   """
+   Retrieves all tag names from a remote Git repository using native git commands.
+
+   :param repo_url: URL of the Git repository
+   :return: list of tag names
+   """
+   
+   if not verify_git_installed(): # Verify if git is installed
+      print(f"{BackgroundColors.RED}Git is not installed on this system. Please install Git to retrieve repository tags.{Style.RESET_ALL}")
+      exit(1) # Exit the program
+   
+   tags_list = [] # List to store the tag names
+
+   try: # Try to retrieve the tags using git ls-remote
+      proc = subprocess.run(["git", "ls-remote", "--tags", repo_url], capture_output=True, text=True, check=False) # Run the git command
+
+      if proc.returncode != 0: # Check if the git command was successful
+         raise RuntimeError(proc.stderr.strip() or f"git exited with code {proc.returncode}") # Raise an error if the command failed
+
+      lines = proc.stdout.splitlines() # Split the output into lines
+      extracted = [] # Temporary list to store extracted tag names
+      
+      for line in lines: # Iterate over each line of the output
+         if not line.strip(): # Skip empty lines
+            continue # Continue to the next line
+         
+         parts = line.split() # Split the line into parts
+         if len(parts) < 2: # Ensure there are at least two parts
+            continue # Skip lines that don't have enough parts
+         
+         ref = parts[1] # Get the reference part
+         if ref.startswith("refs/tags/"): # Check if the reference is a tag
+            tag_part = ref[len("refs/tags/"):] # Extract the tag name
+            
+            if tag_part.endswith("^{}"): # Handle annotated tags
+               tag_part = tag_part[:-3] # Remove the ^{} suffix
+               
+            extracted.append(tag_part) # Add the tag name to the temporary list
+
+      seen = {} # Dictionary to track seen tags
+      for t in extracted: # Iterate over the extracted tag names
+         if t not in seen: # If the tag has not been seen yet
+            seen[t] = True # Mark the tag as seen
+            tags_list.append(t) # Add the tag name to the final list
+
+   except Exception as e: # If an error occurs during the process
+      print(f"{BackgroundColors.RED}Failed to retrieve tags: {BackgroundColors.CYAN}{e}{Style.RESET_ALL}")
+
+   return tags_list # Return the list of tag names
+
 def get_commits_information(repo_url, from_tag=None, to_tag=None):
    """
    Generates a CSV file with commit dates and messages between specific tags in a GitHub repository.
