@@ -7,7 +7,7 @@ from pydriller import Repository # PyDriller is a Python framework that helps de
 
 # Filepaths Constants:
 START_PATH = os.getcwd() # Get the current working directory
-RELATIVE_OUTPUT_DIRECTORY_PATH = "output/" # The output directory path
+RELATIVE_OUTPUT_DIRECTORY_PATH = "Output/" # The output directory path
 FULL_OUTPUT_DIRECTORY_PATH = os.path.join(START_PATH, RELATIVE_OUTPUT_DIRECTORY_PATH) # The full output directory path
 
 # Macros:
