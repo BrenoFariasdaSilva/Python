@@ -317,13 +317,13 @@ def main():
    """
 
    print(f"{BackgroundColors.CLEAR_TERMINAL}{BackgroundColors.BOLD}{BackgroundColors.GREEN}Welcome to the {BackgroundColors.CYAN}Commits List Splitter by File First Appearance{BackgroundColors.GREEN} program!{Style.RESET_ALL}", end="\n\n") # Output the welcome message
-   print(f"{BackgroundColors.GREEN}You can generate the commits list using the {BackgroundColors.CYAN}Repositories Commits List{BackgroundColors.GREEN} program.{Style.RESET_ALL}\n") # Output the information message
+   print(f"{BackgroundColors.GREEN}You can generate the commits list using the {BackgroundColors.CYAN}Commits List from Repository{BackgroundColors.GREEN} program.{Style.RESET_ALL}\n") # Output the information message
    
    start_time = datetime.datetime.now() # Get the start time of the program
 
    if not verify_filepath_exists(INPUT_CSV): # Ensure input exists
       print(f"{BackgroundColors.RED}Input CSV not found: {BackgroundColors.CYAN}{INPUT_CSV}{BackgroundColors.RED}{Style.RESET_ALL}")
-      print(f"{BackgroundColors.RED}Please make sure to generate the commits list using the {BackgroundColors.CYAN}Repositories Commits List{BackgroundColors.RED} program before running this script.{Style.RESET_ALL}")
+      print(f"{BackgroundColors.RED}Please make sure to generate the commits list using the {BackgroundColors.CYAN}Commits List from Repository{BackgroundColors.RED} program before running this script.{Style.RESET_ALL}")
       return # Exit the program
 
    files, file_to_commits = split_commits_by_first_file_appearance(INPUT_CSV) # Split commits by first file appearance
