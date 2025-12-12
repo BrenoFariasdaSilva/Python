@@ -47,12 +47,18 @@ def get_commits_information(repo_url):
    :return: list of tuples with commit dates and messages
    """
 
-   commits_list = [] # List to store the commit dates and messages
+   commits_list = [] # List to store the commit dates, messages and files changed
    for index, commit in enumerate(Repository(path_to_repo=repo_url).traverse_commits()): # Iterate over the commits
       commit_date = commit.committer_date.strftime("%Y-%m-%d %H:%M:%S") # Get the commit date
-      commits_list.append((index + 1, commit.hash, commit_date, commit.msg)) # Append the index, commit date, and message to the list
+      files_changed = [] # List to store modified file paths for this commit
+      for mf in commit.modified_files: # Iterate over modified files for this commit
+         path = mf.new_path if getattr(mf, "new_path", None) else getattr(mf, "old_path", None) # Prefer new_path, fall back to old_path
+         if path: # If a path exists, add it to the list
+            files_changed.append(path) # Append the file path to the list
+      files_changed_str = "; ".join(files_changed) # Join file paths into a single string separated by semicolons
+      commits_list.append((index + 1, commit.hash, commit_date, commit.msg, files_changed_str)) # Append index, hash, date, message and files changed to the list
 
-   return commits_list # Return the list of tuples with commit dates and messages
+   return commits_list # Return the list of tuples with commit dates, messages and files changed
 
 def create_directory(full_directory_name, relative_directory_name):
    """
@@ -79,7 +85,7 @@ def add_header_to_csv(output_csv):
    """
 
    with open(output_csv, mode="w", newline="") as csv_file: # Open the CSV file in write mode
-      fieldnames = ["Commit Number", "Commit Hash", "Commit Date", "Commit Message"] # CSV header
+      fieldnames = ["Commit Number", "Commit Hash", "Commit Date", "Commit Message", "Files Changed"] # CSV header (added Files Changed)
       writer = csv.DictWriter(csv_file, fieldnames=fieldnames) # Create a CSV writer
       writer.writeheader() # Write the header to the CSV
 
@@ -95,10 +101,16 @@ def write_commits_to_csv(commits_list, output_csv):
    add_header_to_csv(output_csv) # Add a header to the CSV file
 
    with open(output_csv, mode="a", newline="") as csv_file: # Open the CSV file in append mode
-      fieldnames = ["Commit Number", "Commit Hash", "Commit Date", "Commit Message"] # CSV header
+      fieldnames = ["Commit Number", "Commit Hash", "Commit Date", "Commit Message", "Files Changed"] # CSV header (added Files Changed)
       writer = csv.DictWriter(csv_file, fieldnames=fieldnames) # Create a CSV writer
       for commit in commits_list: # Iterate over the commits list
-         writer.writerow({"Commit Number": commit[0], "Commit Hash": commit[1], "Commit Date": commit[2], "Commit Message": commit[3]})
+         writer.writerow({ # Write a row to the CSV file
+            "Commit Number": commit[0], # Commit Number
+            "Commit Hash": commit[1], # Commit Hash
+            "Commit Date": commit[2], # Commit Date
+            "Commit Message": commit[3], # Commit Message
+            "Files Changed": commit[4] if len(commit) > 4 else "", # Include files changed if available
+         })
 
 def main():
    """
@@ -108,7 +120,7 @@ def main():
 
    print(f"{BackgroundColors.CLEAR_TERMINAL}{BackgroundColors.BOLD}{BackgroundColors.GREEN}Welcome to the {BackgroundColors.CYAN}Commits List Generator{BackgroundColors.GREEN}!{Style.RESET_ALL}")
 
-   repo_url = "https://github.com/BrenoFariasdaSilva/Worked-Example-Miner" # The URL of the GitHub repository
+   repo_url = "https://github.com/BrenoFariasdaSilva/DDoS-Detector" # The URL of the GitHub repository
    repo_name = repo_url.split("/")[-1] # Get the repository name
 
    print(f"{BackgroundColors.GREEN}Generating commits list for the repository {BackgroundColors.CYAN}{repo_name}{BackgroundColors.GREEN} in a CSV File...{Style.RESET_ALL}")
