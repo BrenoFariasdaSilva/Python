@@ -39,6 +39,24 @@ def play_sound():
 
 atexit.register(play_sound) # Register the function to play a sound when the program finishes
 
+def verify_git_installed():
+   """
+   Verifies if git is installed on the system.
+
+   :return: True if git is installed, False otherwise
+   """
+
+   try:
+      proc = subprocess.run(["git", "--version"], capture_output=True, text=True, check=False) # Run the git command
+
+      if proc.returncode != 0: # Check if the git command was successful
+         return False # Git is not installed
+
+      return True # Git is installed
+
+   except Exception: # If an error occurs during the process
+      return False # Git is not installed
+
 def get_repository_tags(repo_url):
    """
    Retrieves all tag names from a remote Git repository using native git commands.
@@ -146,6 +164,10 @@ def main():
    repo_name = repo_url.split("/")[-1] # Get the repository name
 
    print(f"{BackgroundColors.GREEN}Retrieving tags for the repository {BackgroundColors.CYAN}{repo_name}{BackgroundColors.GREEN}...{Style.RESET_ALL}")
+   
+   if not verify_git_installed(): # Verify if git is installed
+      print(f"{BackgroundColors.RED}Git is not installed on this system. Please install git and try again.{Style.RESET_ALL}")
+      return # Exit the program
    
    tags_list = get_repository_tags(repo_url) # Get repository tags
    create_directory(FULL_OUTPUT_DIRECTORY_PATH, RELATIVE_OUTPUT_DIRECTORY_PATH) # Create the output directory
