@@ -7,3 +7,6 @@
 [submodule "Multi-Format-Dataset-Converter"]
 	path = Multi-Format-Dataset-Converter
 	url = https://github.com/BrenoFariasdaSilva/Multi-Format-Dataset-Converter.git
+[submodule "Datasets-Features-Compatibility"]
+	path = Datasets-Features-Compatibility
+	url = https://github.com/BrenoFariasdaSilva/Datasets-Features-Compatibility.git
