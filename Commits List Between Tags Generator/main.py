@@ -113,8 +113,9 @@ def main():
    
    repo_url = "https://github.com/BrenoFariasdaSilva/DDoS-Detector" # The URL of the GitHub repository
    repo_name = repo_url.split("/")[-1] # Get the repository name
-   from_tag = "v1.0" # The starting tag
-   to_tag = "v2.0" # The ending tag
+   
+   from_tag = "v1.0" # The starting tag. if set to None or "", it will start from the beginning
+   to_tag = "v2.0" # The ending tag. if set to None or "", it will go until the latest commit
 
    print(f"{BackgroundColors.GREEN}Generating commit CSV from {BackgroundColors.CYAN}{from_tag}{BackgroundColors.GREEN} to {BackgroundColors.CYAN}{to_tag}{BackgroundColors.GREEN} for the repository {BackgroundColors.CYAN}{repo_name}{BackgroundColors.GREEN}...{Style.RESET_ALL}")
    
