@@ -382,7 +382,7 @@ def main():
       print(f"No .srt files found in directory: {INPUT_DIR}") # Output message
       return # Exit the program
 
-   with tqdm(srt_files, desc=f"{BackgroundColors.GREEN}Translating SRT files", unit="file") as progress_bar: # Progress bar for SRT files
+   with tqdm(srt_files, desc=f"{BackgroundColors.GREEN}Translating {BackgroundColors.CYAN}SRT{BackgroundColors.GREEN} files", unit="file") as progress_bar: # Progress bar for SRT files
       for srt_file in progress_bar: # Iterate through each SRT file
          progress_bar.set_description(f"{BackgroundColors.GREEN}Processing: {BackgroundColors.CYAN}{srt_file.name}{BackgroundColors.GREEN}")
       
