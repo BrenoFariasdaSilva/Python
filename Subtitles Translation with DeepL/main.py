@@ -260,40 +260,45 @@ def translate_text_block(text_block, translator):
       print(f"{BackgroundColors.RED}Translation failed: {e}. Returning original lines.{Style.RESET_ALL}")
       return text_block.split("\n") # Return original lines on failure
 
-def translate_srt_lines(lines):
+def translate_srt_lines(srt_file, lines):
    """
    Translates lines from an SRT file using DeepL API.
    Timing and index lines remain unchanged.
 
+   :param srt_file: Path to the SRT file (for logging purposes)
    :param lines: List of SRT lines
    :return: List of translated lines
    """
 
-   verbose_output(f"{BackgroundColors.GREEN}Translating SRT lines...{Style.RESET_ALL}") # Output the verbose message
+   verbose_output(f"{BackgroundColors.GREEN}Translating SRT lines from file: {BackgroundColors.CYAN}{srt_file}{Style.RESET_ALL}") # Output the verbose message
    
    translator = deepl.DeepLClient(auth_key=DEEPL_API_KEY) # Create a DeepL client
    translated_lines = [] # List to store translated lines
    buffer = [] # Buffer to store text lines for translation
 
-   for line in lines: # Iterate through each line in the SRT file
-      stripped = line.strip() # Remove leading and trailing whitespace
+   with tqdm(total=len(lines), desc=f"{BackgroundColors.GREEN}Lines translated in file {BackgroundColors.CYAN}{srt_file}{BackgroundColors.GREEN}", unit="line", ncols=100, leave=False, bar_format=f"{BackgroundColors.CYAN}{{l_bar}}{{bar}}{BackgroundColors.GREEN}{{r_bar}}{Style.RESET_ALL}") as pbar:
+      for line in lines: # Iterate through each line in the SRT file
+         stripped = line.strip() # Remove leading and trailing whitespace
 
-      if stripped == "" or stripped.replace(":", "").replace(",", "").isdigit() or "-->" in line: # If line is empty, timing, or index
-         if buffer: # If buffer contains text to translate
-            translated = translate_text_block("\n".join(buffer), translator) # Translate buffer
-            if translated is None: # Defensive check, should never happen
-               translated = buffer
-            translated_lines.extend(translated) # Add translated lines
-            buffer = [] # Clear buffer
-         translated_lines.append(line.rstrip("\n")) # Keep timing/index/empty line as is
-      else: # Line is text to be translated
-         buffer.append(stripped) # Add line to buffer
+         if stripped == "" or stripped.replace(":", "").replace(",", "").isdigit() or "-->" in line:   # If line is empty, timing, or index
+            if buffer: # If buffer contains text to translate
+               translated = translate_text_block("\n".join(buffer), translator) # Translate buffer
+               if translated is None: # Defensive check, should never happen
+                  translated = buffer # Fallback to original lines
+               translated_lines.extend(translated) # Add translated lines
+               buffer = [] # Clear buffer
+            translated_lines.append(line.rstrip("\n")) # Keep timing/index/empty line as is
+         else: # Line is text to be translated
+            buffer.append(stripped) # Add line to buffer
 
-   if buffer: # Translate any remaining text in buffer
-      translated = translate_text_block("\n".join(buffer), translator)
-      if translated is None:
-         translated = buffer
-      translated_lines.extend(translated)
+         pbar.update(1) # Update progress bar for each line processed
+
+      if buffer: # Translate any remaining text in buffer
+         translated = translate_text_block("\n".join(buffer), translator) # Translate remaining buffer
+         if translated is None: # Defensive check, should never happen
+            translated = buffer # Fallback to original lines
+         translated_lines.extend(translated) # Add translated lines
+         pbar.update(len(buffer)) # Update progress bar for remaining lines
 
    return translated_lines # Return all translated lines
 
@@ -391,7 +396,7 @@ def main():
          if DESCRIPTIVE_SUBTITLES_REMOVAL: # Remove descriptive subtitles if enabled
             srt_lines = remove_descriptive_subtitles(srt_file) # Clean SRT lines
          
-         translated_lines = translate_srt_lines(srt_lines) # Translate
+         translated_lines = translate_srt_lines(srt_file, srt_lines) # Translate
          
          relative_path = srt_file.relative_to(INPUT_DIR).parent # Get relative path
          output_subdir = OUTPUT_DIR / relative_path # Create output subdirectory path
