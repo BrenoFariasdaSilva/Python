@@ -245,9 +245,11 @@ def translate_text_block(text_block, translator):
 
    remaining_chars = get_remaining_characters(translator) # Check remaining characters
 
-   if remaining_chars is not None and len(text_block) > remaining_chars: # Exceeding limit
-      print(f"{BackgroundColors.YELLOW}Warning: Translation limit would be exceeded. Current block size: {BackgroundColors.CYAN}{len(text_block)}{BackgroundColors.YELLOW}. Current remaining characters: {BackgroundColors.CYAN}{remaining_chars}{BackgroundColors.YELLOW}. Skipping translation for this block.{Style.RESET_ALL}")
-      return text_block.split("\n") # Return original lines
+   if remaining_chars is not None: # If there is a limit on remaining characters
+      print(f"{BackgroundColors.GREEN}Current remaining characters in DeepL API: {BackgroundColors.CYAN}{remaining_chars}{BackgroundColors.GREEN} characters{Style.RESET_ALL}") # Output remaining characters
+      if len(text_block) > remaining_chars: # Exceeding limit
+         print(f"{BackgroundColors.YELLOW}Warning: Translation limit would be exceeded. Current block size: {BackgroundColors.CYAN}{len(text_block)}{BackgroundColors.YELLOW}. Exceeding limit by: {BackgroundColors.CYAN}{len(text_block) - remaining_chars}{BackgroundColors.YELLOW} characters. Skipping translation for this block.{Style.RESET_ALL}") # Output warning message
+         return text_block.split("\n") # Return original lines
    else: # Perform translation
       result = translator.translate_text(text_block, source_lang="EN", target_lang="PT-BR") # Translate text block
       return result.text.split("\n") # Return translated lines
@@ -368,22 +370,23 @@ def main():
       print(f"No .srt files found in directory: {INPUT_DIR}") # Output message
       return # Exit the program
 
-   for srt_file in tqdm(srt_files, desc=f"{BackgroundColors.GREEN}Translating SRT files{Style.RESET_ALL}", unit="file"): # Iterate through each SRT file with progress bar
-      tqdm.write(f"{BackgroundColors.GREEN}Processing file: {BackgroundColors.CYAN}{srt_file}{Style.RESET_ALL}") # Show current file
+   with tqdm(srt_files, desc=f"{BackgroundColors.GREEN}Translating SRT files", unit="file") as progress_bar: # Progress bar for SRT files
+      for srt_file in progress_bar: # Iterate through each SRT file
+         progress_bar.set_description(f"{BackgroundColors.GREEN}Processing: {BackgroundColors.CYAN}{srt_file.name}{BackgroundColors.GREEN}")
       
-      srt_lines = read_srt(srt_file) # Read SRT
-      
-      if DESCRIPTIVE_SUBTITLES_REMOVAL: # Remove descriptive subtitles if enabled
-         srt_lines = remove_descriptive_subtitles(srt_file) # Clean SRT lines
-      
-      translated_lines = translate_srt_lines(srt_lines) # Translate
-      
-      relative_path = srt_file.relative_to(INPUT_DIR).parent # Get relative path
-      output_subdir = OUTPUT_DIR / relative_path # Create output subdirectory path
-      output_subdir.mkdir(parents=True, exist_ok=True) # Ensure output subdir exists
-      
-      output_file = output_subdir / f"{srt_file.stem}_ptBR.srt" # Build output file path
-      save_srt(translated_lines, output_file) # Save translated SRT
+         srt_lines = read_srt(srt_file) # Read SRT
+         
+         if DESCRIPTIVE_SUBTITLES_REMOVAL: # Remove descriptive subtitles if enabled
+            srt_lines = remove_descriptive_subtitles(srt_file) # Clean SRT lines
+         
+         translated_lines = translate_srt_lines(srt_lines) # Translate
+         
+         relative_path = srt_file.relative_to(INPUT_DIR).parent # Get relative path
+         output_subdir = OUTPUT_DIR / relative_path # Create output subdirectory path
+         output_subdir.mkdir(parents=True, exist_ok=True) # Ensure output subdir exists
+         
+         output_file = output_subdir / f"{srt_file.stem}_ptBR.srt" # Build output file path
+         save_srt(translated_lines, output_file) # Save translated SRT
 
    finish_time = datetime.datetime.now() # Get the finish time of the program
    print(f"{BackgroundColors.GREEN}Start time: {BackgroundColors.CYAN}{start_time.strftime('%d/%m/%Y - %H:%M:%S')}\n{BackgroundColors.GREEN}Finish time: {BackgroundColors.CYAN}{finish_time.strftime('%d/%m/%Y - %H:%M:%S')}\n{BackgroundColors.GREEN}Execution time: {BackgroundColors.CYAN}{calculate_execution_time(start_time, finish_time)}{Style.RESET_ALL}") # Output start, finish, and execution times
