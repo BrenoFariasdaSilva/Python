@@ -77,6 +77,7 @@ class BackgroundColors: # Colors for the terminal
 
 # Execution Constants:
 VERBOSE = False # Set to True to output verbose messages
+DESCRIPTIVE_SUBTITLES_REMOVAL = True # Set to True to remove descriptive lines (e.g., [music], (laughs)) from SRT before translation
 DEEPL_API_KEY = "" # DeepL API key (will be loaded in load_dotenv function)
 INPUT_DIR = f"./Input" # Directory containing the input SRT files
 OUTPUT_DIR = Path("./Output") # Base output directory
@@ -178,6 +179,40 @@ def read_srt(file_path):
 
    with open(file_path, "r", encoding="utf-8") as f: # Open the SRT file for reading
       return f.readlines() # Read all lines and return as a list
+
+def remove_descriptive_subtitles(file_path):
+   """
+   Removes descriptive lines from the SRT file, such as text within brackets or parentheses.
+   Overwrites the original SRT file with cleaned lines.
+   These cleaned lines are used for translation.
+
+   :param file_path: Path to the SRT file
+   :return: List of cleaned lines
+   """
+
+   verbose_output(f"{BackgroundColors.GREEN}Removing descriptive subtitles from: {BackgroundColors.CYAN}{file_path}{Style.RESET_ALL}") # Verbose message
+
+   cleaned_lines = [] # Store cleaned lines
+
+   with open(file_path, "r", encoding="utf-8") as f: # Open SRT for reading
+      for line in f: # Iterate through each line
+         stripped = line.strip() # Remove leading/trailing whitespace
+
+         if stripped == "" or stripped.replace(":", "").replace(",", "").isdigit() or "-->" in line: # If line is empty, timing, or index
+            cleaned_lines.append(line.rstrip("\n")) # Keep timing/index/empty lines as is
+            continue # Skip further checks
+
+         if stripped.startswith("[") and stripped.endswith("]"): # If line is descriptive (in brackets)
+            continue # Skip descriptive lines
+         if stripped.startswith("(") and stripped.endswith(")"): # If line is descriptive (in parentheses)
+            continue # Skip descriptive lines
+         
+         cleaned_lines.append(stripped) # Keep normal text lines
+
+   with open(file_path, "w", encoding="utf-8") as f: # Open SRT for writing
+      f.write("\n".join(cleaned_lines)) # Overwrite SRT with cleaned lines
+
+   return cleaned_lines # Return cleaned lines for translation
 
 def get_remaining_characters(translator):
    """
@@ -337,6 +372,9 @@ def main():
       tqdm.write(f"{BackgroundColors.GREEN}Processing file: {BackgroundColors.CYAN}{srt_file}{Style.RESET_ALL}") # Show current file
       
       srt_lines = read_srt(srt_file) # Read SRT
+      
+      if DESCRIPTIVE_SUBTITLES_REMOVAL: # Remove descriptive subtitles if enabled
+         srt_lines = remove_descriptive_subtitles(srt_file) # Clean SRT lines
       
       translated_lines = translate_srt_lines(srt_lines) # Translate
       
