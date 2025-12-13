@@ -238,7 +238,7 @@ def translate_text_block(text_block, translator):
 
    :param text_block: String containing multiple lines to translate
    :param translator: DeepLClient instance
-   :return: List of translated lines or original lines if limit exceeded
+   :return: List of translated lines or original lines if limit exceeded or translation fails
    """
 
    verbose_output(f"{BackgroundColors.GREEN}Translating text block...{Style.RESET_ALL}") # Output the verbose message
@@ -246,13 +246,19 @@ def translate_text_block(text_block, translator):
    remaining_chars = get_remaining_characters(translator) # Check remaining characters
 
    if remaining_chars is not None: # If there is a limit on remaining characters
-      print(f"{BackgroundColors.GREEN}Current remaining characters in DeepL API: {BackgroundColors.CYAN}{remaining_chars}{BackgroundColors.GREEN} characters{Style.RESET_ALL}") # Output remaining characters
       if len(text_block) > remaining_chars: # Exceeding limit
          print(f"{BackgroundColors.YELLOW}Warning: Translation limit would be exceeded. Current block size: {BackgroundColors.CYAN}{len(text_block)}{BackgroundColors.YELLOW}. Exceeding limit by: {BackgroundColors.CYAN}{len(text_block) - remaining_chars}{BackgroundColors.YELLOW} characters. Skipping translation for this block.{Style.RESET_ALL}") # Output warning message
          return text_block.split("\n") # Return original lines
-   else: # Perform translation
+
+   try: # Perform translation
       result = translator.translate_text(text_block, source_lang="EN", target_lang="PT-BR") # Translate text block
-      return result.text.split("\n") # Return translated lines
+      if result is not None and hasattr(result, "text") and result.text: # Ensure result is valid
+         return result.text.split("\n") # Return translated lines
+      else:
+         return text_block.split("\n") # Fallback to original lines
+   except Exception as e: # Handle any translation error
+      print(f"{BackgroundColors.RED}Translation failed: {e}. Returning original lines.{Style.RESET_ALL}")
+      return text_block.split("\n") # Return original lines on failure
 
 def translate_srt_lines(lines):
    """
@@ -274,14 +280,20 @@ def translate_srt_lines(lines):
 
       if stripped == "" or stripped.replace(":", "").replace(",", "").isdigit() or "-->" in line: # If line is empty, timing, or index
          if buffer: # If buffer contains text to translate
-            translated_lines.extend(translate_text_block("\n".join(buffer), translator)) # Translate buffer
+            translated = translate_text_block("\n".join(buffer), translator) # Translate buffer
+            if translated is None: # Defensive check, should never happen
+               translated = buffer
+            translated_lines.extend(translated) # Add translated lines
             buffer = [] # Clear buffer
-            translated_lines.append(line.rstrip("\n")) # Keep timing/index/empty line as is
+         translated_lines.append(line.rstrip("\n")) # Keep timing/index/empty line as is
       else: # Line is text to be translated
          buffer.append(stripped) # Add line to buffer
 
    if buffer: # Translate any remaining text in buffer
-      translated_lines.extend(translate_text_block("\n".join(buffer), translator))
+      translated = translate_text_block("\n".join(buffer), translator)
+      if translated is None:
+         translated = buffer
+      translated_lines.extend(translated)
 
    return translated_lines # Return all translated lines
 
