@@ -63,6 +63,7 @@ from dotenv import load_dotenv # For loading environment variables from .env fil
 from Logger import Logger # For logging output to both terminal and file
 from pathlib import Path # For handling file paths
 from shutil import copyfile # For copying files
+from tqdm import tqdm # For progress bars
 
 # Macros:
 class BackgroundColors: # Colors for the terminal
@@ -332,17 +333,19 @@ def main():
       print(f"No .srt files found in directory: {INPUT_DIR}") # Output message
       return # Exit the program
 
-   for srt_file in srt_files: # Iterate through each SRT file
-      print(f"{BackgroundColors.GREEN}Processing file: {BackgroundColors.CYAN}{srt_file}{Style.RESET_ALL}")
+   for srt_file in tqdm(srt_files, desc=f"{BackgroundColors.GREEN}Translating SRT files{Style.RESET_ALL}", unit="file"): # Iterate through each SRT file with progress bar
+      tqdm.write(f"{BackgroundColors.GREEN}Processing file: {BackgroundColors.CYAN}{srt_file}{Style.RESET_ALL}") # Show current file
+      
       srt_lines = read_srt(srt_file) # Read SRT
+      
       translated_lines = translate_srt_lines(srt_lines) # Translate
-
+      
       relative_path = srt_file.relative_to(INPUT_DIR).parent # Get relative path
       output_subdir = OUTPUT_DIR / relative_path # Create output subdirectory path
-      output_subdir.mkdir(parents=True, exist_ok=True) # Create output subdirectory if it doesn't exist
-
+      output_subdir.mkdir(parents=True, exist_ok=True) # Ensure output subdir exists
+      
       output_file = output_subdir / f"{srt_file.stem}_ptBR.srt" # Build output file path
-      save_srt(translated_lines, output_file)  # Save translated SRT
+      save_srt(translated_lines, output_file) # Save translated SRT
 
    finish_time = datetime.datetime.now() # Get the finish time of the program
    print(f"{BackgroundColors.GREEN}Start time: {BackgroundColors.CYAN}{start_time.strftime('%d/%m/%Y - %H:%M:%S')}\n{BackgroundColors.GREEN}Finish time: {BackgroundColors.CYAN}{finish_time.strftime('%d/%m/%Y - %H:%M:%S')}\n{BackgroundColors.GREEN}Execution time: {BackgroundColors.CYAN}{calculate_execution_time(start_time, finish_time)}{Style.RESET_ALL}") # Output start, finish, and execution times
