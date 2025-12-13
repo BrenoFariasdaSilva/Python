@@ -1,14 +1,14 @@
-import atexit  # For playing a sound when the program finishes
-import os  # For running a command in the terminal
-import platform  # For getting the operating system name
-from colorama import init, Fore, Style  # For coloring the terminal
-from itertools import permutations  # For generating permutations of team positions
+import atexit # For playing a sound when the program finishes
+import os # For running a command in the terminal
+import platform # For getting the operating system name
+from colorama import init, Fore, Style # For coloring the terminal
+from itertools import permutations # For generating permutations of team positions
 
 # Initialize colorama
-init(autoreset=True)  # Autoreset colors after each print
+init(autoreset=True) # Autoreset colors after each print
 
 # Macros:
-class BackgroundColors:  # Colors for the terminal
+class BackgroundColors: # Colors for the terminal
    CYAN = "\033[96m" # Cyan
    GREEN = "\033[92m" # Green
    YELLOW = "\033[93m" # Yellow
@@ -18,8 +18,8 @@ class BackgroundColors:  # Colors for the terminal
    CLEAR_TERMINAL = "\033[H\033[J" # Clear the terminal
 
 # Sound Constants:
-SOUND_COMMANDS = {"Darwin": "afplay", "Linux": "aplay", "Windows": "start"}  # The commands to play a sound for each operating system
-SOUND_FILE = "./.assets/Sounds/NotificationSound.wav"  # The path to the sound file
+SOUND_COMMANDS = {"Darwin": "afplay", "Linux": "aplay", "Windows": "start"} # The commands to play a sound for each operating system
+SOUND_FILE = "./.assets/Sounds/NotificationSound.wav" # The path to the sound file
 
 def play_sound():
    """
@@ -29,11 +29,11 @@ def play_sound():
    """
 
    if os.path.exists(SOUND_FILE):
-      if platform.system() in SOUND_COMMANDS:  # If the platform.system() is in the SOUND_COMMANDS dictionary
+      if platform.system() in SOUND_COMMANDS: # If the platform.system() is in the SOUND_COMMANDS dictionary
          os.system(f"{SOUND_COMMANDS[platform.system()]} {SOUND_FILE}")
-      else:  # If the platform.system() is not in the SOUND_COMMANDS dictionary
+      else: # If the platform.system() is not in the SOUND_COMMANDS dictionary
          print(f"{BackgroundColors.RED}The {BackgroundColors.CYAN}platform.system(){BackgroundColors.RED} is not in the {BackgroundColors.CYAN}SOUND_COMMANDS dictionary{BackgroundColors.RED}. Please add it!{Style.RESET_ALL}")
-   else:  # If the sound file does not exist
+   else: # If the sound file does not exist
       print(f"{BackgroundColors.RED}Sound file {BackgroundColors.CYAN}{SOUND_FILE}{BackgroundColors.RED} not found. Make sure the file exists.{Style.RESET_ALL}")
 
 # Register the function to play a sound when the program finishes
@@ -41,8 +41,8 @@ atexit.register(play_sound)
 
 # Function to calculate total points based on race results
 def calculate_total_points(initial_points, race2_positions, race3_positions):
-   normal_points = [10, 8, 7, 5]  # Points for normal races
-   double_points = [2 * points for points in normal_points]  # Points for double points race
+   normal_points = [10, 8, 7, 5] # Points for normal races
+   double_points = [2 * points for points in normal_points] # Points for double points race
    total_points = initial_points.copy()
 
    # Add points from race 2
@@ -165,4 +165,4 @@ if __name__ == "__main__":
    :return: None
    """
 
-   main()  # Call the main function
+   main() # Call the main function

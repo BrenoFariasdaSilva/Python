@@ -75,7 +75,7 @@ def is_hidden_or_system(filepath):
       try: # Try to get the file attributes 
          import ctypes # Import ctypes for Windows API calls
          attrs = ctypes.windll.kernel32.GetFileAttributesW(str(filepath)) # Get the file attributes
-         return bool(attrs & 2 or attrs & 4)  # FILE_ATTRIBUTE_HIDDEN or SYSTEM
+         return bool(attrs & 2 or attrs & 4) # FILE_ATTRIBUTE_HIDDEN or SYSTEM
       except Exception: # If an error occurs while getting the file attributes
          return False # Return False indicating the file is not hidden/system
    
@@ -229,7 +229,7 @@ def perform_zero_fill_on_raw_device(raw_device):
    
    try: # Try to open the raw device in binary read/write mode
       with open(raw_device, "rb+") as f: # Open the raw device in binary read/write mode
-         block_size = 1024 * 1024  # 1 MB block size
+         block_size = 1024 * 1024 # 1 MB block size
          zero_block = b"\x00" * block_size # Create a block of zero bytes
          total_written = 0 # Total bytes written
 

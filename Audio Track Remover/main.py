@@ -353,7 +353,7 @@ def process_videos_in_directory():
          for full_path in video_files:
             # Update progress bar description with current file
             filename = os.path.basename(full_path)
-            pbar.set_description(f"Processing: {filename[:50]}")  # Limit filename length
+            pbar.set_description(f"Processing: {filename[:50]}") # Limit filename length
             remove_other_audio_tracks(full_path, pbar) # Remove non-default audio tracks
             pbar.update(1) # Update progress bar
    else:

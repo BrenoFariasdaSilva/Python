@@ -63,7 +63,7 @@ def install_ffmpeg_windows():
 	:return: None
 	"""
 
-	verbose_output(f"{BackgroundColors.GREEN}Checking for Chocolatey...{Style.RESET_ALL}")  # Output the verbose message
+	verbose_output(f"{BackgroundColors.GREEN}Checking for Chocolatey...{Style.RESET_ALL}") # Output the verbose message
 
 	choco_installed = subprocess.run(["choco", "--version"], capture_output=True, text=True).returncode == 0 # Check if Chocolatey is installed
 
@@ -109,7 +109,7 @@ def install_ffmpeg_mac():
    :return: None
    """
 
-   verbose_output(f"{BackgroundColors.GREEN}Installing FFmpeg on macOS...{Style.RESET_ALL}")  # Output the verbose message
+   verbose_output(f"{BackgroundColors.GREEN}Installing FFmpeg on macOS...{Style.RESET_ALL}") # Output the verbose message
 
    try: # Try installing FFmpeg
       subprocess.run(["brew", "install", "ffmpeg"], check=True) # Run the installation command
@@ -127,7 +127,7 @@ def check_and_install_ffmpeg():
 	INSTALL_COMMANDS = { # Installation commands for different platforms
 	"Windows": install_ffmpeg_windows, # Windows
 	"Linux": install_ffmpeg_linux, # Linux
-	"Darwin": install_ffmpeg_mac  # macOS
+	"Darwin": install_ffmpeg_mac # macOS
 	}
 
 	if is_ffmpeg_installed(): # If FFmpeg is already installed

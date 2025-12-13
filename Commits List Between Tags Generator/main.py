@@ -9,7 +9,7 @@ from pydriller import Repository # PyDriller is a Python framework that helps de
 
 # Execution Constant:
 REPO_URL = "https://github.com/BrenoFariasdaSilva/DDoS-Detector" # The URL of the GitHub repository
-SPLIT_ALL = True  # If both tags are empty and SPLIT_ALL == True, split by all tags instead of single run
+SPLIT_ALL = True # If both tags are empty and SPLIT_ALL == True, split by all tags instead of single run
 
 # Filepaths Constants:
 START_PATH = os.getcwd() # Get the current working directory
