@@ -6,34 +6,33 @@ Author      : Breno Farias da Silva
 Created     : 2025-10-26
 Description :
    This script recursively searches for video files in the specified input directory
-   and sets the default audio track, optionally removing other audio tracks.
-   When more than two audio tracks are detected, the script prompts the user to
-   manually select which one should become the default.
+   and processes their audio tracks: keeps only tracks in desired languages (from DESIRED_LANGUAGES),
+   sets the default audio track to English if available, otherwise the first desired track.
+   Undesired audio tracks are automatically removed.
 
    Key features include:
       - Recursive search for video files with specified extensions
-      - Automatic detection of audio tracks using ffprobe
-      - Setting the default audio track (prioritizing English tracks)
-      - Optional removal of other audio tracks after setting the default
-      - Manual selection of default track for videos with more than two audio tracks
+      - Automatic detection and filtering of audio tracks by desired languages
+      - Removal of undesired audio tracks
+      - Setting the default audio track to English if available
       - Progress bar visualization for processing
       - Integration with ffmpeg for audio track manipulation
 
 Usage:
    1. Set the INPUT_DIR constant to the folder containing your video files.
-   2. Optionally set REMOVE_OTHER_AUDIO_TRACKS to True to remove other audio tracks after setting the default.
+   2. Modify DESIRED_LANGUAGES to include the languages you want to keep.
    3. Execute the script:
-         $ python swap_audio_tracks.py
-   4. Select the desired audio track when prompted (if more than two exist).
+         $ python main.py
+   4. The script will automatically keep only desired language tracks and set English as default if present.
 
 Outputs:
-   - Video files in the same directory with swapped or updated default audio track
+   - Video files in the same directory with only desired language audio tracks, English set as default if present
 
 TODOs:
    - Add a dry-run mode to preview changes without modifying files
    - Add logging of processed files and errors
-   - Support automatic language-based selection (e.g., always set “eng” as default)
-   - Optimize for batch operations without manual input
+   - Allow customization of default language priority
+   - Optimize for batch operations
 
 Dependencies:
    - Python >= 3.9
@@ -73,6 +72,11 @@ INPUT_DIR = "./Input/" # Root directory to search for videos
 VIDEO_FILE_EXTENSIONS = [".mkv", ".mp4", ".avi"] # List of video file extensions to process
 REMOVE_OTHER_AUDIO_TRACKS = False # Set to True to remove other audio tracks after setting the default
 
+DESIRED_LANGUAGES = {
+   "English": ["english", "eng", "en"], # Languages to prioritize when selecting default audio track
+   "Brazilian Portuguese": ["brazilian", "portuguese", "pt-br", "pt"] # Additional languages can be added here
+}
+,
 # Sound Constants:
 SOUND_COMMANDS = {"Darwin": "afplay", "Linux": "aplay", "Windows": "start"} # The commands to play a sound for each operating system
 SOUND_FILE = "./.assets/Sounds/NotificationSound.wav" # The path to the sound file
@@ -97,6 +101,15 @@ def verbose_output(true_string="", false_string=""):
       print(true_string) # Output the true statement string
    elif false_string != "": # If the false_string is set
       print(false_string) # Output the false statement string
+
+def get_desired_languages():
+   """
+   Get a flat list of all desired languages from DESIRED_LANGUAGES.
+
+   :return: List of desired language codes
+   """
+   
+   return [lang for langs in DESIRED_LANGUAGES.values() for lang in langs] # Flatten the list of desired languages
 
 def install_chocolatey():
    """
@@ -273,7 +286,7 @@ def is_english_track_default(audio_tracks):
       if len(track_info) >= 3: # If track info has enough parts
          language = track_info[2].lower().strip() if len(track_info[2].strip()) > 0 else "und" # Get language or "und"
          is_default = track_info[1].strip() == "1" # Check if track is default
-         if is_default and language in ["english", "eng"]: # If English track is already default, nothing to do
+         if is_default and language in DESIRED_LANGUAGES.get("English", []): # If default and language is English
             return True # English track is already default
    
    return False # English track is not default
@@ -344,33 +357,36 @@ def determine_default_track(audio_tracks, video_path):
    
    return 1 if num_tracks == 2 else 0 # For 1 or 2 tracks, swap only if there are 2 tracks
 
-def apply_audio_track_default(video_path, audio_tracks, default_track_index):
+def apply_audio_track_default(video_path, audio_tracks, default_track_index, kept_indices):
    """
-   Apply the default audio track disposition to the video file using ffmpeg.
-   Optionally removes other audio tracks if REMOVE_OTHER_AUDIO_TRACKS is True.
+   Apply the default audio track disposition to the video file using ffmpeg, keeping only desired tracks.
 
    :param video_path: Path to the video file
    :param audio_tracks: List of audio track strings
    :param default_track_index: Index of the track to set as default
+   :param kept_indices: List of indices of tracks to keep
    :return: None
    """
-
-   num_tracks = len(audio_tracks) # Number of audio tracks
 
    root, ext = os.path.splitext(video_path) # Split the file path and extension
    ext = ext.lower() # Ensure lowercase extension
    video_path = video_path if video_path.endswith(ext) else os.rename(video_path, root + ext) or (root + ext) # Rename if needed
    temp_file = root + ".tmp" + ext # Temporary file path with correct extension order
 
-   if REMOVE_OTHER_AUDIO_TRACKS: # If removing other audio tracks
-      cmd = ["ffmpeg", "-y", "-i", video_path, "-map", "0:v", "-map", f"0:a:{default_track_index}", "-c", "copy", temp_file]
-   else: # If keeping all audio tracks
-      cmd = ["ffmpeg", "-y", "-i", video_path, "-map", "0", "-c", "copy"] # Base ffmpeg command to copy all streams
+   cmd = ["ffmpeg", "-y", "-i", video_path, "-map", "0:v"] # Base command with video
 
-      for i in range(num_tracks): # For each audio track
-         cmd += ["-disposition:a:" + str(i), "0"] # Clear all dispositions
+   for idx in kept_indices: # Map each kept audio track
+      cmd += ["-map", f"0:a:{idx}"] # Map audio track
 
-      cmd += ["-disposition:a:" + str(default_track_index), "default", temp_file] # Set the selected track as default and define output file
+   cmd += ["-c", "copy"] # Copy codecs
+
+   for i, idx in enumerate(kept_indices): # Set dispositions
+      if idx == default_track_index: # If this is the default track
+         cmd += ["-disposition:a:" + str(i), "default"] # Set as default
+      else: # If this is not the default track
+         cmd += ["-disposition:a:" + str(i), "0"] # Unset default
+
+   cmd += [temp_file] # Output file
 
    verbose_output(f"{BackgroundColors.GREEN}Executing ffmpeg command:{BackgroundColors.CYAN} {' '.join(cmd)}{Style.RESET_ALL}") # Output the ffmpeg command if verbose is True
 
@@ -386,15 +402,14 @@ def apply_audio_track_default(video_path, audio_tracks, default_track_index):
 
 def swap_audio_tracks(video_path):
    """
-   Swap the default audio track in the video with the non-default track.
-   Automatically detects and prioritizes English audio tracks.
+   Process the audio tracks in the video: keep only desired languages, set English as default if available.
    Requires ffmpeg and ffprobe installed and available in PATH.
 
    :param video_path: Path to the video file
    :return: None
    """
 
-   verbose_output(f"{BackgroundColors.GREEN}Swapping audio tracks for video: {BackgroundColors.CYAN}{video_path}{Style.RESET_ALL}") # Output the verbose message
+   verbose_output(f"{BackgroundColors.GREEN}Processing audio tracks for video: {BackgroundColors.CYAN}{video_path}{Style.RESET_ALL}") # Output the verbose message
 
    audio_tracks = get_audio_track_info(video_path) # Get audio track information using ffprobe
 
@@ -402,16 +417,37 @@ def swap_audio_tracks(video_path):
       print(f"{BackgroundColors.YELLOW}No audio tracks found for: {BackgroundColors.CYAN}{video_path}{Style.RESET_ALL}")
       return # Skip this file
 
-   if is_english_track_default(audio_tracks): # Check if English track is already the default
-      verbose_output(f"{BackgroundColors.GREEN}English audio track is already default for: {BackgroundColors.CYAN}{video_path}{Style.RESET_ALL}")
+   desired_langs = get_desired_languages() # Get list of desired languages
+   kept_indices = [] # Indices of tracks to keep
+
+   for i, track in enumerate(audio_tracks): # For each audio track
+      parts = track.split(",") # Split the track info
+      if len(parts) >= 3: # If track info has enough parts
+         lang = parts[2].lower().strip() # Get language
+         if lang in desired_langs: # If language is desired
+            kept_indices.append(i) # Keep this track
+
+   if not kept_indices: # If no desired tracks found
+      print(f"{BackgroundColors.YELLOW}No desired audio tracks found for: {BackgroundColors.CYAN}{video_path}{Style.RESET_ALL}")
       return # Skip this file
 
-   default_track_index = determine_default_track(audio_tracks, video_path) # Determine which track should be set as default
+   english_langs = DESIRED_LANGUAGES.get("English", []) # Get English language codes
+   english_index = None # Index of English track if found
+   for i in kept_indices: # For each kept track
+      parts = audio_tracks[i].split(",") # Split the track info
+      lang = parts[2].lower().strip() # Get language
+      if lang in english_langs: # If language is English
+         english_index = i # Set English track index
+         break # Stop searching
 
-   if default_track_index is None: # If no valid track was selected, skip this file
-      return # Skip this file
+   if english_index is not None: # If English track found
+      default_track_index = english_index # Set English as default
+      print(f"{BackgroundColors.GREEN}Automatically selected English audio track for: {BackgroundColors.CYAN}{video_path}{Style.RESET_ALL}")
+   else: # No English, use first kept
+      default_track_index = kept_indices[0] # Set first desired track as default
+      print(f"{BackgroundColors.GREEN}Selected first desired audio track as default for: {BackgroundColors.CYAN}{video_path}{Style.RESET_ALL}")
 
-   apply_audio_track_default(video_path, audio_tracks, default_track_index) # Apply the default disposition to the selected track
+   apply_audio_track_default(video_path, audio_tracks, default_track_index, kept_indices) # Apply the changes
 
 def play_sound():
    """
