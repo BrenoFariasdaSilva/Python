@@ -8,6 +8,7 @@ Description :
    This script scans all video files inside a specified directory and sets the
    preferred subtitle track (e.g., Portuguese or Brazilian Portuguese) as the
    default subtitle. It keeps all existing audio and video streams unchanged.
+   Optionally, it can remove other subtitle tracks after setting the default.
 
    The script works by:
       - Detecting subtitle streams using ffprobe
@@ -15,6 +16,7 @@ Description :
         in the LANGUAGES dictionary
       - Removing all existing default dispositions from subtitle streams
       - Applying the "default" disposition to the chosen subtitle stream
+      - Optionally removing other subtitle tracks
       - Saving changes to a temporary file and optionally replacing the original
 
    This version no longer removes subtitle tracks; it only changes the default
@@ -38,10 +40,10 @@ Key Features:
    - Priority-based subtitle selection (e.g., pt-BR > pt > others)
    - Fully preserved audio and video streams
    - Default subtitle switch without re-encoding (stream copy)
+   - Optional removal of other subtitle tracks
    - Optional sound notification when finished
 
 TODOs:
-   - Add removal of unwanted subtitle tracks
    - Support CLI arguments for input directory and options
    - Add logging and improved exception handling
 
@@ -52,7 +54,7 @@ Dependencies:
    - tqdm (for progress bar)
 
 Assumptions & Notes:
-   - Video and audio streams are untouched; only subtitle dispositions change
+   - Video and audio streams are untouched; subtitle dispositions change and optionally other subtitles are removed
    - Supported formats: .mkv, .mp4, .avi, .mov
    - Works on Windows, Linux, and macOS (automatic FFmpeg installation included)
 """
@@ -80,6 +82,7 @@ class BackgroundColors: # Colors for the terminal
 VERBOSE = False # Set to True to output verbose messages
 INPUT_DIR = r"./Input" # Path to the directory with video files
 DELETE_OLD_FILES = True # Set to True to replace original files with cleaned versions
+DELETE_OTHER_SUBTITLES = False # Set to True to delete other subtitle tracks after setting the default
 FILES_FORMAT = (".mkv", ".mp4", ".avi", ".mov") # Tuple of video file extensions to process
 LANGUAGES = { # Dictionary of languages and their possible subtitle codes
    "Portuguese": ["Brazilian", "Brazilian Portuguese", "Portuguese", "pt-BR", "pt", "pt-PT"], # Portuguese subtitle codes
@@ -271,12 +274,12 @@ def choose_default_subtitle(subtitle_streams):
 
 def set_default_subtitle(full_path):
    """
-   On the given cleaned file (already produced by remove_unwanted_subtitles),
-   clear dispositions of all subtitle streams and set the chosen subtitle as default.
+   Clear dispositions of all subtitle streams and set the chosen subtitle as default.
+   Optionally removes other subtitle tracks if DELETE_OTHER_SUBTITLES is True.
    Works in-place by producing a temporary file and optionally replacing the original
    if DELETE_OLD_FILES is True.
    
-   :param full_path: Path to the cleaned video file
+   :param full_path: Path to the video file
    :return: True on success, False on failure
    """
    
@@ -293,12 +296,13 @@ def set_default_subtitle(full_path):
    base, ext = os.path.splitext(full_path) # Split file path into base and extension
    temp_output = f"{base}_default{ext}" # Temporary output file path
 
-   cmd = ["ffmpeg", "-i", full_path, "-map", "0", "-c", "copy"] # Base ffmpeg command to copy all streams
-
-   for s in subtitle_streams: # Loop through subtitle streams
-      cmd += [f"-disposition:s:{s['sub_pos']}", "0"] # Clear disposition for all subtitle streams
-
-   cmd += [f"-disposition:s:{chosen_pos}", "default", temp_output, "-y"] # Set chosen subtitle as default and specify output file
+   if DELETE_OTHER_SUBTITLES: # If we want to delete other subtitle tracks, map only video, audio, and the chosen subtitle, set it as default
+      cmd = ["ffmpeg", "-i", full_path, "-map", "0:v", "-map", "0:a", "-map", f"0:s:{chosen_pos}", "-c", "copy", "-disposition:s:0", "default", temp_output, "-y"]
+   else: # Just change dispositions, keep all streams
+      cmd = ["ffmpeg", "-i", full_path, "-map", "0", "-c", "copy"] # Base ffmpeg command to copy all streams
+      for s in subtitle_streams: # Loop through subtitle streams
+         cmd += [f"-disposition:s:{s['sub_pos']}", "0"] # Clear disposition for all subtitle streams
+      cmd += [f"-disposition:s:{chosen_pos}", "default", temp_output, "-y"] # Set chosen subtitle as default and specify output file
 
    try: # Run ffmpeg command
       proc = subprocess.run(cmd, capture_output=True, text=True, check=True) # Capture output
