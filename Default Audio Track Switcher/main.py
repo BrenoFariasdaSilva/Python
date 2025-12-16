@@ -271,8 +271,8 @@ def is_english_track_default(audio_tracks):
    for i, track in enumerate(audio_tracks): # For each audio track
       track_info = track.split(",") # Split the track info
       if len(track_info) >= 3: # If track info has enough parts
-         language = track_info[1].lower().strip() if len(track_info[1].strip()) > 0 else "und" # Get language or "und"
-         is_default = track_info[2].strip() == "1" # Check if track is default
+         language = track_info[2].lower().strip() if len(track_info[2].strip()) > 0 else "und" # Get language or "und"
+         is_default = track_info[1].strip() == "1" # Check if track is default
          if is_default and language in ["english", "eng"]: # If English track is already default, nothing to do
             return True # English track is already default
    
@@ -288,9 +288,9 @@ def find_english_track_index(audio_tracks):
 
    for i, track in enumerate(audio_tracks): # For each audio track
       track_info = track.split(",") # Split the track info
-      if len(track_info) >= 2: # If track info has enough parts
-         language = track_info[1].lower().strip() # Get language
-         if language in ["english", "eng"]: # Check if language is English (case-insensitive)
+      if len(track_info) >= 3: # If track info has enough parts
+         language = track_info[2].lower().strip() # Get language
+         if language in ["english", "eng", "en"]: # Check if language is English (case-insensitive)
             verbose_output(f"{BackgroundColors.GREEN}Automatically detected English audio track at index {i}{Style.RESET_ALL}")
             return i # Return the English track index
    
