@@ -454,7 +454,9 @@ def main():
       print(f"{BackgroundColors.YELLOW}No video files found in {INPUT_DIR}{Style.RESET_ALL}")
       return # Exit the program
 
-   for video in tqdm(videos, desc=f"{BackgroundColors.GREEN}Processing Video Files from {BackgroundColors.CYAN}{INPUT_DIR}{BackgroundColors.GREEN}...{Style.RESET_ALL}"): # For each video found, display a progress bar
+   pbar = tqdm(videos, desc=f"{BackgroundColors.GREEN}Processing Video Files from {BackgroundColors.CYAN}{INPUT_DIR}{BackgroundColors.GREEN}...{Style.RESET_ALL}") # Initialize progress bar
+   for video in pbar: # For each video found
+      pbar.set_description(f"{BackgroundColors.GREEN}Processing: {BackgroundColors.CYAN}{os.path.basename(video)}{Style.RESET_ALL}") # Update description with current file name
       swap_audio_tracks(video) # Swap the audio tracks
 
    print(f"\n{BackgroundColors.BOLD}{BackgroundColors.GREEN}All videos processed successfully.{Style.RESET_ALL}")
