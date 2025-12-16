@@ -6,23 +6,25 @@ Author      : Breno Farias da Silva
 Created     : 2025-10-26
 Description :
    This script recursively searches for video files in the specified input directory
-   and inverts their default audio track, making the non-default track the default.
+   and sets the default audio track, optionally removing other audio tracks.
    When more than two audio tracks are detected, the script prompts the user to
    manually select which one should become the default.
 
    Key features include:
       - Recursive search for video files with specified extensions
       - Automatic detection of audio tracks using ffprobe
-      - Swapping the default and secondary audio track
+      - Setting the default audio track (prioritizing English tracks)
+      - Optional removal of other audio tracks after setting the default
       - Manual selection of default track for videos with more than two audio tracks
       - Progress bar visualization for processing
       - Integration with ffmpeg for audio track manipulation
 
 Usage:
    1. Set the INPUT_DIR constant to the folder containing your video files.
-   2. Execute the script:
+   2. Optionally set REMOVE_OTHER_AUDIO_TRACKS to True to remove other audio tracks after setting the default.
+   3. Execute the script:
          $ python swap_audio_tracks.py
-   3. Select the desired audio track when prompted (if more than two exist).
+   4. Select the desired audio track when prompted (if more than two exist).
 
 Outputs:
    - Video files in the same directory with swapped or updated default audio track
@@ -69,6 +71,7 @@ class BackgroundColors: # Colors for the terminal
 VERBOSE = False # Set to True to output verbose messages
 INPUT_DIR = "./Input/" # Root directory to search for videos
 VIDEO_FILE_EXTENSIONS = [".mkv", ".mp4", ".avi"] # List of video file extensions to process
+REMOVE_OTHER_AUDIO_TRACKS = False # Set to True to remove other audio tracks after setting the default
 
 # Sound Constants:
 SOUND_COMMANDS = {"Darwin": "afplay", "Linux": "aplay", "Windows": "start"} # The commands to play a sound for each operating system
@@ -344,6 +347,7 @@ def determine_default_track(audio_tracks, video_path):
 def apply_audio_track_default(video_path, audio_tracks, default_track_index):
    """
    Apply the default audio track disposition to the video file using ffmpeg.
+   Optionally removes other audio tracks if REMOVE_OTHER_AUDIO_TRACKS is True.
 
    :param video_path: Path to the video file
    :param audio_tracks: List of audio track strings
@@ -358,12 +362,15 @@ def apply_audio_track_default(video_path, audio_tracks, default_track_index):
    video_path = video_path if video_path.endswith(ext) else os.rename(video_path, root + ext) or (root + ext) # Rename if needed
    temp_file = root + ".tmp" + ext # Temporary file path with correct extension order
 
-   cmd = ["ffmpeg", "-y", "-i", video_path, "-map", "0", "-c", "copy"] # Base ffmpeg command (with overwrite flag)
+   if REMOVE_OTHER_AUDIO_TRACKS: # If removing other audio tracks
+      cmd = ["ffmpeg", "-y", "-i", video_path, "-map", "0:v", "-map", f"0:a:{default_track_index}", "-c", "copy", temp_file]
+   else: # If keeping all audio tracks
+      cmd = ["ffmpeg", "-y", "-i", video_path, "-map", "0", "-c", "copy"] # Base ffmpeg command to copy all streams
 
-   for i in range(num_tracks): # For each audio track
-      cmd += ["-disposition:a:" + str(i), "0"] # Clear all dispositions
+      for i in range(num_tracks): # For each audio track
+         cmd += ["-disposition:a:" + str(i), "0"] # Clear all dispositions
 
-   cmd += ["-disposition:a:" + str(default_track_index), "default", temp_file] # Set the selected track as default and define output file
+      cmd += ["-disposition:a:" + str(default_track_index), "default", temp_file] # Set the selected track as default and define output file
 
    verbose_output(f"{BackgroundColors.GREEN}Executing ffmpeg command:{BackgroundColors.CYAN} {' '.join(cmd)}{Style.RESET_ALL}") # Output the ffmpeg command if verbose is True
 
