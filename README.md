@@ -18,6 +18,7 @@ Feel free to contribute and send suggestions.
 <div align="center">
 
 ![GitHub Build/WorkFlow](https://img.shields.io/github/actions/workflow/status/BrenoFariasDaSilva/Python/update-worked-example-miner-submodule.yml)
+![Lines Of Code](https://raw.githubusercontent.com/BrenoFariasdaSilva/Python/image-data/badge.svg)
 ![GitHub Code Size in Bytes](https://img.shields.io/github/languages/code-size/BrenoFariasdaSilva/Python)
 ![GitHub Last Commit](https://img.shields.io/github/last-commit/BrenoFariasdaSilva/Python)
 ![GitHub](https://img.shields.io/github/license/BrenoFariasdaSilva/Python)
