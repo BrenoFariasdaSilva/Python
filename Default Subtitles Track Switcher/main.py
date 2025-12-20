@@ -59,336 +59,449 @@ Assumptions & Notes:
    - Works on Windows, Linux, and macOS (automatic FFmpeg installation included)
 """
 
-import atexit # For playing a sound when the program finishes
-import json # For parsing JSON output from ffprobe
-import os # For running a command in the terminal
-import platform # For getting the operating system name
-import shutil # For checking if a program is installed
-import subprocess # For running terminal commands
-from colorama import Style # For coloring the terminal
-from tqdm import tqdm # For displaying progress bars
+import atexit  # For playing a sound when the program finishes
+import json  # For parsing JSON output from ffprobe
+import os  # For running a command in the terminal
+import platform  # For getting the operating system name
+import shutil  # For checking if a program is installed
+import subprocess  # For running terminal commands
+from colorama import Style  # For coloring the terminal
+from tqdm import tqdm  # For displaying progress bars
+
 
 # Macros:
-class BackgroundColors: # Colors for the terminal
-   CYAN = "\033[96m" # Cyan
-   GREEN = "\033[92m" # Green
-   YELLOW = "\033[93m" # Yellow
-   RED = "\033[91m" # Red
-   BOLD = "\033[1m" # Bold
-   UNDERLINE = "\033[4m" # Underline
-   CLEAR_TERMINAL = "\033[H\033[J" # Clear the terminal
+class BackgroundColors:  # Colors for the terminal
+    CYAN = "\033[96m"  # Cyan
+    GREEN = "\033[92m"  # Green
+    YELLOW = "\033[93m"  # Yellow
+    RED = "\033[91m"  # Red
+    BOLD = "\033[1m"  # Bold
+    UNDERLINE = "\033[4m"  # Underline
+    CLEAR_TERMINAL = "\033[H\033[J"  # Clear the terminal
+
 
 # Execution Constants:
-VERBOSE = False # Set to True to output verbose messages
-INPUT_DIR = r"./Input" # Path to the directory with video files
-DELETE_OLD_FILES = True # Set to True to replace original files with cleaned versions
-DELETE_OTHER_SUBTITLES = False # Set to True to delete other subtitle tracks after setting the default
-FILES_FORMAT = (".mkv", ".mp4", ".avi", ".mov") # Tuple of video file extensions to process
-LANGUAGES = { # Dictionary of languages and their possible subtitle codes
-   "Portuguese": ["Brazilian", "Brazilian Portuguese", "Portuguese", "pt-BR", "pt", "pt-PT"], # Portuguese subtitle codes
-   "English": ["English", "eng", "en", "en-US"] # English subtitle codes
+VERBOSE = False  # Set to True to output verbose messages
+INPUT_DIR = r"./Input"  # Path to the directory with video files
+DELETE_OLD_FILES = True  # Set to True to replace original files with cleaned versions
+DELETE_OTHER_SUBTITLES = False  # Set to True to delete other subtitle tracks after setting the default
+FILES_FORMAT = (".mkv", ".mp4", ".avi", ".mov")  # Tuple of video file extensions to process
+LANGUAGES = {  # Dictionary of languages and their possible subtitle codes
+    "Portuguese": [
+        "Brazilian",
+        "Brazilian Portuguese",
+        "Portuguese",
+        "pt-BR",
+        "pt",
+        "pt-PT",
+    ],  # Portuguese subtitle codes
+    "English": ["English", "eng", "en", "en-US"],  # English subtitle codes
 }
 
 # Sound Constants:
-SOUND_COMMANDS = {"Darwin": "afplay", "Linux": "aplay", "Windows": "start"} # The commands to play a sound for each operating system
-SOUND_FILE = "./.assets/Sounds/NotificationSound.wav" # The path to the sound file
+SOUND_COMMANDS = {
+    "Darwin": "afplay",
+    "Linux": "aplay",
+    "Windows": "start",
+}  # The commands to play a sound for each operating system
+SOUND_FILE = "./.assets/Sounds/NotificationSound.wav"  # The path to the sound file
 
 # RUN_FUNCTIONS:
 RUN_FUNCTIONS = {
-   "Play Sound": True, # Set to True to play a sound when the program finishes
+    "Play Sound": True,  # Set to True to play a sound when the program finishes
 }
 
 # Functions Definitions:
 
+
 def verbose_output(true_string="", false_string=""):
-   """
-   Outputs a message if the VERBOSE constant is set to True.
+    """
+    Outputs a message if the VERBOSE constant is set to True.
 
-   :param true_string: The string to be outputted if the VERBOSE constant is set to True.
-   :param false_string: The string to be outputted if the VERBOSE constant is set to False.
-   :return: None
-   """
+    :param true_string: The string to be outputted if the VERBOSE constant is set to True.
+    :param false_string: The string to be outputted if the VERBOSE constant is set to False.
+    :return: None
+    """
 
-   if VERBOSE and true_string != "": # If the VERBOSE constant is set to True and the true_string is set
-      print(true_string) # Output the true statement string
-   elif false_string != "": # If the false_string is set
-      print(false_string) # Output the false statement string
-      
+    if VERBOSE and true_string != "":  # If the VERBOSE constant is set to True and the true_string is set
+        print(true_string)  # Output the true statement string
+    elif false_string != "":  # If the false_string is set
+        print(false_string)  # Output the false statement string
+
+
 def install_chocolatey():
-   """
-   Installs Chocolatey on Windows if it is not already installed.
+    """
+    Installs Chocolatey on Windows if it is not already installed.
 
-   :param none
-   :return: None
-   """
+    :param none
+    :return: None
+    """
 
-   if shutil.which("choco") is not None: # Chocolatey already installed
-      verbose_output(f"{BackgroundColors.GREEN}Chocolatey is already installed.{Style.RESET_ALL}")
-      return
+    if shutil.which("choco") is not None:  # Chocolatey already installed
+        verbose_output(f"{BackgroundColors.GREEN}Chocolatey is already installed.{Style.RESET_ALL}")
+        return
 
-   print(f"{BackgroundColors.GREEN}Installing {BackgroundColors.CYAN}Chocolatey{BackgroundColors.GREEN} via {BackgroundColors.CYAN}PowerShell{BackgroundColors.GREEN}...{Style.RESET_ALL}")
+    print(
+        f"{BackgroundColors.GREEN}Installing {BackgroundColors.CYAN}Chocolatey{BackgroundColors.GREEN} via {BackgroundColors.CYAN}PowerShell{BackgroundColors.GREEN}...{Style.RESET_ALL}"
+    )
 
-   command = ( # PowerShell command to install Chocolatey
-      'powershell -NoProfile -InputFormat None -ExecutionPolicy Bypass -Command '
-      '"Set-ExecutionPolicy Bypass -Scope Process -Force; '
-      '[System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; '
-      'iex ((New-Object System.Net.WebClient).DownloadString(\'https://community.chocolatey.org/install.ps1\'))"'
-   )
+    command = (  # PowerShell command to install Chocolatey
+        "powershell -NoProfile -InputFormat None -ExecutionPolicy Bypass -Command "
+        '"Set-ExecutionPolicy Bypass -Scope Process -Force; '
+        "[System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; "
+        "iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))\""
+    )
 
-   os.system(command) # Run the command to install Chocolatey
+    os.system(command)  # Run the command to install Chocolatey
+
 
 def install_ffmpeg_and_ffprobe():
-   """
-   Installs ffmpeg and ffprobe according to the OS.
+    """
+    Installs ffmpeg and ffprobe according to the OS.
 
-   :param none
-   :return: None
-   """
+    :param none
+    :return: None
+    """
 
-   current_os = platform.system() # Get the current operating system
+    current_os = platform.system()  # Get the current operating system
 
-   verbose_output(f"{BackgroundColors.GREEN}Installing ffmpeg and ffprobe in the current operating system: {BackgroundColors.CYAN}{current_os}{Style.RESET_ALL}") # Output the verbose message
+    verbose_output(
+        f"{BackgroundColors.GREEN}Installing ffmpeg and ffprobe in the current operating system: {BackgroundColors.CYAN}{current_os}{Style.RESET_ALL}"
+    )  # Output the verbose message
 
-   if shutil.which("ffmpeg") is not None and shutil.which("ffprobe") is not None: # If ffmpeg and ffprobe are already installed
-      verbose_output(f"{BackgroundColors.GREEN}ffmpeg and ffprobe are already installed.{Style.RESET_ALL}") # Output the verbose message
-      return # Exit the function
+    if (
+        shutil.which("ffmpeg") is not None and shutil.which("ffprobe") is not None
+    ):  # If ffmpeg and ffprobe are already installed
+        verbose_output(
+            f"{BackgroundColors.GREEN}ffmpeg and ffprobe are already installed.{Style.RESET_ALL}"
+        )  # Output the verbose message
+        return  # Exit the function
 
-   if current_os == "Darwin": # MacOS
-      print(f"{BackgroundColors.GREEN}Installing {BackgroundColors.CYAN}ffmpeg and ffprobe{BackgroundColors.GREEN} via {BackgroundColors.CYAN}Homebrew{BackgroundColors.GREEN}...{Style.RESET_ALL}")
-      os.system("brew install ffmpeg") # Install ffmpeg (includes ffprobe) via Homebrew
-   elif current_os == "Linux": # Linux
-      print(f"{BackgroundColors.GREEN}Installing {BackgroundColors.CYAN}ffmpeg and ffprobe{BackgroundColors.GREEN} via {BackgroundColors.CYAN}apt{BackgroundColors.GREEN}...{Style.RESET_ALL}")
-      os.system("sudo apt update -y && sudo apt install -y ffmpeg") # Install ffmpeg (includes ffprobe) via apt
-   elif current_os == "Windows": # Windows via Chocolatey
-      if shutil.which("choco") is None: # If Chocolatey is not installed
-         install_chocolatey() # Install Chocolatey first
-      print(f"{BackgroundColors.GREEN}Installing {BackgroundColors.CYAN}ffmpeg and ffprobe{BackgroundColors.GREEN} via {BackgroundColors.CYAN}Chocolatey{BackgroundColors.GREEN}...{Style.RESET_ALL}")
-      subprocess.run(["choco", "install", "ffmpeg", "-y"], check=True) # Install ffmpeg (includes ffprobe) via Chocolatey
-   else: # Unsupported OS
-      print(f"{BackgroundColors.RED}Unsupported OS for automatic ffmpeg installation.{Style.RESET_ALL}") # Output the error message
-      return # Exit the function
+    if current_os == "Darwin":  # MacOS
+        print(
+            f"{BackgroundColors.GREEN}Installing {BackgroundColors.CYAN}ffmpeg and ffprobe{BackgroundColors.GREEN} via {BackgroundColors.CYAN}Homebrew{BackgroundColors.GREEN}...{Style.RESET_ALL}"
+        )
+        os.system("brew install ffmpeg")  # Install ffmpeg (includes ffprobe) via Homebrew
+    elif current_os == "Linux":  # Linux
+        print(
+            f"{BackgroundColors.GREEN}Installing {BackgroundColors.CYAN}ffmpeg and ffprobe{BackgroundColors.GREEN} via {BackgroundColors.CYAN}apt{BackgroundColors.GREEN}...{Style.RESET_ALL}"
+        )
+        os.system("sudo apt update -y && sudo apt install -y ffmpeg")  # Install ffmpeg (includes ffprobe) via apt
+    elif current_os == "Windows":  # Windows via Chocolatey
+        if shutil.which("choco") is None:  # If Chocolatey is not installed
+            install_chocolatey()  # Install Chocolatey first
+        print(
+            f"{BackgroundColors.GREEN}Installing {BackgroundColors.CYAN}ffmpeg and ffprobe{BackgroundColors.GREEN} via {BackgroundColors.CYAN}Chocolatey{BackgroundColors.GREEN}...{Style.RESET_ALL}"
+        )
+        subprocess.run(
+            ["choco", "install", "ffmpeg", "-y"], check=True
+        )  # Install ffmpeg (includes ffprobe) via Chocolatey
+    else:  # Unsupported OS
+        print(
+            f"{BackgroundColors.RED}Unsupported OS for automatic ffmpeg installation.{Style.RESET_ALL}"
+        )  # Output the error message
+        return  # Exit the function
 
-   if shutil.which("ffmpeg") is not None and shutil.which("ffprobe") is not None: # If ffmpeg and ffprobe were successfully installed
-      print(f"{BackgroundColors.GREEN}ffmpeg and ffprobe installed successfully.{Style.RESET_ALL}") # Output the success message
-   else: # If the installation failed
-      print(f"{BackgroundColors.RED}Failed to install ffmpeg and ffprobe. Please install them manually.{Style.RESET_ALL}") # Output the error message
+    if (
+        shutil.which("ffmpeg") is not None and shutil.which("ffprobe") is not None
+    ):  # If ffmpeg and ffprobe were successfully installed
+        print(
+            f"{BackgroundColors.GREEN}ffmpeg and ffprobe installed successfully.{Style.RESET_ALL}"
+        )  # Output the success message
+    else:  # If the installation failed
+        print(
+            f"{BackgroundColors.RED}Failed to install ffmpeg and ffprobe. Please install them manually.{Style.RESET_ALL}"
+        )  # Output the error message
+
 
 def verify_filepath_exists(filepath):
-   """
-   Verify if a file or folder exists at the specified path.
+    """
+    Verify if a file or folder exists at the specified path.
 
-   :param filepath: Path to the file or folder
-   :return: True if the file or folder exists, False otherwise
-   """
+    :param filepath: Path to the file or folder
+    :return: True if the file or folder exists, False otherwise
+    """
 
-   verbose_output(f"{BackgroundColors.GREEN}Verifying if the file or folder exists at the path: {BackgroundColors.CYAN}{filepath}{Style.RESET_ALL}") # Output the verbose message
+    verbose_output(
+        f"{BackgroundColors.GREEN}Verifying if the file or folder exists at the path: {BackgroundColors.CYAN}{filepath}{Style.RESET_ALL}"
+    )  # Output the verbose message
 
-   return os.path.exists(filepath) # Return True if the file or folder exists, False otherwise
+    return os.path.exists(filepath)  # Return True if the file or folder exists, False otherwise
+
 
 def get_subtitle_streams(file_path):
-   """
-   Returns a list of subtitle streams in physical order (the order FFmpeg sees them).
-   Each element is a dict:
-   {
-      "global_index": <int>,    # stream.index from ffprobe (global stream index)
-      "codec_type": "subtitle",
-      "tags": {...} or {},
-      "lang": <str or "">,
-      "title": <str or "">,
-      "sub_pos": <int>          # 0-based position among subtitle streams
-   }
-   
-   :param file_path: Path to the video file
-   :return: List of subtitle stream dicts
-   """
-   
-   verbose_output(f"{BackgroundColors.GREEN}Getting subtitle streams for file: {BackgroundColors.CYAN}{file_path}{Style.RESET_ALL}") # Output the verbose message
-   
-   # ffprobe command to get subtitle streams in JSON format
-   cmd = [ # ffprobe command
-      "ffprobe", "-v", "error", # Suppress unnecessary output
-      "-select_streams", "s", # Select only subtitle streams
-      "-show_streams", # Show full stream blocks (includes tags, disposition, codec info)
-      "-of", "json", # Output format as JSON
-      file_path # Path to the video file
-   ]
-   
-   verbose_output(f"{BackgroundColors.GREEN}Running ffprobe command: {BackgroundColors.CYAN}{' '.join(cmd)}{Style.RESET_ALL}") # Output the verbose message
-   
-   try: # Run ffprobe command
-      proc = subprocess.run(cmd, capture_output=True, text=True, check=True) # Capture output
-      out = proc.stdout or "" # Get stdout output
-      json_start = out.find("{") # Find the first "{"" character
-      json_text = out[json_start:] if json_start != -1 else out # Extract JSON text
-      try: # Parse JSON output
-         info = json.loads(json_text or "{}") # Load JSON data
-      except json.JSONDecodeError: # Handle JSON parsing errors
-         verbose_output(f"{BackgroundColors.YELLOW}ffprobe output not valid JSON, falling back to empty streams for {file_path}.{Style.RESET_ALL}")
-         info = {}
-   except subprocess.CalledProcessError as e: # Handle ffprobe errors
-      verbose_output(f"{BackgroundColors.RED}ffprobe failed for {file_path}: {e.stderr}{Style.RESET_ALL}")
-      return [] # Return empty list on error
+    """
+    Returns a list of subtitle streams in physical order (the order FFmpeg sees them).
+    Each element is a dict:
+    {
+       "global_index": <int>,    # stream.index from ffprobe (global stream index)
+       "codec_type": "subtitle",
+       "tags": {...} or {},
+       "lang": <str or "">,
+       "title": <str or "">,
+       "sub_pos": <int>          # 0-based position among subtitle streams
+    }
 
-   streams = info.get("streams", []) or [] # Get list of streams
-   subs = [] # List to hold subtitle stream info
-   sub_pos = 0 # Subtitle position index
-   
-   for stream in streams: # Loop through each stream (we already limited ffprobe to subtitle streams)
-      tags = stream.get("tags") or stream.get("stream_tags") or {} # Get tags dict (may be under "tags" or "stream_tags")
-      lang = (tags.get("language") or "").strip() # Get language tag (often under tags.language)
-      title = (tags.get("title") or "").strip() # Get title tag (may be empty)
-      subs.append({ # Append subtitle stream info
-         "global_index": int(stream.get("index", -1)), # Global stream index
-         "lang": lang.lower(), # Store language in lowercase for easier comparison
-         "title": title.lower(), # Store title in lowercase for easier comparison
-         "sub_pos": sub_pos # 0-based position among subtitle streams
-      })
-      sub_pos += 1 # Increment subtitle position index
-   return subs # Return list of subtitle streams
+    :param file_path: Path to the video file
+    :return: List of subtitle stream dicts
+    """
+
+    verbose_output(
+        f"{BackgroundColors.GREEN}Getting subtitle streams for file: {BackgroundColors.CYAN}{file_path}{Style.RESET_ALL}"
+    )  # Output the verbose message
+
+    # ffprobe command to get subtitle streams in JSON format
+    cmd = [  # ffprobe command
+        "ffprobe",
+        "-v",
+        "error",  # Suppress unnecessary output
+        "-select_streams",
+        "s",  # Select only subtitle streams
+        "-show_streams",  # Show full stream blocks (includes tags, disposition, codec info)
+        "-of",
+        "json",  # Output format as JSON
+        file_path,  # Path to the video file
+    ]
+
+    verbose_output(
+        f"{BackgroundColors.GREEN}Running ffprobe command: {BackgroundColors.CYAN}{' '.join(cmd)}{Style.RESET_ALL}"
+    )  # Output the verbose message
+
+    try:  # Run ffprobe command
+        proc = subprocess.run(cmd, capture_output=True, text=True, check=True)  # Capture output
+        out = proc.stdout or ""  # Get stdout output
+        json_start = out.find("{")  # Find the first "{"" character
+        json_text = out[json_start:] if json_start != -1 else out  # Extract JSON text
+        try:  # Parse JSON output
+            info = json.loads(json_text or "{}")  # Load JSON data
+        except json.JSONDecodeError:  # Handle JSON parsing errors
+            verbose_output(
+                f"{BackgroundColors.YELLOW}ffprobe output not valid JSON, falling back to empty streams for {file_path}.{Style.RESET_ALL}"
+            )
+            info = {}
+    except subprocess.CalledProcessError as e:  # Handle ffprobe errors
+        verbose_output(f"{BackgroundColors.RED}ffprobe failed for {file_path}: {e.stderr}{Style.RESET_ALL}")
+        return []  # Return empty list on error
+
+    streams = info.get("streams", []) or []  # Get list of streams
+    subs = []  # List to hold subtitle stream info
+    sub_pos = 0  # Subtitle position index
+
+    for stream in streams:  # Loop through each stream (we already limited ffprobe to subtitle streams)
+        tags = (
+            stream.get("tags") or stream.get("stream_tags") or {}
+        )  # Get tags dict (may be under "tags" or "stream_tags")
+        lang = (tags.get("language") or "").strip()  # Get language tag (often under tags.language)
+        title = (tags.get("title") or "").strip()  # Get title tag (may be empty)
+        subs.append(
+            {  # Append subtitle stream info
+                "global_index": int(stream.get("index", -1)),  # Global stream index
+                "lang": lang.lower(),  # Store language in lowercase for easier comparison
+                "title": title.lower(),  # Store title in lowercase for easier comparison
+                "sub_pos": sub_pos,  # 0-based position among subtitle streams
+            }
+        )
+        sub_pos += 1  # Increment subtitle position index
+    return subs  # Return list of subtitle streams
+
 
 def choose_default_subtitle(subtitle_streams):
-   """
-   Choose the subtitle-position index to be default.
-   Priority: Brazilian Portuguese first, then Portuguese (per LANGUAGES dict).
-   
-   :param subtitle_streams: List of subtitle stream dicts
-   Returns the subtitle-position index (0-based among subtitle streams), or None.
-   """
-   
-   if not subtitle_streams: # No subtitle streams
-      return None # Return None
+    """
+    Choose the subtitle-position index to be default.
+    Priority: Brazilian Portuguese first, then Portuguese (per LANGUAGES dict).
 
-   portuguese_vals = {v.lower() for v in LANGUAGES.get("Portuguese", [])} # Set of Portuguese language values in lowercase
+    :param subtitle_streams: List of subtitle stream dicts
+    Returns the subtitle-position index (0-based among subtitle streams), or None.
+    """
 
-   for s in subtitle_streams: # First pass: specifically look for Brazilian Portuguese
-      if "brazil" in s["lang"] or "brazil" in s["title"]: # Check for "brazil" in lang or title
-         return s["sub_pos"] # Return subtitle position
-      if "brazilian portuguese" in s["lang"] or "brazilian portuguese" in s["title"]: # Check for "brazilian portuguese" in lang or title
-         return s["sub_pos"] # Return subtitle position
+    if not subtitle_streams:  # No subtitle streams
+        return None  # Return None
 
-   for s in subtitle_streams: # Second pass: look for any Portuguese
-      if s["lang"] in portuguese_vals or s["title"] in portuguese_vals: # Check if lang or title matches Portuguese values
-         return s["sub_pos"] # Return subtitle position
+    portuguese_vals = {
+        v.lower() for v in LANGUAGES.get("Portuguese", [])
+    }  # Set of Portuguese language values in lowercase
 
-   return None # No preferred subtitle found
+    for s in subtitle_streams:  # First pass: specifically look for Brazilian Portuguese
+        if "brazil" in s["lang"] or "brazil" in s["title"]:  # Check for "brazil" in lang or title
+            return s["sub_pos"]  # Return subtitle position
+        if (
+            "brazilian portuguese" in s["lang"] or "brazilian portuguese" in s["title"]
+        ):  # Check for "brazilian portuguese" in lang or title
+            return s["sub_pos"]  # Return subtitle position
+
+    for s in subtitle_streams:  # Second pass: look for any Portuguese
+        if (
+            s["lang"] in portuguese_vals or s["title"] in portuguese_vals
+        ):  # Check if lang or title matches Portuguese values
+            return s["sub_pos"]  # Return subtitle position
+
+    return None  # No preferred subtitle found
+
 
 def set_default_subtitle(full_path):
-   """
-   Clear dispositions of all subtitle streams and set the chosen subtitle as default.
-   Optionally removes other subtitle tracks if DELETE_OTHER_SUBTITLES is True.
-   Works in-place by producing a temporary file and optionally replacing the original
-   if DELETE_OLD_FILES is True.
-   
-   :param full_path: Path to the video file
-   :return: True on success, False on failure
-   """
-   
-   subtitle_streams = get_subtitle_streams(full_path) # Get subtitle streams
-   if not subtitle_streams: # No subtitle streams found
-      verbose_output(f"{BackgroundColors.YELLOW}No subtitle streams found in {full_path}. Skipping default setting.{Style.RESET_ALL}")
-      return True # Nothing to do
+    """
+    Clear dispositions of all subtitle streams and set the chosen subtitle as default.
+    Optionally removes other subtitle tracks if DELETE_OTHER_SUBTITLES is True.
+    Works in-place by producing a temporary file and optionally replacing the original
+    if DELETE_OLD_FILES is True.
 
-   chosen_pos = choose_default_subtitle(subtitle_streams) # Choose the preferred subtitle position
-   if chosen_pos is None: # No preferred subtitle found
-      verbose_output(f"{BackgroundColors.YELLOW}No preferred Portuguese subtitle found in {full_path}. Skipping default change.{Style.RESET_ALL}")
-      return True # Nothing to do
+    :param full_path: Path to the video file
+    :return: True on success, False on failure
+    """
 
-   base, ext = os.path.splitext(full_path) # Split file path into base and extension
-   temp_output = f"{base}_default{ext}" # Temporary output file path
+    subtitle_streams = get_subtitle_streams(full_path)  # Get subtitle streams
+    if not subtitle_streams:  # No subtitle streams found
+        verbose_output(
+            f"{BackgroundColors.YELLOW}No subtitle streams found in {full_path}. Skipping default setting.{Style.RESET_ALL}"
+        )
+        return True  # Nothing to do
 
-   if DELETE_OTHER_SUBTITLES: # If we want to delete other subtitle tracks, map only video, audio, and the chosen subtitle, set it as default
-      cmd = ["ffmpeg", "-i", full_path, "-map", "0:v", "-map", "0:a", "-map", f"0:s:{chosen_pos}", "-c", "copy", "-disposition:s:0", "default", temp_output, "-y"]
-   else: # Just change dispositions, keep all streams
-      cmd = ["ffmpeg", "-i", full_path, "-map", "0", "-c", "copy"] # Base ffmpeg command to copy all streams
-      for s in subtitle_streams: # Loop through subtitle streams
-         cmd += [f"-disposition:s:{s['sub_pos']}", "0"] # Clear disposition for all subtitle streams
-      cmd += [f"-disposition:s:{chosen_pos}", "default", temp_output, "-y"] # Set chosen subtitle as default and specify output file
+    chosen_pos = choose_default_subtitle(subtitle_streams)  # Choose the preferred subtitle position
+    if chosen_pos is None:  # No preferred subtitle found
+        verbose_output(
+            f"{BackgroundColors.YELLOW}No preferred Portuguese subtitle found in {full_path}. Skipping default change.{Style.RESET_ALL}"
+        )
+        return True  # Nothing to do
 
-   try: # Run ffmpeg command
-      proc = subprocess.run(cmd, capture_output=True, text=True, check=True) # Capture output
-   except subprocess.CalledProcessError as e: # Handle ffmpeg errors
-      print(f"{BackgroundColors.RED}Failed to set default subtitle for {full_path}{Style.RESET_ALL}")
-      if e.stderr: # If there is stderr output
-         print(f"{BackgroundColors.RED}ffmpeg stderr:\n{e.stderr}{Style.RESET_ALL}")
-      return False # Indicate failure
+    base, ext = os.path.splitext(full_path)  # Split file path into base and extension
+    temp_output = f"{base}_default{ext}"  # Temporary output file path
 
-   if DELETE_OLD_FILES: # Overwrite mode
-      try: # Attempt to replace the original file
-         os.replace(temp_output, full_path) # Replace original file with temp file
-      except Exception as e: # If replacement fails
-         print(f"{BackgroundColors.RED}Failed to replace file: {e}{Style.RESET_ALL}")
-         return False # Indicate failure
-   else: # Keep both files
-      print(f"{BackgroundColors.GREEN}Saved with default subtitle set as: {temp_output}{Style.RESET_ALL}")
+    if (
+        DELETE_OTHER_SUBTITLES
+    ):  # If we want to delete other subtitle tracks, map only video, audio, and the chosen subtitle, set it as default
+        cmd = [
+            "ffmpeg",
+            "-i",
+            full_path,
+            "-map",
+            "0:v",
+            "-map",
+            "0:a",
+            "-map",
+            f"0:s:{chosen_pos}",
+            "-c",
+            "copy",
+            "-disposition:s:0",
+            "default",
+            temp_output,
+            "-y",
+        ]
+    else:  # Just change dispositions, keep all streams
+        cmd = ["ffmpeg", "-i", full_path, "-map", "0", "-c", "copy"]  # Base ffmpeg command to copy all streams
+        for s in subtitle_streams:  # Loop through subtitle streams
+            cmd += [f"-disposition:s:{s['sub_pos']}", "0"]  # Clear disposition for all subtitle streams
+        cmd += [
+            f"-disposition:s:{chosen_pos}",
+            "default",
+            temp_output,
+            "-y",
+        ]  # Set chosen subtitle as default and specify output file
 
-   return True # Indicate success
+    try:  # Run ffmpeg command
+        proc = subprocess.run(cmd, capture_output=True, text=True, check=True)  # Capture output
+    except subprocess.CalledProcessError as e:  # Handle ffmpeg errors
+        print(f"{BackgroundColors.RED}Failed to set default subtitle for {full_path}{Style.RESET_ALL}")
+        if e.stderr:  # If there is stderr output
+            print(f"{BackgroundColors.RED}ffmpeg stderr:\n{e.stderr}{Style.RESET_ALL}")
+        return False  # Indicate failure
+
+    if DELETE_OLD_FILES:  # Overwrite mode
+        try:  # Attempt to replace the original file
+            os.replace(temp_output, full_path)  # Replace original file with temp file
+        except Exception as e:  # If replacement fails
+            print(f"{BackgroundColors.RED}Failed to replace file: {e}{Style.RESET_ALL}")
+            return False  # Indicate failure
+    else:  # Keep both files
+        print(f"{BackgroundColors.GREEN}Saved with default subtitle set as: {temp_output}{Style.RESET_ALL}")
+
+    return True  # Indicate success
+
 
 def process_videos_in_directory():
-   """
-   Processes all video files in the specified INPUT_DIR, removing unwanted
-   subtitle tracks and optionally setting the preferred default subtitle in the cleaned file.
-   
-   :param: None
-   :return: None
-   """
-   
-   verbose_output(f"{BackgroundColors.GREEN}Processing video files in directory: {BackgroundColors.CYAN}{INPUT_DIR}{Style.RESET_ALL}") # Output the verbose message
-   
-   video_files = [] # List to hold all video file paths
-   for root, _, files in os.walk(INPUT_DIR): # Walk through the input directory
-      for file in files: # Loop through all files
-         if file.lower().endswith(FILES_FORMAT): # Check for video file extensions
-            video_files.append(os.path.join(root, file)) # Add the full file path to the list
+    """
+    Processes all video files in the specified INPUT_DIR, removing unwanted
+    subtitle tracks and optionally setting the preferred default subtitle in the cleaned file.
 
-   for full_path in tqdm(video_files, desc=f"Processing Videos", unit="file"): # Loop through all video files with a progress bar
-      result = set_default_subtitle(full_path) # Set the default subtitle track
-      if not result: # If setting the default subtitle failed
-         print(f"{BackgroundColors.RED}Failed to set default subtitle for: {BackgroundColors.CYAN}{full_path}{Style.RESET_ALL}")
-         continue # Skip to the next file
+    :param: None
+    :return: None
+    """
+
+    verbose_output(
+        f"{BackgroundColors.GREEN}Processing video files in directory: {BackgroundColors.CYAN}{INPUT_DIR}{Style.RESET_ALL}"
+    )  # Output the verbose message
+
+    video_files = []  # List to hold all video file paths
+    for root, _, files in os.walk(INPUT_DIR):  # Walk through the input directory
+        for file in files:  # Loop through all files
+            if file.lower().endswith(FILES_FORMAT):  # Check for video file extensions
+                video_files.append(os.path.join(root, file))  # Add the full file path to the list
+
+    for full_path in tqdm(
+        video_files, desc=f"Processing Videos", unit="file"
+    ):  # Loop through all video files with a progress bar
+        result = set_default_subtitle(full_path)  # Set the default subtitle track
+        if not result:  # If setting the default subtitle failed
+            print(
+                f"{BackgroundColors.RED}Failed to set default subtitle for: {BackgroundColors.CYAN}{full_path}{Style.RESET_ALL}"
+            )
+            continue  # Skip to the next file
+
 
 def play_sound():
-   """
-   Plays a sound when the program finishes and skips if the operating system is Windows.
+    """
+    Plays a sound when the program finishes and skips if the operating system is Windows.
 
-   :param: None
-   :return: None
-   """
+    :param: None
+    :return: None
+    """
 
-   current_os = platform.system() # Get the current operating system
-   if current_os == "Windows": # If the current operating system is Windows
-      return # Do nothing
+    current_os = platform.system()  # Get the current operating system
+    if current_os == "Windows":  # If the current operating system is Windows
+        return  # Do nothing
 
-   if verify_filepath_exists(SOUND_FILE): # If the sound file exists
-      if current_os in SOUND_COMMANDS: # If the platform.system() is in the SOUND_COMMANDS dictionary
-         os.system(f"{SOUND_COMMANDS[current_os]} {SOUND_FILE}") # Play the sound
-      else: # If the platform.system() is not in the SOUND_COMMANDS dictionary
-         print(f"{BackgroundColors.RED}The {BackgroundColors.CYAN}{current_os}{BackgroundColors.RED} is not in the {BackgroundColors.CYAN}SOUND_COMMANDS dictionary{BackgroundColors.RED}. Please add it!{Style.RESET_ALL}")
-   else: # If the sound file does not exist
-      print(f"{BackgroundColors.RED}Sound file {BackgroundColors.CYAN}{SOUND_FILE}{BackgroundColors.RED} not found. Make sure the file exists.{Style.RESET_ALL}")
+    if verify_filepath_exists(SOUND_FILE):  # If the sound file exists
+        if current_os in SOUND_COMMANDS:  # If the platform.system() is in the SOUND_COMMANDS dictionary
+            os.system(f"{SOUND_COMMANDS[current_os]} {SOUND_FILE}")  # Play the sound
+        else:  # If the platform.system() is not in the SOUND_COMMANDS dictionary
+            print(
+                f"{BackgroundColors.RED}The {BackgroundColors.CYAN}{current_os}{BackgroundColors.RED} is not in the {BackgroundColors.CYAN}SOUND_COMMANDS dictionary{BackgroundColors.RED}. Please add it!{Style.RESET_ALL}"
+            )
+    else:  # If the sound file does not exist
+        print(
+            f"{BackgroundColors.RED}Sound file {BackgroundColors.CYAN}{SOUND_FILE}{BackgroundColors.RED} not found. Make sure the file exists.{Style.RESET_ALL}"
+        )
+
 
 def main():
-   """
-   Main function.
+    """
+    Main function.
 
-   :param: None
-   :return: None
-   """
+    :param: None
+    :return: None
+    """
 
-   print(f"{BackgroundColors.CLEAR_TERMINAL}{BackgroundColors.BOLD}{BackgroundColors.GREEN}Welcome to the {BackgroundColors.CYAN}Default Subtitles Track Switcher{BackgroundColors.GREEN} Program!{Style.RESET_ALL}") # Output the welcome message
-   
-   install_ffmpeg_and_ffprobe() # Ensure ffmpeg and ffprobe are installed
+    print(
+        f"{BackgroundColors.CLEAR_TERMINAL}{BackgroundColors.BOLD}{BackgroundColors.GREEN}Welcome to the {BackgroundColors.CYAN}Default Subtitles Track Switcher{BackgroundColors.GREEN} Program!{Style.RESET_ALL}"
+    )  # Output the welcome message
 
-   process_videos_in_directory() # Process all videos in the input directory
+    install_ffmpeg_and_ffprobe()  # Ensure ffmpeg and ffprobe are installed
 
-   print(f"\n{BackgroundColors.BOLD}{BackgroundColors.GREEN}Program finished.{Style.RESET_ALL}") # Output the end of the program message
+    process_videos_in_directory()  # Process all videos in the input directory
 
-   atexit.register(play_sound) if RUN_FUNCTIONS["Play Sound"] else None # Register the play_sound function to be called when the program finishes
+    print(
+        f"\n{BackgroundColors.BOLD}{BackgroundColors.GREEN}Program finished.{Style.RESET_ALL}"
+    )  # Output the end of the program message
+
+    (
+        atexit.register(play_sound) if RUN_FUNCTIONS["Play Sound"] else None
+    )  # Register the play_sound function to be called when the program finishes
+
 
 if __name__ == "__main__":
-   """
-   This is the standard boilerplate that calls the main() function.
+    """
+    This is the standard boilerplate that calls the main() function.
 
-   :return: None
-   """
+    :return: None
+    """
 
-   main() # Call the main function
+    main()  # Call the main function
