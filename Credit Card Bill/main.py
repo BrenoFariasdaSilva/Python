@@ -1,7 +1,9 @@
 import atexit  # For registering the play_sound function to be called when the program finishes
+import glob  # For pattern matching files
 import os  # For checking if the file exists
 import pandas as pd  # Pandas is used to read and write the CSV files
 import platform  # For checking the operating system
+import re  # For regular expressions
 from colorama import Style  # For coloring the terminal
 
 
@@ -17,11 +19,12 @@ class BackgroundColors:  # Colors for the terminal
 
 
 # Constants:
-INPUT_CSV_FOLDER = "Bills"  # The folder where the CSV files are located
-INPUT_CSV_FILENAME = "debits.csv"  # The CSV file to be read
-INPUT_CSV_FILE = f"{INPUT_CSV_FOLDER}/{INPUT_CSV_FILENAME}"  # The CSV file to be read
+POSSIBLE_INPUT_FOLDERS = ["Bills", "Input"]  # Possible folder names for CSV files
+INPUT_CSV_FOLDER = None  # Will be detected at runtime
+INPUT_CSV_FILENAME = None  # Will be detected at runtime
+INPUT_CSV_FILE = None  # Will be set after detection
 OUTPUT_CSV_FILENAME = "debits_sum.csv"  # The CSV file to be written
-OUTPUT_CSV_FILE = f"{INPUT_CSV_FOLDER}/{OUTPUT_CSV_FILENAME}"  # The CSV file to be written
+OUTPUT_CSV_FILE = None  # Will be set after detection
 
 # Execution Constants:
 VERBOSE = False  # Set to True to output verbose messages
@@ -53,6 +56,66 @@ def verbose_output(true_string="", false_string=""):
         print(true_string)  # Output the true statement string
     elif false_string != "":  # If the false_string is set
         print(false_string)  # Output the false statement string
+
+
+def detect_input_folder():
+    """
+    Detect which input folder exists (Bills or Input).
+
+    :return: The name of the existing folder, or None if neither exists
+    """
+
+    verbose_output(
+        true_string=f"{BackgroundColors.GREEN}Detecting input folder from options: {BackgroundColors.CYAN}{POSSIBLE_INPUT_FOLDERS}{Style.RESET_ALL}"
+    )
+
+    for folder in POSSIBLE_INPUT_FOLDERS:
+        if os.path.isdir(folder):
+            verbose_output(
+                true_string=f"{BackgroundColors.GREEN}Found input folder: {BackgroundColors.CYAN}{folder}{Style.RESET_ALL}"
+            )
+            return folder
+
+    return None
+
+
+def detect_input_csv_filename(folder):
+    """
+    Detect the input CSV filename. Looks for:
+    1. debits.csv (case insensitive)
+    2. Files matching pattern Fatura{YYYY-MM-DD}.csv
+
+    :param folder: The folder to search in
+    :return: The filename if found, or None if not found
+    """
+
+    verbose_output(
+        true_string=f"{BackgroundColors.GREEN}Detecting input CSV filename in folder: {BackgroundColors.CYAN}{folder}{Style.RESET_ALL}"
+    )
+
+    if not os.path.isdir(folder):  # Verify if the folder exists
+        return None  # Return None if the folder does not exist
+
+    csv_files = glob.glob(f"{folder}/*.csv")  # Get all CSV files in the folder
+
+    for file in csv_files:  # First, look for debits.csv (case insensitive)
+        filename = os.path.basename(file)  # Get the filename from the path
+        if filename.lower() == "debits.csv":  # If the filename is debits.csv (case insensitive)
+            verbose_output(
+                true_string=f"{BackgroundColors.GREEN}Found debits.csv file: {BackgroundColors.CYAN}{filename}{Style.RESET_ALL}"
+            )
+            return filename  # Return the filename
+
+    fatura_pattern = re.compile(r"^Fatura\d{4}-\d{2}-\d{2}\.csv$", re.IGNORECASE)  # Second, look for Fatura{YYYY-MM-DD}.csv pattern
+    for file in csv_files:  # Look for files matching the Fatura pattern
+        filename = os.path.basename(file)  # Get the filename from the path
+        if fatura_pattern.match(filename):  # If the filename matches the Fatura pattern
+            verbose_output(
+                true_string=f"{BackgroundColors.GREEN}Found Fatura pattern file: {BackgroundColors.CYAN}{filename}{Style.RESET_ALL}"
+            )
+            return filename  # Return the filename
+
+    return None  # Return None if no valid CSV file is found
 
 
 def verify_filepath_exists(filepath):
@@ -195,16 +258,33 @@ def main():
     :return: None
     """
 
+    global INPUT_CSV_FOLDER, INPUT_CSV_FILENAME, INPUT_CSV_FILE, OUTPUT_CSV_FILE  # Declare global variables
+
     print(
         f"{BackgroundColors.CLEAR_TERMINAL}{BackgroundColors.BOLD}{BackgroundColors.GREEN}Welcome to {BackgroundColors.CYAN}Credit Card Bill{BackgroundColors.GREEN}!{Style.RESET_ALL}",
         end="\n\n",
     )  # Print the welcome message
 
-    verify_filepath_exists(f"{INPUT_CSV_FOLDER}")  # Verify if the input folder exists
-
-    if not debits_csv_exists(f"{INPUT_CSV_FILE}"):  # Verify if the "debits.csv" file exists
+    INPUT_CSV_FOLDER = detect_input_folder()  # Detect the input folder
+    if INPUT_CSV_FOLDER is None:  # If no input folder was found
         print(
-            f'{BackgroundColors.RED}The file {BackgroundColors.CYAN}"{INPUT_CSV_FILE}"{BackgroundColors.RED} does not exist inside the {BackgroundColors.CYAN}"{INPUT_CSV_FOLDER}"{BackgroundColors.RED} folder.{Style.RESET_ALL}'
+            f"{BackgroundColors.RED}Could not find any input folder. Expected one of: {BackgroundColors.CYAN}{POSSIBLE_INPUT_FOLDERS}{Style.RESET_ALL}"
+        )
+        exit(1)  # Exit the program if no input folder was found
+
+    INPUT_CSV_FILENAME = detect_input_csv_filename(INPUT_CSV_FOLDER)  # Detect the input CSV filename
+    if INPUT_CSV_FILENAME is None:  # If no valid CSV file was found
+        print(
+            f'{BackgroundColors.RED}Could not find a valid CSV file in {BackgroundColors.CYAN}"{INPUT_CSV_FOLDER}"{BackgroundColors.RED}. Expected "debits.csv" (case insensitive) or "FaturaYYYY-MM-DD.csv" pattern.{Style.RESET_ALL}'
+        )
+        exit(1)  # Exit the program if no valid CSV file was found
+
+    INPUT_CSV_FILE = f"{INPUT_CSV_FOLDER}/{INPUT_CSV_FILENAME}"  # Set the input CSV file path
+    OUTPUT_CSV_FILE = f"{INPUT_CSV_FOLDER}/{OUTPUT_CSV_FILENAME}"  # Set the output CSV file path
+
+    if not debits_csv_exists(f"{INPUT_CSV_FILE}"):  # Verify if the CSV file exists
+        print(
+            f'{BackgroundColors.RED}The file {BackgroundColors.CYAN}"{INPUT_CSV_FILE}"{BackgroundColors.RED} does not exist.{Style.RESET_ALL}'
         )
         exit(1)  # Exit the program if the file does not exist
 
