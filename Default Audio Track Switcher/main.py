@@ -445,10 +445,10 @@ def apply_audio_track_default(video_path, audio_tracks, default_track_index, kep
     )  # Rename if needed
     temp_file = root + ".tmp" + ext  # Temporary file path with correct extension order
 
-    cmd = ["ffmpeg", "-y", "-i", video_path, "-map", "0:v"]  # Base command with video
+    cmd = ["ffmpeg", "-y", "-i", video_path, "-map", "0", "-map", "-0:a"]  # Base mapping preserving subs
 
     for idx in kept_indices:  # Map each kept audio track
-        cmd += ["-map", f"0:a:{idx}"]  # Map audio track
+        cmd += ["-map", f"0:a:{idx}"]  # Re-add desired audio tracks
 
     cmd += ["-c", "copy"]  # Copy codecs
 
@@ -501,20 +501,23 @@ def swap_audio_tracks(video_path):
         return  # Skip this file
 
     desired_langs = get_desired_languages()  # Get list of desired languages
-    kept_indices = []  # Indices of tracks to keep
 
-    for i, track in enumerate(audio_tracks):  # For each audio track
-        parts = track.split(",")  # Split the track info
-        if len(parts) >= 3:  # If track info has enough parts
-            lang = parts[2].lower().strip()  # Get language
-            if lang in desired_langs:  # If language is desired
-                kept_indices.append(i)  # Keep this track
+    if REMOVE_OTHER_AUDIO_TRACKS:  # If we are removing other audio tracks
+        kept_indices = []  # Indices of tracks to keep (desired only)
+        for i, track in enumerate(audio_tracks):  # For each audio track
+            parts = track.split(",")  # Split the track info
+            if len(parts) >= 3:  # If track info has enough parts
+                lang = parts[2].lower().strip()  # Get language
+                if lang in desired_langs:  # If language is desired
+                    kept_indices.append(i)  # Keep this track
 
-    if not kept_indices:  # If no desired tracks found
-        print(
-            f"{BackgroundColors.YELLOW}No desired audio tracks found for: {BackgroundColors.CYAN}{video_path}{Style.RESET_ALL}"
-        )
-        return  # Skip this file
+        if not kept_indices:  # If no desired tracks found and we're removing others
+            print(
+                f"{BackgroundColors.YELLOW}No desired audio tracks found for: {BackgroundColors.CYAN}{video_path}{Style.RESET_ALL}"
+            )
+            return  # Skip this file
+    else:  # If we are not removing other audio tracks
+        kept_indices = list(range(len(audio_tracks)))  # Keep all track indices
 
     english_langs = DESIRED_LANGUAGES.get("English", [])  # Get English language codes
     english_index = None  # Index of English track if found
@@ -530,10 +533,10 @@ def swap_audio_tracks(video_path):
         print(
             f"{BackgroundColors.GREEN}Automatically selected English audio track for: {BackgroundColors.CYAN}{video_path}{Style.RESET_ALL}"
         )
-    else:  # No English, use first kept
+    else:  # No English, use first track from kept set
         default_track_index = kept_indices[0]  # Set first desired track as default
         print(
-            f"{BackgroundColors.GREEN}Selected first desired audio track as default for: {BackgroundColors.CYAN}{video_path}{Style.RESET_ALL}"
+            f"{BackgroundColors.GREEN}Selected first {'desired ' if REMOVE_OTHER_AUDIO_TRACKS else ''}audio track as default for: {BackgroundColors.CYAN}{video_path}{Style.RESET_ALL}"
         )
 
     apply_audio_track_default(video_path, audio_tracks, default_track_index, kept_indices)  # Apply the changes
