@@ -73,6 +73,7 @@ VERBOSE = False  # Set to True to output verbose messages
 INPUT_DIR = "./Input/"  # Root directory to search for videos
 VIDEO_FILE_EXTENSIONS = [".mkv", ".mp4", ".avi"]  # List of video file extensions to process
 REMOVE_OTHER_AUDIO_TRACKS = False  # Set to True to remove other audio tracks after setting the default
+REMOVE_SUBTITLE_TRACKS = False  # Set to True to remove all subtitle tracks
 
 DESIRED_LANGUAGES = {
     "English": ["english", "eng", "en"],  # Languages to prioritize when selecting default audio track
@@ -446,6 +447,9 @@ def apply_audio_track_default(video_path, audio_tracks, default_track_index, kep
     temp_file = root + ".tmp" + ext  # Temporary file path with correct extension order
 
     cmd = ["ffmpeg", "-y", "-i", video_path, "-map", "0", "-map", "-0:a"]  # Base mapping preserving subs
+
+    if REMOVE_SUBTITLE_TRACKS:
+        cmd += ["-map", "-0:s"]
 
     for idx in kept_indices:  # Map each kept audio track
         cmd += ["-map", f"0:a:{idx}"]  # Re-add desired audio tracks
