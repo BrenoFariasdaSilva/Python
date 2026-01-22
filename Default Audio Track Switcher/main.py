@@ -47,6 +47,7 @@ Assumptions & Notes:
    - Original file is replaced by the processed file
 """
 
+import argparse  # For parsing command-line arguments
 import atexit  # For playing a sound when the program finishes
 import json  # For parsing JSON output from ffprobe
 import os  # For running a command in the terminal
@@ -72,6 +73,8 @@ class BackgroundColors:  # Colors for the terminal
 VERBOSE = False  # Set to True to output verbose messages
 INPUT_DIR = "./Input/"  # Root directory to search for videos
 VIDEO_FILE_EXTENSIONS = [".mkv", ".mp4", ".avi"]  # List of video file extensions to process
+
+# These will be set by command-line arguments in main()
 REMOVE_OTHER_AUDIO_TRACKS = False  # Set to True to remove other audio tracks after setting the default
 REMOVE_SUBTITLE_TRACKS = False  # Set to True to remove all subtitle tracks
 
@@ -578,10 +581,38 @@ def main():
     :param: None
     :return: None
     """
+    global REMOVE_OTHER_AUDIO_TRACKS, REMOVE_SUBTITLE_TRACKS
+
+    # Parse command-line arguments
+    parser = argparse.ArgumentParser(
+        description="Process video files and manage audio tracks and subtitles."
+    )
+    parser.add_argument(
+        "--remove-other-audio",
+        action="store_true",
+        help="Remove audio tracks not in the desired languages list"
+    )
+    parser.add_argument(
+        "--remove-subtitles",
+        action="store_true",
+        help="Remove all subtitle tracks from the video files"
+    )
+    args = parser.parse_args()
+
+    # Update global constants based on arguments
+    REMOVE_OTHER_AUDIO_TRACKS = args.remove_other_audio
+    REMOVE_SUBTITLE_TRACKS = args.remove_subtitles
 
     print(
         f"{BackgroundColors.CLEAR_TERMINAL}{BackgroundColors.BOLD}{BackgroundColors.GREEN}Welcome to the {BackgroundColors.CYAN}Default Audio Track Switcher{BackgroundColors.GREEN}!{Style.RESET_ALL}\n"
     )
+
+    if REMOVE_OTHER_AUDIO_TRACKS:
+        print(f"{BackgroundColors.YELLOW}Mode: Removing non-desired audio tracks{Style.RESET_ALL}")
+    if REMOVE_SUBTITLE_TRACKS:
+        print(f"{BackgroundColors.YELLOW}Mode: Removing subtitle tracks{Style.RESET_ALL}")
+    if REMOVE_OTHER_AUDIO_TRACKS or REMOVE_SUBTITLE_TRACKS:
+        print()  # Add blank line for spacing
 
     install_ffmpeg_and_ffprobe()  # Ensure ffmpeg and ffprobe are installed
 

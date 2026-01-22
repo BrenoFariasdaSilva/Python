@@ -1,6 +1,7 @@
 # Variables
 VENV := venv
 OS := $(shell uname 2>/dev/null || echo Windows)
+FLAGS :=
 
 # Detect correct Python and Pip commands based on OS
 ifeq ($(OS), Windows)
@@ -23,7 +24,7 @@ all: run
 # Main Scripts:
 run: $(VENV)
 	$(CLEAR_CMD)
-	$(TIME_CMD) $(PYTHON) ./main.py
+	$(TIME_CMD) $(PYTHON) ./main.py $(FLAGS)
 
 # Setup Virtual Environment and Install Dependencies
 $(VENV):
