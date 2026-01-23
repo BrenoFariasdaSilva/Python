@@ -206,7 +206,7 @@ def add_header_to_csv(output_csv):
     :return: None
     """
 
-    with open(output_csv, mode="w", newline="") as csv_file:  # Open the CSV file in write mode
+    with open(output_csv, mode="w", newline="", encoding="utf-8") as csv_file:  # Open the CSV file in write mode (UTF-8)
         fieldnames = ["Commit Number", "Commit Hash", "Commit Date", "Commit Message"]  # CSV header
         writer = csv.DictWriter(csv_file, fieldnames=fieldnames)  # Create a CSV writer
         writer.writeheader()  # Write the header to the CSV
@@ -223,7 +223,7 @@ def write_commits_to_csv(commits_list, output_csv):
 
     add_header_to_csv(output_csv)  # Add a header to the CSV file
 
-    with open(output_csv, mode="a", newline="") as csv_file:  # Open the CSV file in append mode
+    with open(output_csv, mode="a", newline="", encoding="utf-8") as csv_file:  # Open the CSV file in append mode (UTF-8)
         fieldnames = ["Commit Number", "Commit Hash", "Commit Date", "Commit Message"]  # CSV header
         writer = csv.DictWriter(csv_file, fieldnames=fieldnames)  # Create a CSV writer
         for commit in commits_list:  # Iterate over the commits list
