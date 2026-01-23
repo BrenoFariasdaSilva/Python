@@ -105,7 +105,7 @@ def add_header_to_csv(output_csv):
     :return: None
     """
 
-    with open(output_csv, mode="w", newline="") as csv_file:  # Open the CSV file in write mode
+    with open(output_csv, mode="w", newline="", encoding="utf-8-sig") as csv_file:  # Open the CSV file in write mode (UTF-8 with BOM for Excel)
         fieldnames = [
             "Commit Number",
             "Commit Hash",
@@ -128,7 +128,7 @@ def write_commits_to_csv(commits_list, output_csv):
 
     add_header_to_csv(output_csv)  # Add a header to the CSV file
 
-    with open(output_csv, mode="a", newline="") as csv_file:  # Open the CSV file in append mode
+    with open(output_csv, mode="a", newline="", encoding="utf-8-sig") as csv_file:  # Open the CSV file in append mode (UTF-8 with BOM for Excel)
         fieldnames = [
             "Commit Number",
             "Commit Hash",
