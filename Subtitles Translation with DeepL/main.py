@@ -309,38 +309,40 @@ def translate_srt_lines(srt_file, lines):
 
     with tqdm(
         total=len(lines),
-        desc=f"{BackgroundColors.GREEN}Lines translated in file {BackgroundColors.CYAN}{srt_file}{BackgroundColors.GREEN}",
+        desc=f"{BackgroundColors.GREEN}Processing: {BackgroundColors.CYAN}{getattr(srt_file, 'name', str(srt_file))}{Style.RESET_ALL}",
         unit="line",
         ncols=100,
         leave=False,
         bar_format=f"{BackgroundColors.CYAN}{{l_bar}}{{bar}}{BackgroundColors.GREEN}{{r_bar}}{Style.RESET_ALL}",
     ) as pbar:
-        for line in lines:  # Iterate through each line in the SRT file
-            stripped = line.strip()  # Remove leading and trailing whitespace
-
+        current_line = 0
+        for line in lines:
+            stripped = line.strip()
             if (
                 stripped == "" or stripped.replace(":", "").replace(",", "").isdigit() or "-->" in line
-            ):  # If line is empty, timing, or index
-                if buffer:  # If buffer contains text to translate
-                    translated = translate_text_block("\n".join(buffer), translator)  # Translate buffer
-                    if translated is None:  # Defensive check, should never happen
-                        translated = buffer  # Fallback to original lines
-                    translated_lines.extend(translated)  # Add translated lines
-                    buffer = []  # Clear buffer
-                translated_lines.append(line.rstrip("\n"))  # Keep timing/index/empty line as is
-            else:  # Line is text to be translated
-                buffer.append(stripped)  # Add line to buffer
-
-            pbar.update(1)  # Update progress bar for each line processed
-
-        if buffer:  # Translate any remaining text in buffer
-            translated = translate_text_block("\n".join(buffer), translator)  # Translate remaining buffer
-            if translated is None:  # Defensive check, should never happen
-                translated = buffer  # Fallback to original lines
-            translated_lines.extend(translated)  # Add translated lines
-            pbar.update(len(buffer))  # Update progress bar for remaining lines
-
-    return translated_lines  # Return all translated lines
+            ):
+                if buffer:
+                    translated = translate_text_block("\n".join(buffer), translator)
+                    if translated is None:
+                        translated = buffer
+                    translated_lines.extend(translated)
+                    buffer = []
+                translated_lines.append(line.rstrip("\n"))
+            else:
+                buffer.append(stripped)
+            current_line += 1
+            pbar.set_postfix({"progress": f"{current_line}/{len(lines)}"})
+            pbar.update(1)
+        if buffer:
+            translated = translate_text_block("\n".join(buffer), translator)
+            if translated is None:
+                translated = buffer
+            translated_lines.extend(translated)
+            # Update for remaining lines
+            current_line += len(buffer)
+            pbar.set_postfix({"progress": f"{current_line}/{len(lines)}"})
+            pbar.update(len(buffer))
+    return translated_lines
 
 
 def save_srt(lines, output_file):
