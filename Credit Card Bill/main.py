@@ -140,11 +140,11 @@ def present_and_choose_file(matched_faturas):
     
     print(f"{BackgroundColors.YELLOW}Multiple Fatura files found. Please choose one to process:{Style.RESET_ALL}")
     for idx, (filename, _) in enumerate(matched_faturas):
-        print(f"[{idx}] - {filename}")
+        print(f"{BackgroundColors.GREEN}[{BackgroundColors.CYAN}{idx}{BackgroundColors.GREEN}] - {BackgroundColors.CYAN}{filename}{Style.RESET_ALL}")
 
     while True:
         try:
-            choice = input(f"Select file index [0-{len(matched_faturas)-1}]: ").strip()
+            choice = input(f"{BackgroundColors.GREEN}Select file index {BackgroundColors.CYAN}[0-{len(matched_faturas)-1}]{BackgroundColors.GREEN}: {Style.RESET_ALL}").strip()
         except (EOFError, KeyboardInterrupt):
             print()
             return None
