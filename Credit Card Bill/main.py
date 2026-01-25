@@ -4,6 +4,7 @@ import os  # For checking if the file exists
 import pandas as pd  # Pandas is used to read and write the CSV files
 import platform  # For checking the operating system
 import re  # For regular expressions
+from datetime import datetime  # For parsing dates in Fatura filenames
 from colorama import Style  # For coloring the terminal
 
 
@@ -79,58 +80,133 @@ def detect_input_folder():
     return None
 
 
+def list_csv_files(folder):
+    """
+    Return list of CSV file paths inside the given folder.
+
+    :param folder: The folder to list CSV files from
+    :return: A list of CSV file paths
+    """
+    
+    return glob.glob(f"{folder}/*.csv")
+
+
+def find_debits_file(csv_files):
+    """
+    Return basename of debits.csv (case-insensitive) if present.
+
+    :param csv_files: A list of CSV file paths to search
+    :return: The basename of debits.csv if found, otherwise None
+    """
+    
+    for path in csv_files:
+        filename = os.path.basename(path)
+        if filename.lower() == "debits.csv":
+            return filename
+    return None
+
+
+def find_fatura_matches(csv_files):
+    """
+    Return list of tuples (basename, date_obj_or_none) for files matching FaturaYYYY-MM-DD.csv.
+
+    :param csv_files: A list of CSV file paths to search
+    :return: A list of tuples where each tuple is (basename, datetime or None)
+    """
+    
+    pattern = re.compile(r"^Fatura(\d{4}-\d{2}-\d{2})\.csv$", re.IGNORECASE)
+    matches = []
+    for path in csv_files:
+        filename = os.path.basename(path)
+        m = pattern.match(filename)
+        if not m:
+            continue
+        date_part = m.group(1)
+        try:
+            date_obj = datetime.strptime(date_part, "%Y-%m-%d")
+        except Exception:
+            date_obj = None
+        matches.append((filename, date_obj))
+    return matches
+
+
+def present_and_choose_file(matched_faturas):
+    """
+    Present numbered list of matched Fatura files and prompt the user to choose one.
+
+    :param matched_faturas: A list of tuples (filename, date_obj_or_none)
+    :return: The chosen filename (basename) or None if selection was cancelled
+    """
+    
+    print(f"{BackgroundColors.YELLOW}Multiple Fatura files found. Please choose one to process:{Style.RESET_ALL}")
+    for idx, (filename, _) in enumerate(matched_faturas):
+        print(f"[{idx}] - {filename}")
+
+    while True:
+        try:
+            choice = input(f"Select file index [0-{len(matched_faturas)-1}]: ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return None
+
+        if not choice.isdigit():
+            print(f"Invalid selection: '{choice}'. Please enter a number between 0 and {len(matched_faturas)-1}.")
+            continue
+
+        idx = int(choice)
+        if 0 <= idx < len(matched_faturas):
+            selected = matched_faturas[idx][0]
+            verbose_output(true_string=f"{BackgroundColors.GREEN}Selected file: {BackgroundColors.CYAN}{selected}{Style.RESET_ALL}")
+            return selected
+
+        print(f"Index out of range. Enter a value between 0 and {len(matched_faturas)-1}.")
+
+
 def detect_input_csv_filename(folder):
     """
-    Detect the input CSV filename. Looks for:
-    1. debits.csv (case insensitive)
-    2. Files matching pattern Fatura{YYYY-MM-DD}.csv
+    Detect the input CSV filename.
 
     :param folder: The folder to search in
     :return: The filename if found, or None if not found
     """
 
-    verbose_output(
-        true_string=f"{BackgroundColors.GREEN}Detecting input CSV filename in folder: {BackgroundColors.CYAN}{folder}{Style.RESET_ALL}"
-    )
+    verbose_output(true_string=f"{BackgroundColors.GREEN}Detecting input CSV filename in folder: {BackgroundColors.CYAN}{folder}{Style.RESET_ALL}")
 
-    if not os.path.isdir(folder):  # Verify if the folder exists
-        return None  # Return None if the folder does not exist
+    if not os.path.isdir(folder):
+        return None
 
-    csv_files = glob.glob(f"{folder}/*.csv")  # Get all CSV files in the folder
+    csv_files = list_csv_files(folder)
 
-    for file in csv_files:  # First, look for debits.csv (case insensitive)
-        filename = os.path.basename(file)  # Get the filename from the path
-        if filename.lower() == "debits.csv":  # If the filename is debits.csv (case insensitive)
-            verbose_output(
-                true_string=f"{BackgroundColors.GREEN}Found debits.csv file: {BackgroundColors.CYAN}{filename}{Style.RESET_ALL}"
-            )
-            return filename  # Return the filename
+    basenames = [os.path.basename(p) for p in csv_files]
+    candidates = []  # list of (filename, date_or_none)
 
-    fatura_pattern = re.compile(r"^Fatura\d{4}-\d{2}-\d{2}\.csv$", re.IGNORECASE)  # Second, look for Fatura{YYYY-MM-DD}.csv pattern
-    for file in csv_files:  # Look for files matching the Fatura pattern
-        filename = os.path.basename(file)  # Get the filename from the path
-        if fatura_pattern.match(filename):  # If the filename matches the Fatura pattern
-            verbose_output(
-                true_string=f"{BackgroundColors.GREEN}Found Fatura pattern file: {BackgroundColors.CYAN}{filename}{Style.RESET_ALL}"
-            )
-            return filename  # Return the filename
+    debits = find_debits_file(csv_files)
+    if debits and debits != OUTPUT_CSV_FILENAME:
+        candidates.append((debits, None))
 
-    return None  # Return None if no valid CSV file is found
+    faturas = find_fatura_matches(csv_files)
 
+    faturas_sorted = sorted(faturas, key=lambda x: (x[1] is None, x[1]), reverse=True)
+    for f in faturas_sorted:
+        if f[0] != OUTPUT_CSV_FILENAME and f[0] not in [c[0] for c in candidates]:
+            candidates.append(f)
 
-def verify_filepath_exists(filepath):
-    """
-    Verify if a file or folder exists at the specified path.
+    for name in basenames:
+        if name == OUTPUT_CSV_FILENAME:
+            continue
+        if name in [c[0] for c in candidates]:
+            continue
+        candidates.append((name, None))
 
-    :param filepath: Path to the file or folder
-    :return: True if the file or folder exists, False otherwise
-    """
+    if not candidates:
+        return None
 
-    verbose_output(
-        f"{BackgroundColors.GREEN}Verifying if the file or folder exists at the path: {BackgroundColors.CYAN}{filepath}{Style.RESET_ALL}"
-    )  # Output the verbose message
+    if len(candidates) == 1:
+        filename = candidates[0][0]
+        verbose_output(true_string=f"{BackgroundColors.GREEN}Found input file: {BackgroundColors.CYAN}{filename}{Style.RESET_ALL}")
+        return filename
 
-    return os.path.exists(filepath)  # Return True if the file or folder exists, False otherwise
+    return present_and_choose_file(candidates)
 
 
 def debits_csv_exists(file_name):
@@ -226,6 +302,21 @@ def process_dates(df, date_column_name="Data", format="%d/%m/%Y"):
     )  # Format the date column as "dd/mm/yyyy"
 
     return sorted_df  # Return the sorted DataFrame with formatted dates
+
+
+def verify_filepath_exists(filepath):
+    """
+    Verify if a file or folder exists at the specified path.
+
+    :param filepath: Path to the file or folder
+    :return: True if the file or folder exists, False otherwise
+    """
+
+    verbose_output(
+        f"{BackgroundColors.GREEN}Verifying if the file or folder exists at the path: {BackgroundColors.CYAN}{filepath}{Style.RESET_ALL}"
+    )  # Output the verbose message
+
+    return os.path.exists(filepath)  # Return True if the file or folder exists, False otherwise
 
 
 def play_sound():
