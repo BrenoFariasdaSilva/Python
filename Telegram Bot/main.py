@@ -51,6 +51,7 @@ import datetime  # For getting the current date and time
 import os  # For running a command in the terminal
 import platform  # For getting the operating system name
 import sys  # For system-specific parameters and functions
+import telegram_bot  # For telegram bot constants
 from colorama import Style  # For coloring the terminal
 from Logger import Logger  # For logging output to both terminal and file
 from pathlib import Path  # For handling file paths
@@ -105,6 +106,24 @@ def verbose_output(true_string="", false_string=""):
         print(true_string)  # Output the true statement string
     elif false_string != "":  # If the false_string is set
         print(false_string)  # Output the false statement string
+
+
+def setup_telegram_bot():
+    """
+    Sets up the Telegram bot for progress messages.
+
+    :return: Initialized TelegramBot instance
+    """
+    
+    verbose_output(
+        f"{BackgroundColors.GREEN}Setting up Telegram bot for messages...{Style.RESET_ALL}"
+    )  # Output the verbose message
+
+    bot = TelegramBot()  # Initialize Telegram bot for progress messages
+    telegram_bot.TELEGRAM_DEVICE_INFO = f"{telegram_bot.get_local_ip()} - {platform.system()}"  # Set device info for Telegram messages
+    telegram_bot.RUNNING_CODE = os.path.basename(__file__)  # Set prefix for Telegram messages
+    
+    return bot  # Return the initialized bot
 
 
 def verify_filepath_exists(filepath):
@@ -176,7 +195,7 @@ def main():
     )  # Output the welcome message
     start_time = datetime.datetime.now()  # Get the start time of the program
 
-    bot = TelegramBot()  # Initialize Telegram bot for progress messages
+    bot = setup_telegram_bot()  # Set up Telegram bot for progress messages
 
     send_telegram_message(bot, [f"Starting the Main Template Python program at {start_time.strftime('%d/%m/%Y - %H:%M:%S')}"])  # Send start message to Telegram
 
