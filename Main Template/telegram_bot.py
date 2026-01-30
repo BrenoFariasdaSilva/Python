@@ -55,6 +55,7 @@ import atexit  # For playing a sound when the program finishes
 import asyncio  # For asynchronous operations
 import os  # For environment variables and file operations
 import platform  # For getting the operating system name
+import re  # For stripping ANSI sequences
 import socket  # For getting the local IP address
 from colorama import Style  # For coloring the terminal
 from dotenv import load_dotenv  # For loading .env file
@@ -170,7 +171,7 @@ class TelegramBot:
 
         if self.bot:  # If the bot is initialized
             async with self.bot:  # Use the bot context
-                await self.bot.send_message(text=text, chat_id=chat_id)  # Send the message
+                await self.bot.send_message(text=text, chat_id=chat_id, parse_mode="MarkdownV2")  # Send the message with MarkdownV2 parse mode
         else:  # If the bot is not initialized
             print(f"{BackgroundColors.RED}Bot not initialized.{Style.RESET_ALL}")
 
@@ -201,7 +202,7 @@ class TelegramBot:
             async with self.bot:  # Use the bot context
                 for part in parts:  # Send each part
                     try:  # Try to send the message part
-                        await self.bot.send_message(chat_id=chat_id, text=part)  # Send the message part
+                        await self.bot.send_message(chat_id=chat_id, text=part, parse_mode="MarkdownV2")  # Send the message part with MarkdownV2 parse mode
                     except BadRequest as e:  # Handle BadRequest error
                         print(f"{BackgroundColors.RED}Failed to send message part: {str(e)}{Style.RESET_ALL}")
         else:  # If the bot is not initialized
@@ -258,9 +259,9 @@ def verbose_output(true_string="", false_string=""):
     """
 
     if VERBOSE and true_string != "":  # If VERBOSE is True and a true_string was provided
-        print(true_string)
+        print(true_string)  # Output the true statement string
     elif false_string != "":  # If a false_string was provided
-        print(false_string)
+        print(false_string)  # Output the false statement string
 
 
 def get_local_ip():
@@ -282,6 +283,39 @@ def get_local_ip():
         return "127.0.0.1"  # Fallback to localhost
 
 
+def strip_ansi(text: str) -> str:
+    """
+    Strips ANSI escape sequences from the given text.
+    
+    :param text: The text to strip ANSI sequences from
+    :return: The text without ANSI sequences
+    """
+    
+    try:  # Try to strip ANSI sequences
+        text = re.sub(r"\x1B\[[0-?]*[ -/]*[@-~]", "", text)  # Remove ANSI escape sequences
+        text = re.sub(r"\[\d+(?:;\d+)*m", "", text)  # Remove color codes
+        return text  # Return the cleaned text
+    except Exception:  # If any error occurs
+        return text  # Return the original text
+
+
+def escape_markdown_v2(text: str) -> str:
+    """
+    Escape Telegram MarkdownV2 special characters in `text` by prefixing
+    them with a backslash so Telegram will not interpret them as formatting.
+
+    Characters escaped: _ * [ ] ( ) ~ ` > # + - = | { } . !
+
+    :param text: Input string
+    :return: Escaped string safe for MarkdownV2
+    """
+
+    try:  # Try to escape special characters
+        return re.sub(r"([_\*\[\]\(\)~`>\#\+\-\=\|\{\}\.\!])", r"\\\1", str(text))  # Escape the set of special characters for MarkdownV2
+    except Exception:  # If any error occurs
+        return text  # Return the original text
+
+
 def send_telegram_message(bot, messages, condition=True):
     """
     Sends a message via Telegram bot if configured and condition is met.
@@ -296,7 +330,15 @@ def send_telegram_message(bot, messages, condition=True):
         try:  # Try to send message
             if isinstance(messages, str):  # If a single string is provided
                 messages = [messages]  # Convert it to a list
-            prefixed_messages = [f"{TELEGRAM_DEVICE_INFO} - {RUNNING_CODE}: {msg}" for msg in messages]
+            
+            prefixed_messages = [  # Prefix each message with device info and running code
+                escape_markdown_v2(
+                    strip_ansi(
+                        f"{str(TELEGRAM_DEVICE_INFO)} - {str(RUNNING_CODE)}: {str(msg)}"
+                    )
+                )
+                for msg in messages
+            ]
             asyncio.run(bot.send_messages(prefixed_messages))  # Run the async method synchronously
         except Exception:  # Silently ignore Telegram errors
             pass  # Do nothing
