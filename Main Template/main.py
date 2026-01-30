@@ -54,6 +54,7 @@ import sys  # For system-specific parameters and functions
 from colorama import Style  # For coloring the terminal
 from Logger import Logger  # For logging output to both terminal and file
 from pathlib import Path  # For handling file paths
+from telegram_bot import TelegramBot, send_telegram_message  # For sending progress messages to Telegram
 
 
 # Macros:
@@ -175,7 +176,9 @@ def main():
     )  # Output the welcome message
     start_time = datetime.datetime.now()  # Get the start time of the program
 
-    # Your code goes here
+    bot = TelegramBot()  # Initialize Telegram bot for progress messages
+
+    send_telegram_message(bot, [f"Starting the Main Template Python program at {start_time.strftime('%d/%m/%Y - %H:%M:%S')}"])  # Send start message to Telegram
 
     finish_time = datetime.datetime.now()  # Get the finish time of the program
     print(
