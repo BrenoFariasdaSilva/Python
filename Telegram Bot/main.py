@@ -51,7 +51,7 @@ import datetime  # For getting the current date and time
 import os  # For running a command in the terminal
 import platform  # For getting the operating system name
 import sys  # For system-specific parameters and functions
-import telegram_bot  # For telegram bot constants
+import telegram_bot as telegram_module  # For setting Telegram prefix and device info
 from colorama import Style  # For coloring the terminal
 from Logger import Logger  # For logging output to both terminal and file
 from pathlib import Path  # For handling file paths
@@ -71,6 +71,9 @@ class BackgroundColors:  # Colors for the terminal
 
 # Execution Constants:
 VERBOSE = False  # Set to True to output verbose messages
+
+# Telegram Bot Setup:
+TELEGRAM_BOT = None  # Global Telegram bot instance (initialized in setup_telegram_bot)
 
 # Logger Setup:
 logger = Logger(f"./Logs/{Path(__file__).stem}.log", clean=True)  # Create a Logger instance
@@ -108,22 +111,43 @@ def verbose_output(true_string="", false_string=""):
         print(false_string)  # Output the false statement string
 
 
+def verify_dot_env_file():
+    """
+    Verifies if the .env file exists in the current directory.
+
+    :return: True if the .env file exists, False otherwise
+    """
+
+    env_path = Path(__file__).parent / ".env"  # Path to the .env file
+    if not env_path.exists():  # If the .env file does not exist
+        print(f"{BackgroundColors.CYAN}.env{BackgroundColors.YELLOW} file not found at {BackgroundColors.CYAN}{env_path}{BackgroundColors.YELLOW}. Telegram messages may not be sent.{Style.RESET_ALL}")
+        return False  # Return False
+
+    return True  # Return True if the .env file exists
+
+
 def setup_telegram_bot():
     """
     Sets up the Telegram bot for progress messages.
 
-    :return: Initialized TelegramBot instance
+    :return: None
     """
     
     verbose_output(
         f"{BackgroundColors.GREEN}Setting up Telegram bot for messages...{Style.RESET_ALL}"
     )  # Output the verbose message
 
-    bot = TelegramBot()  # Initialize Telegram bot for progress messages
-    telegram_bot.TELEGRAM_DEVICE_INFO = f"{telegram_bot.get_local_ip()} - {platform.system()}"  # Set device info for Telegram messages
-    telegram_bot.RUNNING_CODE = os.path.basename(__file__)  # Set prefix for Telegram messages
-    
-    return bot  # Return the initialized bot
+    verify_dot_env_file()  # Verify if the .env file exists
+
+    global TELEGRAM_BOT  # Declare the module-global telegram_bot variable
+
+    try:  # Try to initialize the Telegram bot
+        TELEGRAM_BOT = TelegramBot()  # Initialize Telegram bot for progress messages
+        telegram_module.TELEGRAM_DEVICE_INFO = f"{telegram_module.get_local_ip()} - {platform.system()}"
+        telegram_module.RUNNING_CODE = os.path.basename(__file__)
+    except Exception as e:
+        print(f"{BackgroundColors.RED}Failed to initialize Telegram bot: {e}{Style.RESET_ALL}")
+        TELEGRAM_BOT = None  # Set to None if initialization fails
 
 
 def verify_filepath_exists(filepath):
@@ -195,9 +219,7 @@ def main():
     )  # Output the welcome message
     start_time = datetime.datetime.now()  # Get the start time of the program
 
-    bot = setup_telegram_bot()  # Set up Telegram bot for progress messages
-
-    send_telegram_message(bot, [f"Starting the Main Template Python program at {start_time.strftime('%d/%m/%Y - %H:%M:%S')}"])  # Send start message to Telegram
+    send_telegram_message(TELEGRAM_BOT, [f"Starting the Main Template Python program at {start_time.strftime('%d/%m/%Y - %H:%M:%S')}"])  # Send start message to Telegram
 
     finish_time = datetime.datetime.now()  # Get the finish time of the program
     print(
@@ -206,6 +228,8 @@ def main():
     print(
         f"\n{BackgroundColors.BOLD}{BackgroundColors.GREEN}Program finished.{Style.RESET_ALL}"
     )  # Output the end of the program message
+    
+    send_telegram_message(TELEGRAM_BOT, [f"Finished the Main Template Python program at {finish_time.strftime('%d/%m/%Y - %H:%M:%S')} with execution time {calculate_execution_time(start_time, finish_time)}"])  # Send finish message to Telegram
 
     (
         atexit.register(play_sound) if RUN_FUNCTIONS["Play Sound"] else None
