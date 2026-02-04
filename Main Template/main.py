@@ -111,6 +111,21 @@ def verbose_output(true_string="", false_string=""):
         print(false_string)  # Output the false statement string
 
 
+def verify_filepath_exists(filepath):
+    """
+    Verify if a file or folder exists at the specified path.
+
+    :param filepath: Path to the file or folder
+    :return: True if the file or folder exists, False otherwise
+    """
+
+    verbose_output(
+        f"{BackgroundColors.GREEN}Verifying if the file or folder exists at the path: {BackgroundColors.CYAN}{filepath}{Style.RESET_ALL}"
+    )  # Output the verbose message
+
+    return os.path.exists(filepath)  # Return True if the file or folder exists, False otherwise
+
+
 def verify_dot_env_file():
     """
     Verifies if the .env file exists in the current directory.
@@ -119,7 +134,8 @@ def verify_dot_env_file():
     """
 
     env_path = Path(__file__).parent / ".env"  # Path to the .env file
-    if not env_path.exists():  # If the .env file does not exist
+    
+    if not verify_filepath_exists(env_path):  # If the .env file does not exist
         print(f"{BackgroundColors.CYAN}.env{BackgroundColors.YELLOW} file not found at {BackgroundColors.CYAN}{env_path}{BackgroundColors.YELLOW}. Telegram messages may not be sent.{Style.RESET_ALL}")
         return False  # Return False
 
@@ -148,21 +164,6 @@ def setup_telegram_bot():
     except Exception as e:
         print(f"{BackgroundColors.RED}Failed to initialize Telegram bot: {e}{Style.RESET_ALL}")
         TELEGRAM_BOT = None  # Set to None if initialization fails
-
-
-def verify_filepath_exists(filepath):
-    """
-    Verify if a file or folder exists at the specified path.
-
-    :param filepath: Path to the file or folder
-    :return: True if the file or folder exists, False otherwise
-    """
-
-    verbose_output(
-        f"{BackgroundColors.GREEN}Verifying if the file or folder exists at the path: {BackgroundColors.CYAN}{filepath}{Style.RESET_ALL}"
-    )  # Output the verbose message
-
-    return os.path.exists(filepath)  # Return True if the file or folder exists, False otherwise
 
 
 def to_seconds(obj):
