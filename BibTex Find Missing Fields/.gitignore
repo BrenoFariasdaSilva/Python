@@ -12,6 +12,9 @@ Icon? # match Icon<CR>
 # Ignore the Windows .Desktop Files
 **/desktop.ini
 
+# Ignore the Logs directory
+**/Logs/*
+
 # Ignore the Compressed Files
 **/.zip
 **/.rar
