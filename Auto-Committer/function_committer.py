@@ -228,7 +228,7 @@ def extract_functions_between(text, start_name, end_name):
 
 def write_file(path, content):
     """
-    Writes content to a file with UTF-8 encoding.
+    Writes content to a file with UTF-8 encoding and ensures it ends with exactly one empty line.
 
     :param path: Path object pointing to the target file
     :param content: String content to write to the file
@@ -236,6 +236,8 @@ def write_file(path, content):
     """
 
     verbose_output(f"{BackgroundColors.GREEN}Writing content to file: {BackgroundColors.CYAN}{path}{Style.RESET_ALL}")
+    
+    content = content.rstrip() + "\n"  # Remove trailing whitespace and add exactly one newline
     
     path.write_text(content, encoding="utf-8")  # Write the content to the file
 
@@ -420,5 +422,3 @@ if __name__ == "__main__":
     """
 
     main()  # Call the main function
-
-
