@@ -55,3 +55,11 @@ In order to clone this repository without the submodules (Scientific Research an
 ```bash
 git clone https://github.com/BrenoFariasdaSilva/Python.git
 ```
+
+### Clone with Submodules
+
+In order to clone this repository with the submodules (Scientific Research and Worked-Example-Miner), you can use the following command:
+
+```bash
+git clone --recurse-submodules https://github.com/BrenoFariasdaSilva/Python.git
+```
