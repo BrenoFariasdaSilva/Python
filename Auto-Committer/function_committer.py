@@ -107,6 +107,20 @@ RUN_FUNCTIONS = {
 # Functions Definitions:
 
 
+def write_file(path, content):
+    """
+    Writes content to a file with UTF-8 encoding.
+
+    :param path: Path object pointing to the target file
+    :param content: String content to write to the file
+    :return: None
+    """
+
+    verbose_output(f"{BackgroundColors.GREEN}Writing content to file: {BackgroundColors.CYAN}{path}{Style.RESET_ALL}")
+    
+    path.write_text(content, encoding="utf-8")  # Write the content to the file
+
+
 def to_seconds(obj):
     """
     Converts various time-like objects to seconds.
