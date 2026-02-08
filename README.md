@@ -46,6 +46,17 @@ Feel free to contribute and send suggestions.
 	- [License](#license)
 		- [Creative Commons Zero v1.0 Universal](#creative-commons-zero-v10-universal)
 
+## Setup
+
+### Clone Submodules
+
+In case you have already cloned the repository and forgot to clone the submodules (Scientific Research and Worked-Example-Miner), you can use the following command to clone the submodule:
+
+```bash
+git submodule init
+git submodule update
+```
+
 ## Installation:
 * Python Language:
 
