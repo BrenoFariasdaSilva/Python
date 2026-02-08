@@ -46,6 +46,25 @@ Feel free to contribute and send suggestions.
 	- [License](#license)
 		- [Creative Commons Zero v1.0 Universal](#creative-commons-zero-v10-universal)
 
+## Run Python Code:
+
+```bash
+python3 ./{ProgramName}.py
+# Example: python3 ./main.py 
+```
+
+### Dependencies
+
+1. Install the project dependencies with the following command:
+
+```bash
+make dependencies
+```
+or
+```bash
+pip install -r requirements.txt
+```
+
 ## Contributing
 
 Contributions are what make the open-source community such an amazing place to learn, inspire, and create. Any contributions you make are **greatly appreciated**. If you have suggestions for improving the code, your insights will be highly welcome.
