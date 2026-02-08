@@ -94,3 +94,22 @@ git submodule update
 		chmod +x install.sh
 		sudo ./install.sh
 		```
+
+## Run Python Code:
+
+```bash
+python3 ./{ProgramName}.py
+# Example: python3 ./main.py 
+```
+
+### Dependencies
+
+1. Install the project dependencies with the following command:
+
+```bash
+make dependencies
+```
+or
+```bash
+pip install -r requirements.txt
+```
