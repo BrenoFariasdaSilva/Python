@@ -394,7 +394,10 @@ def main():
         run_git_commit(name)  # Run Git add and commit
         
         time.sleep(3)  # Optional: Sleep for a short time between commits to avoid overwhelming the system (adjust as needed)
-        
+
+    git_dir = FILE_PATH.resolve().parent  # Get the directory containing the file
+    subprocess.run(["git", "-C", str(git_dir), "push"], check=True)  # Push all commits to the remote repository
+    
     print(f"\n{BackgroundColors.BOLD}{BackgroundColors.GREEN}All functions committed successfully!{Style.RESET_ALL}", end="\n\n")  # Output success message
 
     finish_time = datetime.datetime.now()  # Get the finish time of the program
