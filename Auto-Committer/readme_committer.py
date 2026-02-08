@@ -108,6 +108,46 @@ RUN_FUNCTIONS = {
 # Functions Definitions:
 
 
+def validate_markers(start_name, end_name, text):
+    """
+    Validate that START_SECTION and END_SECTION are provided and exist in the file.
+
+    :param start_name: The name of the first section to include
+    :param end_name: The name of the last section to include
+    :param text: The full text content of the README file
+    :return: True if validation passes, False otherwise
+    """
+    
+    verbose_output(f"{BackgroundColors.GREEN}Validating START_SECTION and END_SECTION markers...{Style.RESET_ALL}")
+
+    problems = []  # List to collect validation problems
+    if not start_name or not end_name:  # If either marker is not set
+        problems.append("Both START_SECTION and END_SECTION must be set to section names.")  # Add problem if markers are not set
+
+    pattern = r"^##\s+([^\n]+)"
+    found_names = [m.group(1).strip() for m in re.finditer(pattern, text, flags=re.MULTILINE)]  # Extract all top-level section names from the file
+
+    if start_name and start_name not in found_names:  # If START_SECTION is set but not found in the file
+        problems.append(f"START_SECTION '{start_name}' not found in {FILE_PATH.name}.")  # Add problem if START_SECTION is not found
+    if end_name and end_name not in found_names:  # If END_SECTION is set but not found in the file
+        problems.append(f"END_SECTION '{end_name}' not found in {FILE_PATH.name}.")  # Add problem if END_SECTION is not found
+
+    if problems:  # If there are any validation problems, print them and return False
+        print(f"{BackgroundColors.RED}Validation error with START/END section markers:{Style.RESET_ALL}")
+        for p in problems:  # Print each problem in the validation
+            print(f"{BackgroundColors.YELLOW}- {p}{Style.RESET_ALL}")
+
+        if found_names:  # If there are any sections found, list them to help the user
+            print(f"{BackgroundColors.GREEN}Available level-2 sections in the file:{BackgroundColors.CYAN} {', '.join(found_names)}{Style.RESET_ALL}")
+        else:  # If no sections were found, inform the user
+            print(f"{BackgroundColors.YELLOW}No level-2 sections were detected in {FILE_PATH.name}.{Style.RESET_ALL}")
+
+        print(f"{BackgroundColors.GREEN}Please set `START_SECTION` and `END_SECTION` to valid section names before running the script.{Style.RESET_ALL}")
+        return False  # Validation failed
+
+    return True  # Validation passed
+
+
 def run_git_commit(section_name: str):
     """
     Executes Git add and commit commands for the target file.
