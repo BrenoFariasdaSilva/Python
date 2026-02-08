@@ -44,11 +44,11 @@ endif
 # Default target
 all: dependencies
 
-# Run function_committer
-function_committer: dependencies
+# Run functions_committer
+functions_committer: dependencies
 	$(ENSURE_LOG_DIR)
 	$(CLEAR_CMD)
-	$(call RUN_AND_LOG, ./function_committer.py)
+	$(call RUN_AND_LOG, ./functions_committer.py)
 
 # Run readme_committer
 readme_committer: dependencies
@@ -76,4 +76,4 @@ clean:
 	find . -type f -name '*.pyc' -delete || del /S /Q *.pyc 2>nul
 	find . -type d -name '__pycache__' -delete || rmdir /S /Q __pycache__ 2>nul
 
-.PHONY: all function_committer readme_committer clean dependencies generate_requirements
+.PHONY: all functions_committer readme_committer clean dependencies generate_requirements
