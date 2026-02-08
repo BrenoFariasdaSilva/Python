@@ -108,6 +108,21 @@ RUN_FUNCTIONS = {
 # Functions Definitions:
 
 
+def verify_filepath_exists(filepath):
+    """
+    Verify if a file or folder exists at the specified path.
+
+    :param filepath: Path to the file or folder
+    :return: True if the file or folder exists, False otherwise
+    """
+
+    verbose_output(
+        f"{BackgroundColors.GREEN}Verifying if the file or folder exists at the path: {BackgroundColors.CYAN}{filepath}{Style.RESET_ALL}"
+    )  # Output the verbose message
+
+    return os.path.exists(filepath)  # Return True if the file or folder exists, False otherwise
+
+
 def validate_markers(start_name, end_name, text):
     """
     Validate that START_SECTION and END_SECTION are provided and exist in the file.
