@@ -108,6 +108,30 @@ RUN_FUNCTIONS = {
 # Functions Definitions:
 
 
+def extract_subsections(section_content):
+    """
+    Extracts all level 3 subsections (###) from a section's content.
+
+    :param section_content: The full content of a level 2 section
+    :return: List of tuples (subsection_name, subsection_content) or empty list if no subsections
+    """
+
+    verbose_output(f"{BackgroundColors.GREEN}Verifying for subsections within section...{Style.RESET_ALL}")
+    
+    pattern = r"^###\s+([^\n]+).*?(?=^###\s|\Z)"  # Regex pattern for level 3 headers
+    matches = list(re.finditer(pattern, section_content, flags=re.DOTALL | re.MULTILINE))  # Find all subsection matches
+    
+    if not matches:  # If no subsections found
+        verbose_output(f"{BackgroundColors.YELLOW}No subsections found in this section.{Style.RESET_ALL}")
+        return []  # Return empty list
+    
+    subsections = [(m.group(1).strip(), m.group(0)) for m in matches]  # Extract subsection details (name, content)
+    
+    verbose_output(f"{BackgroundColors.GREEN}Found {BackgroundColors.CYAN}{len(subsections)}{BackgroundColors.GREEN} subsections{Style.RESET_ALL}")
+    
+    return subsections  # Return the list of subsections
+
+
 def commit_section_with_subsections(name, section_header, section_body, subsections, prefix, suffix, current_body, commit_count):
     """
     Commits a section that contains subsections by committing each subsection separately.
