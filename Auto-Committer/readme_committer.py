@@ -108,6 +108,60 @@ RUN_FUNCTIONS = {
 # Functions Definitions:
 
 
+def commit_section_with_subsections(name, section_header, section_body, subsections, prefix, suffix, current_body, commit_count):
+    """
+    Commits a section that contains subsections by committing each subsection separately.
+
+    This function processes sections with level 3 headers (###) by committing each subsection
+    individually in reverse order (bottom to top). The section header and any introductory text
+    before the first subsection are preserved with each subsection commit.
+
+    :param name: The name of the parent section
+    :param section_header: The reconstructed section header (e.g., "## Section Name")
+    :param section_body: The body content of the section without the header
+    :param subsections: List of tuples containing (subsection_name, subsection_content)
+    :param prefix: Text before all selected sections in the document
+    :param suffix: Text after all selected sections in the document
+    :param current_body: The current accumulated body content being built
+    :param commit_count: Current commit counter value
+    :return: Tuple of (updated_current_body, updated_commit_count)
+    """
+
+    print(f"{BackgroundColors.YELLOW}Section '{BackgroundColors.CYAN}{name}{BackgroundColors.YELLOW}' contains {BackgroundColors.CYAN}{len(subsections)}{BackgroundColors.YELLOW} subsections. Committing each separately...{Style.RESET_ALL}")
+
+    first_subsection_pos = section_body.find("###")  # Find the position of the first subsection
+    section_intro = section_body[:first_subsection_pos].rstrip("\n") if first_subsection_pos > 0 else ""  # Extract introductory text
+
+    current_section_content = section_header  # Initialize section content with the header
+    if section_intro:  # Add introductory text if it exists
+        current_section_content += "\n\n" + section_intro
+
+    for subsection_index, (subsection_name, subsection_content) in enumerate(reversed(subsections), start=1):
+        subsection_content = subsection_content.rstrip("\n")  # Remove trailing newlines from subsection content
+
+        if subsection_index == 1:  # Append the first subsection to the current section content
+            current_section_content += "\n\n" + subsection_content
+        else:  # Insert subsequent subsections between the intro and previously added subsections
+            if section_intro:
+                current_section_content = section_header + "\n\n" + section_intro + "\n\n" + subsection_content + current_section_content[len(section_header) + len(section_intro) + 4:]
+            else:
+                current_section_content = section_header + "\n\n" + subsection_content + current_section_content[len(section_header):]
+
+        current_body = current_section_content + SECTION_SEPARATOR + current_body if current_body else current_section_content + SECTION_SEPARATOR  # Update the document body
+
+        new_content = prefix + current_body + suffix  # Combine prefix, current body, and suffix
+        write_file(FILE_PATH, new_content)  # Write the updated content to the file
+
+        commit_count += 1  # Increment the commit counter
+        verbose_output(f"{BackgroundColors.BOLD}[{BackgroundColors.YELLOW}{commit_count}{BackgroundColors.BOLD}]{Style.RESET_ALL} {BackgroundColors.GREEN}Committing subsection: {BackgroundColors.CYAN}{subsection_name}{BackgroundColors.GREEN} (from section {BackgroundColors.CYAN}{name}{BackgroundColors.GREEN}){Style.RESET_ALL}")
+
+        commit_msg = f"{COMMIT_PREFIX} {subsection_name} subsection to {FILE_PATH.name}"  # Create the commit message
+        subprocess.run(["git", "add", str(FILE_PATH)], check=True)  # Stage the file
+        subprocess.run(["git", "commit", "-m", commit_msg], check=True)  # Commit the changes
+
+    return current_body, commit_count  # Return the updated body and commit count
+
+
 def commit_whole_section(name, content, prefix, suffix, current_body, commit_count):
     """
     Commits an entire section as a single commit when it contains no subsections.
