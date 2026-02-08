@@ -50,11 +50,11 @@ functions_committer: dependencies
 	$(CLEAR_CMD)
 	$(call RUN_AND_LOG, ./functions_committer.py)
 
-# Run readme_committer
-readme_committer: dependencies
+# Run readme_sections_committer
+readme_sections_committer: dependencies
 	$(ENSURE_LOG_DIR)
 	$(CLEAR_CMD)
-	$(call RUN_AND_LOG, ./readme_committer.py)
+	$(call RUN_AND_LOG, ./readme_sections_committer.py)
 
 # Create virtual environment if missing
 $(VENV):
@@ -76,4 +76,4 @@ clean:
 	find . -type f -name '*.pyc' -delete || del /S /Q *.pyc 2>nul
 	find . -type d -name '__pycache__' -delete || rmdir /S /Q __pycache__ 2>nul
 
-.PHONY: all functions_committer readme_committer clean dependencies generate_requirements
+.PHONY: all functions_committer readme_sections_committer clean dependencies generate_requirements
