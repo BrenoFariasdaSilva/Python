@@ -140,3 +140,9 @@ Please follow these guidelines to make your contributions smooth and effective:
 4. **Stay Engaged**: Respond to any feedback from the project maintainers and make necessary adjustments to your PR.
 
 5. **Celebrate**: Once your PR is merged, celebrate your contribution to the project!
+
+## License
+
+### Creative Commons Zero v1.0 Universal
+
+This project is licensed under the [Creative Commons Zero v1.0 Universal](LICENSE), which means you are free to use, modify, and distribute the code, as long as you mention include the license and attribute you as the original author for the repository. See the [LICENSE](LICENSE) file for more details.
