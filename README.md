@@ -49,5 +49,3 @@ Feel free to contribute and send suggestions.
 ## License
 
 ### Creative Commons Zero v1.0 Universal
-
-This project is licensed under the [Creative Commons Zero v1.0 Universal](LICENSE), which means you are free to use, modify, and distribute the code, as long as you mention include the license and attribute you as the original author for the repository. See the [LICENSE](LICENSE) file for more details.
