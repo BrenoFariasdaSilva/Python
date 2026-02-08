@@ -249,13 +249,52 @@ def main():
     :return: None
     """
 
-    print(
-        f"{BackgroundColors.CLEAR_TERMINAL}{BackgroundColors.BOLD}{BackgroundColors.GREEN}Welcome to the {BackgroundColors.CYAN}Main Template Python{BackgroundColors.GREEN} program!{Style.RESET_ALL}",
-        end="\n\n",
-    )  # Output the welcome message
+    print(f"{BackgroundColors.CLEAR_TERMINAL}{BackgroundColors.BOLD}{BackgroundColors.GREEN}Welcome to the {BackgroundColors.CYAN}Auto-Committer for README Sections{BackgroundColors.GREEN} program!{Style.RESET_ALL}", end="\n\n")  # Output the welcome message
+    
     start_time = datetime.datetime.now()  # Get the start time of the program
     
-    # Implement logic here
+    if not verify_filepath_exists(FILE_PATH):  # If the file does not exist
+        print(f"{BackgroundColors.RED}Error: Target file {BackgroundColors.CYAN}{FILE_PATH}{BackgroundColors.RED} not found!{Style.RESET_ALL}")  # Output error message
+        return  # Exit the function
+
+    original_text = FILE_PATH.read_text(encoding="utf-8")  # Read the original file content
+
+    if not validate_markers(START_SECTION, END_SECTION, original_text):  # If the START_SECTION and END_SECTION markers are not valid
+        return  # Exit the function
+    
+    print(f"{BackgroundColors.GREEN}Extracting sections between {BackgroundColors.CYAN}{START_SECTION}{BackgroundColors.GREEN} and {BackgroundColors.CYAN}{END_SECTION}{Style.RESET_ALL}")  # Output extraction message
+    
+    prefix, suffix, sections = extract_sections_between(original_text, START_SECTION, END_SECTION)  # Extract the sections between markers
+    
+    verbose_output(f"{BackgroundColors.YELLOW}Removing {BackgroundColors.CYAN}{len(sections)}{BackgroundColors.YELLOW} sections from the file...{Style.RESET_ALL}")  # Output removal message
+    
+    write_file(FILE_PATH, prefix + suffix)  # Write the file without the target sections
+    
+    verbose_output(f"{BackgroundColors.GREEN}Sections removed. Starting staged commits...{Style.RESET_ALL}")  # Output staged commits start message
+    
+    current_body = ""  # Initialize the current body content
+    total_sections = len(sections)  # Get the total number of sections
+    commit_count = 0  # Initialize commit counter
+    
+    for section_index, (name, content, *_) in enumerate(reversed(sections), start=1):  # Process each section in reverse order (bottom to top)
+        section_header = f"## {name}"  # Construct the section header
+        section_body = content[len(section_header):].strip("\n")  # Extract the section body by removing the header
+
+        subsections = extract_subsections(section_body)  # Verify if the section contains level 3 subsections (###)
+
+        if subsections:  # If subsections are present, commit each subsection separately
+            current_body, commit_count = commit_section_with_subsections(
+                name, section_header, section_body, subsections,
+                prefix, suffix, current_body, commit_count
+            )
+        else:  # If no subsections are present, commit the entire section as one unit
+            current_body, commit_count = commit_whole_section(
+                name, content, prefix, suffix, current_body, commit_count
+            )
+            
+        time.sleep(3)  # Sleep for a short time between commits to ensure proper Git history
+        
+    print(f"\n{BackgroundColors.BOLD}{BackgroundColors.GREEN}All sections and subsections committed successfully! Total commits: {BackgroundColors.CYAN}{commit_count}{Style.RESET_ALL}", end="\n\n")  # Output success message with commit count
 
     finish_time = datetime.datetime.now()  # Get the finish time of the program
     print(
