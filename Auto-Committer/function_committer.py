@@ -1,6 +1,6 @@
 """
 ================================================================================
-Auto-Committer for README Functions
+Auto-Committer for Python Functions
 ================================================================================
 Author      : Breno Farias da Silva
 Created     : 2026-02-07
