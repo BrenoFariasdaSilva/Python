@@ -291,22 +291,19 @@ def commit_section_with_subsections(name, section_header, section_body, subsecti
     first_subsection_pos = section_body.find("###")  # Find the position of the first subsection
     section_intro = section_body[:first_subsection_pos].rstrip("\n") if first_subsection_pos > 0 else ""  # Extract introductory text
 
-    current_section_content = section_header  # Initialize section content with the header
-    if section_intro:  # Add introductory text if it exists
-        current_section_content += "\n\n" + section_intro
+    base_section_content = section_header  # Start with the section header as the base content for each commit
+    if section_intro:  # If there is introductory text before the first subsection, include it in the base content
+        base_section_content += "\n\n" + section_intro  # Add the introductory text to the base section content with proper spacing
 
-    for subsection_index, (subsection_name, subsection_content) in enumerate(reversed(subsections), start=1):
-        subsection_content = subsection_content.rstrip("\n")  # Remove trailing newlines from subsection content
+    previous_sections_body = current_body  # Store the body content of all previously committed sections to include in each subsection commit
 
-        if subsection_index == 1:  # Append the first subsection to the current section content
-            current_section_content += "\n\n" + subsection_content
-        else:  # Insert subsequent subsections between the intro and previously added subsections
-            if section_intro:
-                current_section_content = section_header + "\n\n" + section_intro + "\n\n" + subsection_content + current_section_content[len(section_header) + len(section_intro) + 4:]
-            else:
-                current_section_content = section_header + "\n\n" + subsection_content + current_section_content[len(section_header):]
+    for subsection_index, (subsection_name, subsection_content) in enumerate(subsections, start=1):  # Process each subsection in order (top to bottom)
+        current_section_content = base_section_content  # Start with the base section content for this subsection commit
+        for i in range(subsection_index):  # Add all previous subsections up to the current one to the content
+            sub_content = subsections[i][1].rstrip("\n")  # Get the content of the subsection and remove trailing blank lines
+            current_section_content += "\n\n" + sub_content  # Add the subsection content to the current section content with proper spacing
 
-        current_body = current_section_content + SECTION_SEPARATOR + current_body if current_body else current_section_content + SECTION_SEPARATOR  # Update the document body
+        current_body = previous_sections_body + current_section_content + SECTION_SEPARATOR if previous_sections_body else current_section_content + SECTION_SEPARATOR  # Combine previous sections with current section in progress
 
         new_content = prefix + current_body + suffix  # Combine prefix, current body, and suffix
         write_file(FILE_PATH, new_content)  # Write the updated content to the file
@@ -315,8 +312,10 @@ def commit_section_with_subsections(name, section_header, section_body, subsecti
         verbose_output(f"{BackgroundColors.BOLD}[{BackgroundColors.YELLOW}{commit_count}{BackgroundColors.BOLD}]{Style.RESET_ALL} {BackgroundColors.GREEN}Committing subsection: {BackgroundColors.CYAN}{subsection_name}{BackgroundColors.GREEN} (from section {BackgroundColors.CYAN}{name}{BackgroundColors.GREEN}){Style.RESET_ALL}")
 
         commit_msg = f"{COMMIT_PREFIX} {subsection_name} subsection to {FILE_PATH.name}"  # Create the commit message
-        subprocess.run(["git", "add", str(FILE_PATH)], check=True)  # Stage the file
-        subprocess.run(["git", "commit", "-m", commit_msg], check=True)  # Commit the changes
+        absolute_file_path = FILE_PATH.resolve()  # Resolve FILE_PATH to an absolute path
+        git_dir = absolute_file_path.parent  # Get the directory containing the file
+        subprocess.run(["git", "-C", str(git_dir), "add", str(FILE_PATH)], check=True)  # Stage the file
+        subprocess.run(["git", "-C", str(git_dir), "commit", "-m", commit_msg], check=True)  # Commit the changes
 
     return current_body, commit_count  # Return the updated body and commit count
 
@@ -340,7 +339,7 @@ def commit_whole_section(name, content, prefix, suffix, current_body, commit_cou
 
     content = content.rstrip("\n")  # Remove trailing blank lines from the section content
 
-    current_body = content + SECTION_SEPARATOR + current_body if current_body else content + SECTION_SEPARATOR  # Add the section to the document body
+    current_body = current_body + content + SECTION_SEPARATOR if current_body else content + SECTION_SEPARATOR  # Add the section to the document body
 
     new_content = prefix + current_body + suffix  # Combine prefix, current body, and suffix
     write_file(FILE_PATH, new_content)  # Write the updated content to the file
@@ -491,7 +490,7 @@ def main():
     total_sections = len(sections)  # Get the total number of sections
     commit_count = 0  # Initialize commit counter
     
-    for section_index, (name, content, *_) in enumerate(reversed(sections), start=1):  # Process each section in reverse order (bottom to top)
+    for section_index, (name, content, *_) in enumerate(sections, start=1):  # Process each section in order (top to bottom)
         section_header = f"## {name}"  # Construct the section header
         section_body = content[len(section_header):].strip("\n")  # Extract the section body by removing the header
 
