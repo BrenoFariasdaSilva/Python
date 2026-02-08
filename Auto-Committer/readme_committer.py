@@ -138,218 +138,41 @@ def verify_filepath_exists(filepath):
     return os.path.exists(filepath)  # Return True if the file or folder exists, False otherwise
 
 
-def validate_markers(start_name, end_name, text):
+def process_all_sections(sections, prefix, suffix):
     """
-    Validate that START_SECTION and END_SECTION are provided and exist in the file.
+    Processes all sections and commits them incrementally with their subsections.
 
-    :param start_name: The name of the first section to include
-    :param end_name: The name of the last section to include
-    :param text: The full text content of the README file
-    :return: True if validation passes, False otherwise
-    """
-    
-    verbose_output(f"{BackgroundColors.GREEN}Validating START_SECTION and END_SECTION markers...{Style.RESET_ALL}")
-
-    problems = []  # List to collect validation problems
-    if not start_name or not end_name:  # If either marker is not set
-        problems.append("Both START_SECTION and END_SECTION must be set to section names.")  # Add problem if markers are not set
-
-    pattern = r"^##\s+([^\n]+)"
-    found_names = [m.group(1).strip() for m in re.finditer(pattern, text, flags=re.MULTILINE)]  # Extract all top-level section names from the file
-
-    if start_name and start_name not in found_names:  # If START_SECTION is set but not found in the file
-        problems.append(f"START_SECTION '{start_name}' not found in {FILE_PATH.name}.")  # Add problem if START_SECTION is not found
-    if end_name and end_name not in found_names:  # If END_SECTION is set but not found in the file
-        problems.append(f"END_SECTION '{end_name}' not found in {FILE_PATH.name}.")  # Add problem if END_SECTION is not found
-
-    if problems:  # If there are any validation problems, print them and return False
-        print(f"{BackgroundColors.RED}Validation error with START/END section markers:{Style.RESET_ALL}")
-        for p in problems:  # Print each problem in the validation
-            print(f"{BackgroundColors.YELLOW}- {p}{Style.RESET_ALL}")
-
-        if found_names:  # If there are any sections found, list them to help the user
-            print(f"{BackgroundColors.GREEN}Available level-2 sections in the file:{BackgroundColors.CYAN} {', '.join(found_names)}{Style.RESET_ALL}")
-        else:  # If no sections were found, inform the user
-            print(f"{BackgroundColors.YELLOW}No level-2 sections were detected in {FILE_PATH.name}.{Style.RESET_ALL}")
-
-        print(f"{BackgroundColors.GREEN}Please set `START_SECTION` and `END_SECTION` to valid section names before running the script.{Style.RESET_ALL}")
-        return False  # Validation failed
-
-    return True  # Validation passed
-
-
-def run_git_commit(section_name: str):
-    """
-    Executes Git add and commit commands for the target file.
-
-    :param section_name: The name of the section being committed
-    :return: None
-    """
-
-    commit_msg = f"{COMMIT_PREFIX} {section_name} section to {FILE_PATH.name}"  # Create the commit message
-
-    verbose_output(f"{BackgroundColors.GREEN}Running Git add for: {BackgroundColors.CYAN}{FILE_PATH}{Style.RESET_ALL}")
-
-    absolute_file_path = FILE_PATH.resolve()  # Resolve FILE_PATH to an absolute path
-    git_dir = absolute_file_path.parent  # Get the directory containing the file
-
-    subprocess.run(["git", "-C", str(git_dir), "add", str(FILE_PATH)], check=True)  # Stage the file
-
-    verbose_output(f"{BackgroundColors.GREEN}Running Git commit with message: {BackgroundColors.CYAN}{commit_msg}{Style.RESET_ALL}")
-
-    subprocess.run(["git", "-C", str(git_dir), "commit", "-m", commit_msg], check=True)  # Commit the changes
-
-
-def extract_sections_between(text, start_name, end_name):
-    """
-    Extracts all level 2 header sections between two specified section names.
-
-    :param text: The full text content of the README file
-    :param start_name: The name of the first section to include
-    :param end_name: The name of the last section to include
-    :return: Tuple of (prefix_text, suffix_text, list_of_sections)
-             Each section in the list is a tuple: (name, content, start_pos, end_pos)
-    """
-
-    verbose_output(f"{BackgroundColors.GREEN}Extracting sections between {BackgroundColors.CYAN}{start_name}{BackgroundColors.GREEN} and {BackgroundColors.CYAN}{end_name}{Style.RESET_ALL}")
-    
-    pattern = r"^##\s+([^\n]+).*?(?=^##\s|\Z)"  # Regex pattern for level 2 headers
-    matches = list(re.finditer(pattern, text, flags=re.DOTALL | re.MULTILINE))  # Find all matches
-    sections = [(m.group(1).strip(), m.group(0), m.start(), m.end()) for m in matches]  # Extract section details
-    start_idx = next(i for i, s in enumerate(sections) if s[0] == start_name)  # Find start section index
-    end_idx = next(i for i, s in enumerate(sections) if s[0] == end_name)  # Find end section index
-    selected = sections[start_idx:end_idx + 1]  # Get all sections in range (inclusive)
-    prefix = text[:selected[0][2]]  # Text before the first selected section
-    suffix = text[selected[-1][3]:]  # Text after the last selected section
-    
-    verbose_output(f"{BackgroundColors.GREEN}Found {BackgroundColors.CYAN}{len(selected)}{BackgroundColors.GREEN} sections between markers{Style.RESET_ALL}")
-    
-    return prefix, suffix, selected  # Return the components
-
-
-def write_file(path, content):
-    """
-    Writes content to a file with UTF-8 encoding and ensures it ends with exactly one empty line.
-
-    :param path: Path object pointing to the target file
-    :param content: String content to write to the file
-    :return: None
-    """
-
-    verbose_output(f"{BackgroundColors.GREEN}Writing content to file: {BackgroundColors.CYAN}{path}{Style.RESET_ALL}")
-    
-    content = content.rstrip() + "\n"  # Remove trailing whitespace and add exactly one newline
-    
-    path.write_text(content, encoding="utf-8")  # Write the content to the file
-
-
-def extract_subsections(section_content):
-    """
-    Extracts all level 3 subsections (###) from a section's content.
-
-    :param section_content: The full content of a level 2 section
-    :return: List of tuples (subsection_name, subsection_content) or empty list if no subsections
-    """
-
-    verbose_output(f"{BackgroundColors.GREEN}Verifying for subsections within section...{Style.RESET_ALL}")
-    
-    pattern = r"^###\s+([^\n]+).*?(?=^###\s|\Z)"  # Regex pattern for level 3 headers
-    matches = list(re.finditer(pattern, section_content, flags=re.DOTALL | re.MULTILINE))  # Find all subsection matches
-    
-    if not matches:  # If no subsections found
-        verbose_output(f"{BackgroundColors.YELLOW}No subsections found in this section.{Style.RESET_ALL}")
-        return []  # Return empty list
-    
-    subsections = [(m.group(1).strip(), m.group(0)) for m in matches]  # Extract subsection details (name, content)
-    
-    verbose_output(f"{BackgroundColors.GREEN}Found {BackgroundColors.CYAN}{len(subsections)}{BackgroundColors.GREEN} subsections{Style.RESET_ALL}")
-    
-    return subsections  # Return the list of subsections
-
-
-def commit_section_with_subsections(name, section_header, section_body, subsections, prefix, suffix, current_body, commit_count):
-    """
-    Commits a section that contains subsections by committing each subsection separately.
-
-    This function processes sections with level 3 headers (###) by committing each subsection
-    individually in reverse order (bottom to top). The section header and any introductory text
-    before the first subsection are preserved with each subsection commit.
-
-    :param name: The name of the parent section
-    :param section_header: The reconstructed section header (e.g., "## Section Name")
-    :param section_body: The body content of the section without the header
-    :param subsections: List of tuples containing (subsection_name, subsection_content)
+    :param sections: List of section tuples (name, content, start_pos, end_pos)
     :param prefix: Text before all selected sections in the document
     :param suffix: Text after all selected sections in the document
-    :param current_body: The current accumulated body content being built
-    :param commit_count: Current commit counter value
-    :return: Tuple of (updated_current_body, updated_commit_count)
+    :return: Total number of commits made
     """
 
-    print(f"{BackgroundColors.YELLOW}Section '{BackgroundColors.CYAN}{name}{BackgroundColors.YELLOW}' contains {BackgroundColors.CYAN}{len(subsections)}{BackgroundColors.YELLOW} subsections. Committing each separately...{Style.RESET_ALL}")
+    current_body = ""  # Initialize the current body content
+    total_sections = len(sections)  # Get the total number of sections
+    commit_count = 0  # Initialize commit counter
 
-    first_subsection_pos = section_body.find("###")  # Find the position of the first subsection
-    section_intro = section_body[:first_subsection_pos].rstrip("\n") if first_subsection_pos > 0 else ""  # Extract introductory text
+    verbose_output(f"{BackgroundColors.GREEN}Processing {BackgroundColors.CYAN}{total_sections}{BackgroundColors.GREEN} sections...{Style.RESET_ALL}")
+    
+    for section_index, (name, content, *_) in enumerate(sections, start=1):  # Process each section in order (top to bottom)
+        section_header = f"## {name}"  # Construct the section header
+        section_body = content[len(section_header):].strip("\n")  # Extract the section body by removing the header
 
-    base_section_content = section_header  # Start with the section header as the base content for each commit
-    if section_intro:  # If there is introductory text before the first subsection, include it in the base content
-        base_section_content += "\n\n" + section_intro  # Add the introductory text to the base section content with proper spacing
+        subsections = extract_subsections(section_body)  # Verify if the section contains level 3 subsections (###)
 
-    previous_sections_body = current_body  # Store the body content of all previously committed sections to include in each subsection commit
-
-    for subsection_index, (subsection_name, subsection_content) in enumerate(subsections, start=1):  # Process each subsection in order (top to bottom)
-        current_section_content = base_section_content  # Start with the base section content for this subsection commit
-        for i in range(subsection_index):  # Add all previous subsections up to the current one to the content
-            sub_content = subsections[i][1].rstrip("\n")  # Get the content of the subsection and remove trailing blank lines
-            current_section_content += "\n\n" + sub_content  # Add the subsection content to the current section content with proper spacing
-
-        current_body = previous_sections_body + current_section_content + SECTION_SEPARATOR if previous_sections_body else current_section_content + SECTION_SEPARATOR  # Combine previous sections with current section in progress
-
-        new_content = prefix + current_body + suffix  # Combine prefix, current body, and suffix
-        write_file(FILE_PATH, new_content)  # Write the updated content to the file
-
-        commit_count += 1  # Increment the commit counter
-        verbose_output(f"{BackgroundColors.BOLD}[{BackgroundColors.YELLOW}{commit_count}{BackgroundColors.BOLD}]{Style.RESET_ALL} {BackgroundColors.GREEN}Committing subsection: {BackgroundColors.CYAN}{subsection_name}{BackgroundColors.GREEN} (from section {BackgroundColors.CYAN}{name}{BackgroundColors.GREEN}){Style.RESET_ALL}")
-
-        commit_msg = f"{COMMIT_PREFIX} {subsection_name} subsection to {FILE_PATH.name}"  # Create the commit message
-        absolute_file_path = FILE_PATH.resolve()  # Resolve FILE_PATH to an absolute path
-        git_dir = absolute_file_path.parent  # Get the directory containing the file
-        subprocess.run(["git", "-C", str(git_dir), "add", str(FILE_PATH)], check=True)  # Stage the file
-        subprocess.run(["git", "-C", str(git_dir), "commit", "-m", commit_msg], check=True)  # Commit the changes
-
-    return current_body, commit_count  # Return the updated body and commit count
-
-
-def commit_whole_section(name, content, prefix, suffix, current_body, commit_count):
-    """
-    Commits an entire section as a single commit when it contains no subsections.
-
-    This function handles sections that do not have level 3 headers (###) by committing
-    the entire section content at once. This is the simpler case where no subsection
-    splitting is needed.
-
-    :param name: The name of the section being committed
-    :param content: The full content of the section including header and body
-    :param prefix: Text before all selected sections in the document
-    :param suffix: Text after all selected sections in the document
-    :param current_body: The current accumulated body content being built
-    :param commit_count: Current commit counter value
-    :return: Tuple of (updated_current_body, updated_commit_count)
-    """
-
-    content = content.rstrip("\n")  # Remove trailing blank lines from the section content
-
-    current_body = current_body + content + SECTION_SEPARATOR if current_body else content + SECTION_SEPARATOR  # Add the section to the document body
-
-    new_content = prefix + current_body + suffix  # Combine prefix, current body, and suffix
-    write_file(FILE_PATH, new_content)  # Write the updated content to the file
-
-    commit_count += 1  # Increment the commit counter
-    verbose_output(f"{BackgroundColors.BOLD}[{BackgroundColors.YELLOW}{commit_count}{BackgroundColors.BOLD}]{Style.RESET_ALL} {BackgroundColors.GREEN}Committing section: {BackgroundColors.CYAN}{name}{Style.RESET_ALL}")
-
-    run_git_commit(name)  # Commit the section
-
-    return current_body, commit_count  # Return the updated body and commit count
+        if subsections:  # If subsections are present, commit each subsection separately
+            current_body, commit_count = commit_section_with_subsections(
+                name, section_header, section_body, subsections,
+                prefix, suffix, current_body, commit_count
+            )
+        else:  # If no subsections are present, commit the entire section as one unit
+            current_body, commit_count = commit_whole_section(
+                name, content, prefix, suffix, current_body, commit_count
+            )
+            
+        time.sleep(3)  # Sleep for a short time between commits to ensure proper Git history
+    
+    return commit_count  # Return the total number of commits made
 
 
 def to_seconds(obj):
@@ -486,27 +309,7 @@ def main():
     
     verbose_output(f"{BackgroundColors.GREEN}Sections removed. Starting staged commits...{Style.RESET_ALL}")  # Output staged commits start message
     
-    current_body = ""  # Initialize the current body content
-    total_sections = len(sections)  # Get the total number of sections
-    commit_count = 0  # Initialize commit counter
-    
-    for section_index, (name, content, *_) in enumerate(sections, start=1):  # Process each section in order (top to bottom)
-        section_header = f"## {name}"  # Construct the section header
-        section_body = content[len(section_header):].strip("\n")  # Extract the section body by removing the header
-
-        subsections = extract_subsections(section_body)  # Verify if the section contains level 3 subsections (###)
-
-        if subsections:  # If subsections are present, commit each subsection separately
-            current_body, commit_count = commit_section_with_subsections(
-                name, section_header, section_body, subsections,
-                prefix, suffix, current_body, commit_count
-            )
-        else:  # If no subsections are present, commit the entire section as one unit
-            current_body, commit_count = commit_whole_section(
-                name, content, prefix, suffix, current_body, commit_count
-            )
-            
-        time.sleep(3)  # Sleep for a short time between commits to ensure proper Git history
+    commit_count = process_all_sections(sections, prefix, suffix)  # Process all sections and commit them incrementally
         
     print(f"\n{BackgroundColors.BOLD}{BackgroundColors.GREEN}All sections and subsections committed successfully! Total commits: {BackgroundColors.CYAN}{commit_count}{Style.RESET_ALL}", end="\n\n")  # Output success message with commit count
 
