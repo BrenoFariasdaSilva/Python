@@ -74,11 +74,13 @@ class BackgroundColors:  # Colors for the terminal
 VERBOSE = False  # Set to True to output verbose messages
 
 # Files to Process:
-FILES = []  # List of Python files to clean (e.g., ["main.py", "logger.py"])
+FILES = [
+    "main.py",
+]  # List of Python files to clean (e.g., ["main.py", "logger.py"])
 
 # Regex Constants:
 COMMENT_PATTERN = re.compile(
-    r'^[ \t]*#(?!\s*(?:Functions Definitions:?|Classes Definitions:?|Class Definitions:?|Telegram Bot Setup:?|Logger Setup:?|Sound Constants:?|RUN_FUNCTIONS:?|Macros:?|Execution Constants:?|Warnings:?|Regex Constants:?|Constants:?|Files to Process:?|Root directory to process \(non-recursive\):?|Telegram Configuration:?)).*(?:\r?\n)?',
+    r'^[ \t]*#(?!\s*(?:Functions? Definitions:?|Classes? Definitions:?|Class Definitions:?|Telegram Bot Setup:?|Logger Setup:?|Sound Constants:?|RUN_FUNCTIONS:?|Macros:?|Execution Constants:?|Warnings:?|Regex Constants:?|Constants:?|Files to Process:?|Root directory to process \(non-recursive\):?|Telegram Configuration:?|Implement logic here:?)).*(?:\r?\n)?',
     re.MULTILINE,
 )  # Regex pattern to match standalone comments while preserving section headers
 
