@@ -73,6 +73,15 @@ class BackgroundColors:  # Colors for the terminal
 # Execution Constants:
 VERBOSE = False  # Set to True to output verbose messages
 
+# Files to Process:
+FILES = []  # List of Python files to clean (e.g., ["main.py", "logger.py"])
+
+# Regex Constants:
+COMMENT_PATTERN = re.compile(
+    r'^[ \t]*#(?!\s*(?:Functions Definitions:?|Classes Definitions:?|Class Definitions:?|Telegram Bot Setup:?|Logger Setup:?|Sound Constants:?|RUN_FUNCTIONS:?|Macros:?|Execution Constants:?|Warnings:?|Regex Constants:?|Constants:?|Files to Process:?)).*(?:\r?\n)?',
+    re.MULTILINE,
+)  # Regex pattern to match standalone comments while preserving section headers
+
 # Logger Setup:
 logger = Logger(f"./Logs/{Path(__file__).stem}.log", clean=True)  # Create a Logger instance
 sys.stdout = logger  # Redirect stdout to the logger
