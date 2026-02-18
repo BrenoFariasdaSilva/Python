@@ -551,11 +551,11 @@ def detect_changes(old_name, new_name):
 
 def determine_resolution(dir_path, name_hint):
     """
-    Unified resolution detection for a given season folder.
+    Unified resolution detection for a given movie folder.
 
     1) Check for resolution token in `name_hint` using the project's regex.
     2) If not found, probe the first video file inside `dir_path` (non-recursive)
-       using `get_resolution_from_first_video()`.
+        using `get_resolution_from_first_video()`.
     Preserves casing from filename results and returns None when absent.
     """
 
