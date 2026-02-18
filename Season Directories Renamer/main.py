@@ -630,7 +630,7 @@ def rename_dirs():
             entry.rename(new_path)  # Perform the filesystem rename operation for the top-level directory
 
         else:  # Case 2: The directory likely contains season subdirectories, scan them here
-            print(f"{BackgroundColors.YELLOW}No season info found for '{entry.name}'. Scanning subdirectories...{Style.RESET_ALL}")  # Inform user about scanning
+            verbose(f"{BackgroundColors.YELLOW}No season info found for '{entry.name}'. Scanning subdirectories...{Style.RESET_ALL}")  # Inform user about scanning
             for subentry in entry.iterdir():  # Iterate over subentries inside the top-level directory
                 if not subentry.is_dir():  # Skip non-directory subentries such as files
                     continue  # Continue to next subentry when current one is not a directory
