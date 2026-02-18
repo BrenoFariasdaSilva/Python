@@ -1,50 +1,52 @@
 """
 ================================================================================
-<PROJECT OR SCRIPT TITLE>
+Rename TV Show Season Directories using TMDb Metadata
 ================================================================================
 Author      : Breno Farias da Silva
-Created     : <YYYY-MM-DD>
+Created     : 2025-11-11
 Description :
-    <Provide a concise and complete overview of what this script does.>
-    <Mention its purpose, scope, and relevance to the larger project.>
+   This script reads all directories inside the INPUT folder and renames them
+   based on metadata extracted from their names and from The Movie Database (TMDb) API.
+   The renaming pattern follows the format:
+      "Season {SeasonNumberWithTwoDigits} {YearOfThatSeason} {Resolution} {Append_String}"
 
-    Key features include:
-        - <Feature 1 — e.g., automatic data loading and preprocessing>
-        - <Feature 2 — e.g., model training and evaluation>
-        - <Feature 3 — e.g., visualization or report generation>
-        - <Feature 4 — e.g., logging or notification system>
-        - <Feature 5 — e.g., integration with other modules or datasets>
+   Key features include:
+      - Automatic extraction of season and resolution from folder names.
+      - Online lookup of release year for each season via TMDb API.
+      - Clean renaming with standardized format and user-defined suffix.
+      - Logging and verbose messages for better monitoring.
+      - .env integration for secure API key handling.
 
 Usage:
-    1. <Explain any configuration steps before running, such as editing variables or paths.>
-    2. <Describe how to execute the script — typically via Makefile or Python.>
-        $ make <target>   or   $ python <script_name>.py
-    3. <List what outputs are expected or where results are saved.>
+   1. Create a `.env` file in the project root containing your TMDb API key:
+         TMDB_API_KEY=your_api_key_here
+   2. Place the folders to be renamed inside the `./INPUT` directory.
+   3. Run the script via:
+         $ python rename_seasons.py
+   4. The renamed folders will appear in the same directory with the new format.
 
 Outputs:
-    - <Output file or directory 1 — e.g., results.csv>
-    - <Output file or directory 2 — e.g., Feature_Analysis/plots/>
-    - <Output file or directory 3 — e.g., logs/output.txt>
+   - Renamed directories under ./INPUT/
+   - Console logs for progress and any errors encountered
 
 TODOs:
-    - <Add a task or improvement — e.g., implement CLI argument parsing.>
-    - <Add another improvement — e.g., extend support to Parquet files.>
-    - <Add optimization — e.g., parallelize evaluation loop.>
-    - <Add robustness — e.g., error handling or data validation.>
+   - Add command-line argument parsing for dynamic append string selection.
+   - Add caching for TMDb API responses to reduce requests.
+   - Add logging to file with timestamp and results summary.
+   - Handle batch renames for multiple append string variations.
 
 Dependencies:
-    - Python >= <version>
-    - <Library 1 — e.g., pandas>
-    - <Library 2 — e.g., numpy>
-    - <Library 3 — e.g., scikit-learn>
-    - <Library 4 — e.g., matplotlib, seaborn, tqdm, colorama>
+   - Python >= 3.9
+   - requests
+   - python-dotenv
+   - colorama
 
 Assumptions & Notes:
-    - <List any key assumptions — e.g., last column is the target variable.>
-    - <Mention data format — e.g., CSV files only.>
-    - <Mention platform or OS-specific notes — e.g., sound disabled on Windows.>
-    - <Note on output structure or reusability.>
+   - Directory names must contain the season (e.g., S01) and resolution (e.g., 1080p).
+   - Internet access is required to query TMDb API for release years.
+   - The TMDb API key must be defined in a `.env` file in the project root.
 """
+    
 
 import atexit  # For playing a sound when the program finishes
 import datetime  # For getting the current date and time
