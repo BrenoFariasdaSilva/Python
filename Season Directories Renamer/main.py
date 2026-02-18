@@ -140,6 +140,33 @@ def load_api_key():
     return api_key  # Return the TMDb API key string
 
 
+def verify_ffmpeg_is_installed():
+    """
+    Checks if FFmpeg is installed and installs it if missing.
+
+    :return: None
+    """
+
+    INSTALL_COMMANDS = {  # Installation commands for different platforms
+        "Windows": install_ffmpeg_windows,  # Windows
+        "Linux": install_ffmpeg_linux,  # Linux
+        "Darwin": install_ffmpeg_mac,  # macOS
+    }
+
+    if is_ffmpeg_installed():  # If FFmpeg is already installed
+        verbose_output(f"{BackgroundColors.GREEN}FFmpeg is installed.{Style.RESET_ALL}")  # Output the verbose message
+    else:  # If FFmpeg is not installed
+        verbose_output(
+            f"{BackgroundColors.RED}FFmpeg is not installed. Installing FFmpeg...{Style.RESET_ALL}"
+        )  # Output the verbose message
+        if platform.system() in INSTALL_COMMANDS:  # If the platform is supported
+            INSTALL_COMMANDS[platform.system()]()  # Call the corresponding installation function
+        else:  # If the platform is not supported
+            print(
+                f"Installation for {platform.system()} is not implemented. Please install FFmpeg manually."
+            )  # Inform the user
+
+
 def parse_dir_name(dir_name):
 
     """
@@ -724,6 +751,8 @@ def main():
         end="\n\n",
     )  # Output the welcome message
     start_time = datetime.datetime.now()  # Get the start time of the program
+    
+    verify_ffmpeg_is_installed()  # Verify if ffmpeg is installed
     
     rename_dirs()  # Execute the directory renaming workflow
 
