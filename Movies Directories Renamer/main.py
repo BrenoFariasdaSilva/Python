@@ -74,11 +74,12 @@ class BackgroundColors:  # Colors for the terminal
 # Execution Constants:
 VERBOSE = False  # Set to True to output verbose messages
 INPUT_DIRS = [
-    Path("E:/Movies/Dual"),
-    Path("E:/Movies/Dublado"),
-    Path("E:/Movies/English"),
-    Path("E:/Movies/Legendado"),
-    Path("E:/Movies/Nacional"),
+    Path("D:/Sem Backup/Download/Temp/Movies"),
+    # Path("E:/Movies/Dual"),
+    # Path("E:/Movies/Dublado"),
+    # Path("E:/Movies/English"),
+    # Path("E:/Movies/Legendado"),
+    # Path("E:/Movies/Nacional"),
 ]  # The input directory or list of input directories
 LANGUAGE_OPTIONS = ["Dual", "Dublado", "English", "Legendado", "Nacional"]  # User-defined suffixes for renaming
 TMDB_BASE_URL = "https://api.themoviedb.org/3"  # Base URL for TMDb API
@@ -96,6 +97,21 @@ SOUND_FILE = "./.assets/Sounds/NotificationSound.wav"  # The path to the sound f
 RUN_FUNCTIONS = {
     "Play Sound": True,  # Set to True to play a sound when the program finishes
 }
+
+VIDEO_EXTS = {  # Video file extensions to consider when probing for resolution
+    ".mkv",
+    ".mp4",
+    ".avi",
+    ".mov",
+    ".m4v",
+    ".webm",
+    ".ts",
+    ".flv",
+    ".mpg",
+    ".mpeg",
+    ".wmv",
+    ".m2ts",
+} 
 
 # Functions Definitions:
 
@@ -378,20 +394,7 @@ def get_resolution_from_first_video(dir_path):
     Returns resolution token string (preserving filename casing) or None.
     """
 
-    video_exts = {  # Known video file extensions
-        ".mkv",
-        ".mp4",
-        ".avi",
-        ".mov",
-        ".m4v",
-        ".webm",
-        ".ts",
-        ".flv",
-        ".mpg",
-        ".mpeg",
-        ".wmv",
-        ".m2ts",
-    }  # Set of extensions
+    video_exts = VIDEO_EXTS  # Reuse global set of video extensions to ensure consistency
 
     try:  # Guard filesystem iteration
         entries = sorted(dir_path.iterdir())  # Deterministic ordering of directory entries
@@ -698,6 +701,51 @@ def rename_dirs():
                 entry.rename(entry.parent / new_name)  # Perform the filesystem rename operation for the movie folder
             except Exception as e:  # If rename fails, log error but continue processing
                 print(f"{BackgroundColors.RED}Failed to rename '{entry.name}' → '{new_name}': {e}{Style.RESET_ALL}")  # Inform about failure
+
+            target_dir = entry.parent / new_name  # Compute the expected directory path after rename
+            if not target_dir.exists():  # If the target directory isn't present
+                verbose_output(f"{BackgroundColors.YELLOW}Skipping video sync (dir missing): {target_dir}{Style.RESET_ALL}")  # Inform skip and continue
+                continue  # Continue to next entry when directory is absent
+
+            main_video = None  # Placeholder for chosen main video file
+            max_size = -1  # Track largest size seen so far
+            try:  # Guard filesystem iteration for files
+                for candidate in sorted(target_dir.iterdir()):  # Deterministic ordering of files
+                    if not candidate.is_file():  # Skip non-file entries
+                        continue  # Continue to next entry
+                    if candidate.suffix.lower() not in {ext.lower() for ext in VIDEO_EXTS}:  # Skip non-video extensions
+                        continue  # Continue to next candidate
+                    if "sample" in candidate.name.lower():  # Skip obvious sample files by name
+                        continue  # Continue to next candidate
+                    try:  # Attempt to stat the candidate to get file size
+                        size = candidate.stat().st_size  # Get file size in bytes
+                    except Exception:  # If stat fails for any reason
+                        continue  # Skip this candidate on error
+                    if size > max_size:  # If this candidate is larger than previous ones
+                        main_video = candidate  # Select this as the current main video
+                        max_size = size  # Update the largest size seen
+            except Exception:  # Protect against directory iteration errors
+                main_video = None  # Ensure safe fallback when errors occur
+
+            if main_video is None:  # If no video file was found inside the directory
+                verbose_output(f"{BackgroundColors.YELLOW}No main video found to sync in: {target_dir}{Style.RESET_ALL}")  # Inform skip case
+                continue  # Continue processing next directory
+
+            expected_path = target_dir / (new_name + main_video.suffix)  # Construct path with original suffix preserved
+            if main_video.name == expected_path.name:  # If the video file already matches the expected filename
+                verbose_output(f"{BackgroundColors.YELLOW}Video already synced: {main_video.name}{Style.RESET_ALL}")  # Inform no-op
+                continue  # Continue to next entry when no rename is required
+
+            print(
+                f"{BackgroundColors.GREEN}Renaming video file (Sync With Dir): "  # Start message
+                f"'{BackgroundColors.CYAN}{main_video.name}{BackgroundColors.GREEN}' → "  # Old video filename
+                f"'{BackgroundColors.CYAN}{expected_path.name}{BackgroundColors.GREEN}'"  # New video filename
+                f"{Style.RESET_ALL}"
+            )  # Formatted video rename output
+            try:  # Protect the video rename operation from raising
+                main_video.rename(expected_path)  # Perform the filesystem rename for the primary video file
+            except Exception as e:  # If video rename fails, log and continue processing other entries
+                print(f"{BackgroundColors.RED}Failed to rename video '{main_video.name}' → '{expected_path.name}': {e}{Style.RESET_ALL}")  # Log error and continue
 
         print()  # Add single spacing after processing this input root
 
