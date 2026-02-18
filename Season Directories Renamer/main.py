@@ -72,7 +72,7 @@ class BackgroundColors:  # Colors for the terminal
 
 # Execution Constants:
 VERBOSE = False  # Set to True to output verbose messages
-INPUT_DIR = Path("./INPUT")  # The input directory containing the season folders
+INPUT_DIR = Path("D:/Sem Backup/Download/Temp/Series/")  # The input directory containing the season folders
 APPEND_STRINGS = ["Legendado", "Dual", "Dublado", "English"]  # User-defined suffixes for renaming
 TMDB_BASE_URL = "https://api.themoviedb.org/3"  # Base URL for TMDb API
 
@@ -147,17 +147,38 @@ def parse_dir_name(dir_name):
     :param dir_name: Directory name string to parse
     :return: Tuple (series_name, season_number, resolution) or None when parsing fails
     """
+    
+    match = re.match(r"(?P<series>[A-Za-z0-9\._]+)\.S(?P<season>\d{2})\.(?P<res>\d{3,4}p)", dir_name, re.IGNORECASE)  # Attempt classic regex match for series.Sxx.<res>
+    if match:  # If classic pattern matched
+        series = match.group("series").replace(".", " ")  # Convert dotted series token to readable series name
+        season = int(match.group("season"))  # Convert captured season string to integer
+        resolution = match.group("res")  # Capture resolution token (e.g., '1080p')
+        return series, season, resolution  # Return parsed tuple for classic pattern
 
-    match = re.match(r"(?P<series>[A-Za-z0-9\._]+)\.S(?P<season>\d{2})\.(?P<res>\d{3,4}p)", dir_name, re.IGNORECASE)  # Attempt regex match for series, season and resolution
-    
-    if not match:  # If regex does not match the expected pattern
-        return None  # Return None to indicate parsing failure
-    
-    series = match.group("series").replace(".", " ")  # Convert dotted series token to readable series name
-    season = int(match.group("season"))  # Convert captured season string to integer
-    resolution = match.group("res")  # Capture resolution token (e.g., '1080p')
-    
-    return series, season, resolution  # Return parsed tuple with series name, season int, and resolution
+    name_only = os.path.basename(dir_name)  # Extract the final path component or the name itself
+    season_match = re.match(r"^Season\s*(?P<num>\d{1,2})", name_only, re.IGNORECASE)  # Match names starting with 'Season <number>'
+    if not season_match:  # If no season-style match found
+        return None  # Return None when neither classic nor season patterns match
+
+    season = int(season_match.group("num"))  # Convert the matched season number to integer
+
+    res_search = re.search(r"\b(?P<res>\d{3,4}p?)\b", name_only, re.IGNORECASE)  # Search for 3-4 digit resolution with optional 'p'
+    if res_search:  # If a resolution-like token was found
+        res_digits = re.sub(r"\D", "", res_search.group("res"))  # Strip any non-digit chars to leave digits only
+        resolution = f"{res_digits}p"  # Normalize to '<digits>p' format
+    else:  # No resolution token found in season directory name
+        resolution = None  # Use None when no resolution is present
+
+    try:  # Use pathlib to safely derive parent directory name even if path doesn't exist
+        parent_name = Path(dir_name).parent.name  # Get parent directory name component
+    except Exception:  # Catch any unexpected error when handling Path operations
+        parent_name = ""  # Fallback to empty string when extraction fails
+
+    if not parent_name:  # If parent name is empty, we cannot infer the series
+        return None  # Return None because series cannot be inferred safely
+
+    series = parent_name.replace(".", " ")  # Normalize parent directory name by replacing dots with spaces
+    return series, season, resolution  # Return parsed tuple inferred from season-style directory
 
 
 def get_series_id(api_key, series_name):
