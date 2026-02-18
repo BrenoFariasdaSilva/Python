@@ -492,6 +492,101 @@ def get_resolution_from_first_video(dir_path):
     return None  # No video file found in directory
 
 
+def detect_changes(old_name, new_name):
+    """
+    Detect a list of change tags between old_name and new_name.
+
+    Returns a human-readable string like 'Add Prefix + Add Year'.
+    """
+
+    old_norm = " ".join(old_name.split())  # Normalize old name whitespace
+    new_norm = " ".join(new_name.split())  # Normalize new name whitespace
+
+    if old_name == new_name:  # No change at all
+        return ""  # Empty means skip rename
+
+    if old_norm == new_norm and old_name != new_name:  # Only spacing differs
+        return "Normalize Format"  # Single tag for spacing-only changes
+
+    tags = []  # Collect change tags
+
+    if re.match(r"^[^-]+\s-\s", new_name) and not re.match(r"^[^-]+\s-\s", old_name):  # Added series prefix
+        tags.append("Add Prefix")  # Add tag for added prefix
+
+    year_re = re.compile(r"\b(19|20)\d{2}\b")  # Year regex
+    old_year = year_re.search(old_name)  # Find year in old name
+    new_year = year_re.search(new_name)  # Find year in new name
+
+    if new_year and not old_year:  # Year added
+        tags.append("Add Year")  # Tag for adding year
+    elif new_year and old_year and new_year.group(0) != old_year.group(0):  # Year changed
+        tags.append("Correct Year")  # Tag for corrected year
+
+    res_re = re.compile(r"\b(\d{3,4}p|4k)\b", re.IGNORECASE)  # Resolution regex
+    old_res = res_re.search(old_name)  # Find resolution in old name
+    new_res = res_re.search(new_name)  # Find resolution in new name
+    if new_res and not old_res:  # Resolution added
+        tags.append("Add Resolution")  # Tag for added resolution
+    elif new_res and old_res and new_res.group(0).lower() != old_res.group(0).lower():  # Resolution changed
+        tags.append("Correct Resolution")  # Tag for changed resolution
+
+    part_re = re.compile(r"\b(part|pt|volume|vol|cour|arc)\b\.?\s*([A-Za-z0-9]+)\b", re.IGNORECASE)  # Part token regex
+    old_part = part_re.search(old_name)  # Find part in old name
+    new_part = part_re.search(new_name)  # Find part in new name
+    if new_part and not old_part:  # Part added
+        tags.append("Add Part")  # Tag for added part
+
+    def strip_prefix(s):  # Helper to remove leading 'X - ' if present
+        m = re.match(r"^(?P<prefix>[^-]+)\s-\s(?P<rest>.+)$", s)  # Match prefix pattern
+        return m.group("rest") if m else s  # Return remainder or original
+
+    base_old = strip_prefix(old_name)  # Remove prefix from old
+    base_new = strip_prefix(new_name)  # Remove prefix from new
+    toks_old = base_old.split()  # Tokenize old base
+    toks_new = base_new.split()  # Tokenize new base
+
+    seen = set()  # Track seen tokens
+    dup_old = False  # Assume no duplicates
+    for t in toks_old:  # Iterate tokens in old
+        key = t.lower()  # Case-insensitive key
+
+        if key in seen:  # Duplicate found
+            dup_old = True  # Mark duplicate
+            break  # Stop early
+        
+        seen.add(key)  # Add token
+
+    if dup_old:  # If old had duplicates
+        seen_new = set()  # Track new tokens
+        dup_new = False  # Default
+
+        for t in toks_new:  # Iterate new tokens
+            key = t.lower()  # Case-insensitive key
+
+            if key in seen_new:  # Duplicate in new
+                dup_new = True  # Mark
+                break  # Stop early
+
+            seen_new.add(key)  # Add
+            
+        if not dup_new:  # If new has no duplicates but old did
+            tags.append("Remove Duplicate Tokens")  # Tag for duplicate removal
+
+    if [t.lower() for t in toks_old] != [t.lower() for t in toks_new] and sorted([t.lower() for t in toks_old]) == sorted([t.lower() for t in toks_new]):  # Same tokens different order
+        tags.append("Reorder Tokens")  # Tag for reordering
+
+    if [t.lower() for t in toks_old] == [t.lower() for t in toks_new] and toks_old != toks_new:  # Same tokens different casing
+        tags.append("Standardize Casing")  # Tag for casing normalization
+
+    if not tags:  # No specific tags found
+        if old_norm != new_norm:  # If normalized forms differ
+            tags.append("Normalize Format")  # Use Normalize Format as fallback
+        else:  # Otherwise nothing meaningful changed
+            return ""  # Signal skip
+
+    return " + ".join(tags)  # Return combined tags
+
+
 def rename_dirs():
     """
     Iterates through the INPUT_DIR, extracts metadata, fetches the release year from TMDb,
@@ -627,11 +722,23 @@ def rename_dirs():
             if new_name == entry.name:  # If name is already correct, skip renaming
                 verbose_output(f"{BackgroundColors.YELLOW}Skipping (already named): {entry.name}{Style.RESET_ALL}")  # Inform skip
                 continue  # Continue to next entry
-
+            
+            change_desc = detect_changes(entry.name, new_name)  # Detect descriptive change tags
+            if not change_desc:  # If detect_changes returned empty, nothing to do
+                verbose_output(f"{BackgroundColors.YELLOW}Skipping (no detected meaningful change): {entry.name}{Style.RESET_ALL}")  # Inform skip
+                continue  # Continue to next entry
+            
             res_present = bool(res_token)  # Detect presence of resolution token
             lang_present = bool(append_str)  # Detect presence of language suffix
             name_color = BackgroundColors.CYAN if (res_present and lang_present) else BackgroundColors.YELLOW  # Choose color
-            print(f"{BackgroundColors.GREEN}Renaming: '{name_color}{entry.name}{BackgroundColors.GREEN}' → '{BackgroundColors.CYAN}{new_name}{BackgroundColors.GREEN}'{Style.RESET_ALL}")  # Inform about rename
+            
+            print(
+                f"{BackgroundColors.GREEN}Renaming subdir "  # Start message
+                f"({change_desc}): "  # Show change tags
+                f"'{BackgroundColors.CYAN}{entry.name}{BackgroundColors.GREEN}' → "  # Old name
+                f"'{BackgroundColors.CYAN}{new_name}{BackgroundColors.GREEN}'"  # New name
+                f"{Style.RESET_ALL}"
+            )  # Formatted rename output
             entry.rename(new_path)  # Perform the filesystem rename operation for the top-level directory
 
         else:  # Case 2: The directory likely contains season subdirectories, scan them here
@@ -693,13 +800,23 @@ def rename_dirs():
                             if subentry.name.startswith(expected_prefix):  # If subdir already has correct prefix
                                 verbose_output(f"{BackgroundColors.YELLOW}Skipping (already correctly formatted): {subentry.name}{Style.RESET_ALL}")  # Inform that subdir is already correct
                                 continue  # Skip renaming for this subdirectory
-
                             stripped = re.sub(rf"^{re.escape(series_prefix)}\s*-?\s*", "", subentry.name).strip()  # Remove any malformed leading series tokens
                             prefixed_name = f"{expected_prefix}{stripped}"  # Build new name with exact separator
                             prefixed_name = " ".join(prefixed_name.split())  # Normalize whitespace to avoid double spaces
                             new_path = subentry.parent / prefixed_name  # Compute final path for prefixed rename
-                            print(f"{BackgroundColors.GREEN}Renaming subdir (Add Prefix): '{BackgroundColors.CYAN}{subentry.name}{BackgroundColors.GREEN}' → '{BackgroundColors.CYAN}{prefixed_name}{BackgroundColors.GREEN}'{Style.RESET_ALL}")  # Inform about rename
-                            subentry.rename(new_path)  # Perform the filesystem rename to add series prefix
+                            
+                            change_desc = detect_changes(subentry.name, prefixed_name)  # Compute tags
+                            if change_desc:  # If tags present, print structured message and rename
+                                print(
+                                    f"{BackgroundColors.GREEN}Renaming subdir "  # Start message
+                                    f"({change_desc}): "  # Show change tags
+                                    f"'{BackgroundColors.CYAN}{subentry.name}{BackgroundColors.GREEN}' → "  # Old name
+                                    f"'{BackgroundColors.CYAN}{prefixed_name}{BackgroundColors.GREEN}'"  # New name
+                                    f"{Style.RESET_ALL}"
+                                )  # Formatted rename output
+                                subentry.rename(new_path)  # Perform rename to add prefix
+                            else:  # No meaningful tags found, verbose skip
+                                verbose_output(f"{BackgroundColors.YELLOW}Skipping (no detected meaningful change): {subentry.name}{Style.RESET_ALL}")  # Inform skip
                             continue  # Continue to next subentry after prefixing
 
                         if api_year is not None and str(api_year) != str(existing_year_int):  # API year differs from folder year
@@ -719,8 +836,19 @@ def rename_dirs():
                                 corrected_name = f"{corrected_name} {existing_suffix}"  # Append suffix
                             corrected_name = " ".join(corrected_name.split())  # Normalize whitespace
                             corrected_path = subentry.parent / corrected_name  # Compute corrected path
-                            print(f"{BackgroundColors.GREEN}Correcting year: '{subentry.name}' → '{corrected_name}'{Style.RESET_ALL}")  # Inform about correction
-                            subentry.rename(corrected_path)  # Perform rename to corrected year for subdirectory
+                            
+                            change_desc = detect_changes(subentry.name, corrected_name)  # Compute tags
+                            if change_desc:  # If tags present, print structured message and rename
+                                print(
+                                    f"{BackgroundColors.GREEN}Renaming subdir "  # Start message
+                                    f"({change_desc}): "  # Show change tags
+                                    f"'{BackgroundColors.CYAN}{subentry.name}{BackgroundColors.GREEN}' → "  # Old name
+                                    f"'{BackgroundColors.CYAN}{corrected_name}{BackgroundColors.GREEN}'"  # New name
+                                    f"{Style.RESET_ALL}"
+                                )  # Formatted rename output
+                                subentry.rename(corrected_path)  # Perform the filesystem rename to corrected year for subdirectory
+                            else:  # No meaningful tags found
+                                verbose_output(f"{BackgroundColors.YELLOW}Skipping (no detected meaningful change): {subentry.name}{Style.RESET_ALL}")  # Inform skip
                             continue  # Continue to next subentry after correction
 
                 try:  # Attempt TMDb lookups for the subdirectory using resolved series_name_sub and season_num_sub
@@ -790,10 +918,23 @@ def rename_dirs():
                     verbose_output(f"{BackgroundColors.YELLOW}Skipping (already named): {subentry.name}{Style.RESET_ALL}")  # Inform skip
                     continue  # Continue to next subentry
 
+                
+                change_desc = detect_changes(subentry.name, new_name)  # Compute tags for final rename
+                if not change_desc:  # If no meaningful changes detected
+                    verbose_output(f"{BackgroundColors.YELLOW}Skipping (no detected meaningful change): {subentry.name}{Style.RESET_ALL}")  # Inform skip
+                    continue  # Continue to next subentry
+
                 res_present = bool(res_token_sub)  # Detect presence of resolution token
                 lang_present = bool(append_str)  # Detect presence of language suffix
                 name_color = BackgroundColors.CYAN if (res_present and lang_present) else BackgroundColors.YELLOW  # Choose color
-                print(f"{BackgroundColors.GREEN}Renaming subdir: '{name_color}{subentry.name}{BackgroundColors.GREEN}' → '{BackgroundColors.CYAN}{new_name}{BackgroundColors.GREEN}'{Style.RESET_ALL}")  # Inform about the subdirectory rename
+                
+                print(
+                    f"{BackgroundColors.GREEN}Renaming subdir "  # Start message
+                    f"({change_desc}): "  # Show change tags
+                    f"'{BackgroundColors.CYAN}{subentry.name}{BackgroundColors.GREEN}' → "  # Old name
+                    f"'{BackgroundColors.CYAN}{new_name}{BackgroundColors.GREEN}'"  # New name
+                    f"{Style.RESET_ALL}"
+                )  # Formatted rename output
                 subentry.rename(new_path)  # Perform the filesystem rename operation for subdirectory
                 
         print(f"\n")  # Add spacing after processing a top-level directory
