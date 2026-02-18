@@ -50,6 +50,7 @@ Assumptions & Notes:
 
 import atexit  # For playing a sound when the program finishes
 import datetime  # For getting the current date and time
+import json  # For writing JSON report files
 import os  # For running a command in the terminal
 import platform  # For getting the operating system name
 import re  # For parsing directory names
@@ -634,12 +635,18 @@ def rename_dirs():
     """
 
     api_key = load_api_key()  # Load TMDb API key from environment before processing directories
+    
+    report_data = {  # Initialize the report data structure before processing
+        "generated_at": None,  # Placeholder for ISO timestamp to be set by generate_report
+        "input_dirs": {},  # Container to hold per-root modification records
+    }  # End report_data initialization
+    
     suffix_group = "|".join([re.escape(s) for s in LANGUAGE_OPTIONS])  # Build alternation group from LANGUAGE_OPTIONS
     formatted_pattern = rf"^Season\s(?P<season>\d{{2}})\s(?P<year>\d{{4}})(?:\s(?P<resolution>\d{{3,4}}p|4k))?(?:\s(?P<suffix>{suffix_group}))?$"  # Strict formatted folder regex
 
     roots = INPUT_DIR if isinstance(INPUT_DIR, (list, tuple)) else [INPUT_DIR]  # Normalize INPUT_DIR to a list of paths
     
-    entries = []  # Build list of directory entries only across all configured roots
+    entries = []  # Build list of (root_path, directory) entries across all configured roots
     
     for root in roots:  # Iterate each configured root path
         root_path = Path(root)  # Convert to Path object for consistent handling
@@ -649,7 +656,7 @@ def rename_dirs():
         try:  # Guard against any error when reading the directory contents
             for p in root_path.iterdir():  # Iterate entries in the root directory
                 if p.is_dir():  # Only consider directories for processing, skip files at this stage
-                    entries.append(p)  # Add directory entry to the list for later processing
+                    entries.append((root_path, p))  # Add tuple (root,dir) for later processing and grouping
         except Exception:
             # If a particular input root can't be read, skip it and continue with others
             verbose_output(f"{BackgroundColors.YELLOW}Cannot read input path, skipping: {BackgroundColors.CYAN}{root_path}{Style.RESET_ALL}")
@@ -657,7 +664,7 @@ def rename_dirs():
         
     total = len(entries)  # Compute total number of directories to process
     
-    for idx, entry in enumerate(entries, start=1):  # Iterate with index and entry
+    for idx, (root_path, entry) in enumerate(entries, start=1):  # Iterate with index and unpacked (root,entry)
         print(f"{BackgroundColors.GREEN}Processing {BackgroundColors.CYAN}{idx}{BackgroundColors.GREEN}/{BackgroundColors.CYAN}{total}{BackgroundColors.GREEN}: {BackgroundColors.CYAN}{entry.name}{Style.RESET_ALL}")  # Output index/total and entry name
         if not entry.is_dir():  # Skip non-directory entries such as files
             continue  # Continue to next entry when current one is not a directory
@@ -671,6 +678,7 @@ def rename_dirs():
         if parsed:  # Case 1: The directory name contains season and resolution info
             series_name, season_num, resolution = parsed  # Unpack parsed metadata tuple
             season_str = f"{season_num:02d}"  # Format season number as two digits
+            append_str = None  # Default to no suffix (safe default for earlier checks)
 
             formatted_match = re.match(formatted_pattern, entry.name, re.IGNORECASE)  # Match strict formatted pattern against folder name (case-insensitive)
             if formatted_match:  # If folder already matches strict format
@@ -721,6 +729,60 @@ def rename_dirs():
                         corrected_path = entry.parent / corrected_name  # Compute corrected path
                         print(f"{BackgroundColors.GREEN}Correcting year: '{entry.name}' → '{corrected_name}'{Style.RESET_ALL}")  # Inform about correction
                         entry.rename(corrected_path)  # Perform rename to corrected year
+                        
+                        if corrected_path.exists():  # Only record when filesystem shows the rename succeeded
+                            root_key = str(root_path)  # Use string form of input root as dictionary key
+                            if root_key not in report_data["input_dirs"]:  # Lazily create per-root entry when first change occurs
+                                report_data["input_dirs"][root_key] = {  # Initialize per-root structure
+                                    "directories_modified": [],  # List to hold directory modifications
+                                    "video_files_renamed": [],  # List to hold video rename records (unused here but preserved)
+                                }  # End initialization
+                            change_desc = detect_changes(entry.name, corrected_name)  # Compute a human-readable list of changes
+                            tags = [t.strip() for t in change_desc.split("+")] if change_desc else []  # Split tags from detect_changes
+                            labels = []  # Collect mapped labels for the report
+                            if any("Add Year" in t for t in tags):  # Map to Year Added
+                                labels.append("Year Added")  # Append label
+                            if any("Correct Year" in t for t in tags):  # Map to Year Corrected
+                                labels.append("Year Corrected")  # Append label
+                            if any("Add Resolution" in t for t in tags):  # Map to Resolution Added
+                                labels.append("Resolution Added")  # Append label
+                            if any("Correct Resolution" in t for t in tags):  # Map to Resolution Corrected
+                                labels.append("Resolution Corrected")  # Append label
+                            if any("Remove Duplicate Tokens" in t for t in tags):  # Map to Duplicate Tokens Removed
+                                labels.append("Duplicate Tokens Removed")  # Append label
+                            if any("Reorder Tokens" in t for t in tags):  # Map to Format Reordered
+                                labels.append("Format Reordered")  # Append label
+                            if any("Normalize Format" in t or "Standardize Casing" in t for t in tags):  # Map spacing/casing changes
+                                labels.append("Whitespace Normalized")  # Append label
+                            try:  # Detect parentheses removal (guard regex)
+                                if re.search(r"\(\d{4}\)", entry.name) and not re.search(r"\(\d{4}\)", corrected_name):  # Parentheses removed
+                                    labels.append("Parentheses Removed")  # Append label
+                            except Exception:  # If regex fails
+                                pass  # Ignore detection errors
+                            try:  # Detect 4K -> 2160p conversion (guard regex)
+                                if re.search(r"\b4k\b", entry.name, re.IGNORECASE) and "2160p" in corrected_name.lower():  # 4K converted
+                                    labels.append("4K Converted to 2160p")  # Append label
+                            except Exception:  # If detection fails
+                                pass  # Ignore detection errors
+                            try:  # Detect language normalization differences (guard regex)
+                                old_lang_match = re.search(r"\b(Dual|Dublado|English|Legendado|Nacional)\b", entry.name, re.IGNORECASE)  # Find old lang token
+                                if old_lang_match:  # If an old language token existed
+                                    old_lang_raw = old_lang_match.group(0)  # Extract raw matched token
+                                    if append_str and old_lang_raw != append_str:  # If canonical differs from raw
+                                        labels.append("Language Normalized")  # Append label
+                            except Exception:  # On detection errors
+                                pass  # Ignore
+                            seen = set()  # Deduplicate labels while preserving order
+                            final_labels = []  # Ordered unique labels
+                            for L in labels:  # Iterate computed labels
+                                if L not in seen:  # If label not yet recorded
+                                    seen.add(L)  # Mark seen
+                                    final_labels.append(L)  # Append to final list
+                            report_data["input_dirs"][root_key]["directories_modified"].append({  # Append directory modification record
+                                "old_name": entry.name,  # Record old directory name
+                                "new_name": corrected_name,  # Record new directory name
+                                "changes": final_labels,  # Record detected change labels
+                            })  # End append directory record
                         continue  # Continue to next entry after correction
 
             try:  # Attempt TMDb lookups which may raise exceptions
@@ -794,6 +856,58 @@ def rename_dirs():
                 f"{Style.RESET_ALL}"
             )  # Formatted rename output
             entry.rename(new_path)  # Perform the filesystem rename operation for the top-level directory
+            if new_path.exists():  # Only record when filesystem shows the rename succeeded
+                root_key = str(root_path)  # Use string form of input root as dictionary key
+                if root_key not in report_data["input_dirs"]:  # Lazily create per-root entry when first change occurs
+                    report_data["input_dirs"][root_key] = {  # Initialize per-root structure
+                        "directories_modified": [],  # List to hold directory modifications
+                        "video_files_renamed": [],  # List to hold video rename records (unused here but preserved)
+                    }  # End initialization
+                tags = [t.strip() for t in change_desc.split("+")] if change_desc else []  # Split tags from detect_changes
+                labels = []  # Collect mapped labels for the report
+                if any("Add Year" in t for t in tags):  # Map to Year Added
+                    labels.append("Year Added")  # Append label
+                if any("Correct Year" in t for t in tags):  # Map to Year Corrected
+                    labels.append("Year Corrected")  # Append label
+                if any("Add Resolution" in t for t in tags):  # Map to Resolution Added
+                    labels.append("Resolution Added")  # Append label
+                if any("Correct Resolution" in t for t in tags):  # Map to Resolution Corrected
+                    labels.append("Resolution Corrected")  # Append label
+                if any("Remove Duplicate Tokens" in t for t in tags):  # Map to Duplicate Tokens Removed
+                    labels.append("Duplicate Tokens Removed")  # Append label
+                if any("Reorder Tokens" in t for t in tags):  # Map to Format Reordered
+                    labels.append("Format Reordered")  # Append label
+                if any("Normalize Format" in t or "Standardize Casing" in t for t in tags):  # Map spacing/casing changes
+                    labels.append("Whitespace Normalized")  # Append label
+                try:  # Detect parentheses removal (guard regex)
+                    if re.search(r"\(\d{4}\)", entry.name) and not re.search(r"\(\d{4}\)", new_name):  # Parentheses removed
+                        labels.append("Parentheses Removed")  # Append label
+                except Exception:  # If regex fails
+                    pass  # Ignore detection errors
+                try:  # Detect 4K -> 2160p conversion (guard regex)
+                    if re.search(r"\b4k\b", entry.name, re.IGNORECASE) and "2160p" in new_name.lower():  # 4K converted
+                        labels.append("4K Converted to 2160p")  # Append label
+                except Exception:  # If detection fails
+                    pass  # Ignore detection errors
+                try:  # Detect language normalization differences (guard regex)
+                    old_lang_match = re.search(r"\b(Dual|Dublado|English|Legendado|Nacional)\b", entry.name, re.IGNORECASE)  # Find old lang token
+                    if old_lang_match:  # If an old language token existed
+                        old_lang_raw = old_lang_match.group(0)  # Extract raw matched token
+                        if append_str and old_lang_raw != append_str:  # If canonical differs from raw
+                            labels.append("Language Normalized")  # Append label
+                except Exception:  # On detection errors
+                    pass  # Ignore
+                seen = set()  # Deduplicate labels while preserving order
+                final_labels = []  # Ordered unique labels
+                for L in labels:  # Iterate computed labels
+                    if L not in seen:  # If label not yet recorded
+                        seen.add(L)  # Mark seen
+                        final_labels.append(L)  # Append to final list
+                report_data["input_dirs"][root_key]["directories_modified"].append({  # Append directory modification record
+                    "old_name": entry.name,  # Record old directory name
+                    "new_name": new_name,  # Record new directory name
+                    "changes": final_labels,  # Record detected change labels
+                })  # End append directory record
 
         else:  # Case 2: The directory likely contains season subdirectories, scan them here
             verbose_output(f"{BackgroundColors.YELLOW}No season info found for '{entry.name}'. Scanning subdirectories...{Style.RESET_ALL}")  # Inform user about scanning
@@ -823,6 +937,7 @@ def rename_dirs():
                     series_name_sub = entry.name  # Infer series name from parent directory name
 
                 season_str_sub = f"{season_num_sub:02d}"  # Format season number as two digits for subdirectory
+                append_str = None  # Default to no suffix for subdirectory checks
 
                 formatted_match_sub = re.match(formatted_pattern, subentry.name, re.IGNORECASE)  # Match strict formatted pattern against subdirectory name (case-insensitive)
                 if formatted_match_sub:  # If the subdirectory already matches strict format
@@ -870,6 +985,58 @@ def rename_dirs():
                                     f"{Style.RESET_ALL}"
                                 )  # Formatted rename output
                                 subentry.rename(new_path)  # Perform rename to add prefix
+                                if new_path.exists():  # Only record when filesystem shows the rename succeeded
+                                    root_key = str(root_path)  # Use string form of input root as dictionary key
+                                    if root_key not in report_data["input_dirs"]:  # Lazily create per-root entry when first change occurs
+                                        report_data["input_dirs"][root_key] = {  # Initialize per-root structure
+                                            "directories_modified": [],  # List to hold directory modifications
+                                            "video_files_renamed": [],  # List to hold video rename records (unused here but preserved)
+                                        }  # End initialization
+                                    tags = [t.strip() for t in change_desc.split("+")] if change_desc else []  # Split tags from detect_changes
+                                    labels = []  # Collect mapped labels for the report
+                                    if any("Add Year" in t for t in tags):  # Map to Year Added
+                                        labels.append("Year Added")  # Append label
+                                    if any("Correct Year" in t for t in tags):  # Map to Year Corrected
+                                        labels.append("Year Corrected")  # Append label
+                                    if any("Add Resolution" in t for t in tags):  # Map to Resolution Added
+                                        labels.append("Resolution Added")  # Append label
+                                    if any("Correct Resolution" in t for t in tags):  # Map to Resolution Corrected
+                                        labels.append("Resolution Corrected")  # Append label
+                                    if any("Remove Duplicate Tokens" in t for t in tags):  # Map to Duplicate Tokens Removed
+                                        labels.append("Duplicate Tokens Removed")  # Append label
+                                    if any("Reorder Tokens" in t for t in tags):  # Map to Format Reordered
+                                        labels.append("Format Reordered")  # Append label
+                                    if any("Normalize Format" in t or "Standardize Casing" in t for t in tags):  # Map spacing/casing changes
+                                        labels.append("Whitespace Normalized")  # Append label
+                                    try:  # Detect parentheses removal (guard regex)
+                                        if re.search(r"\(\d{4}\)", subentry.name) and not re.search(r"\(\d{4}\)", prefixed_name):  # Parentheses removed
+                                            labels.append("Parentheses Removed")  # Append label
+                                    except Exception:  # If regex fails
+                                        pass  # Ignore detection errors
+                                    try:  # Detect 4K -> 2160p conversion (guard regex)
+                                        if re.search(r"\b4k\b", subentry.name, re.IGNORECASE) and "2160p" in prefixed_name.lower():  # 4K converted
+                                            labels.append("4K Converted to 2160p")  # Append label
+                                    except Exception:  # If detection fails
+                                        pass  # Ignore detection errors
+                                    try:  # Detect language normalization differences (guard regex)
+                                        old_lang_match = re.search(r"\b(Dual|Dublado|English|Legendado|Nacional)\b", subentry.name, re.IGNORECASE)  # Find old lang token
+                                        if old_lang_match:  # If an old language token existed
+                                            old_lang_raw = old_lang_match.group(0)  # Extract raw matched token
+                                            if append_str and old_lang_raw != append_str:  # If canonical differs from raw
+                                                labels.append("Language Normalized")  # Append label
+                                    except Exception:  # On detection errors
+                                        pass  # Ignore
+                                    seen = set()  # Deduplicate labels while preserving order
+                                    final_labels = []  # Ordered unique labels
+                                    for L in labels:  # Iterate computed labels
+                                        if L not in seen:  # If label not yet recorded
+                                            seen.add(L)  # Mark seen
+                                            final_labels.append(L)  # Append to final list
+                                    report_data["input_dirs"][root_key]["directories_modified"].append({  # Append directory modification record
+                                        "old_name": subentry.name,  # Record old directory name
+                                        "new_name": prefixed_name,  # Record new directory name
+                                        "changes": final_labels,  # Record detected change labels
+                                    })  # End append directory record
                             else:  # No meaningful tags found, verbose skip
                                 verbose_output(f"{BackgroundColors.YELLOW}Skipping (no detected meaningful change): {subentry.name}{Style.RESET_ALL}")  # Inform skip
                             continue  # Continue to next subentry after prefixing
@@ -1095,6 +1262,24 @@ def play_sound():
         print(
             f"{BackgroundColors.RED}Sound file {BackgroundColors.CYAN}{SOUND_FILE}{BackgroundColors.RED} not found. Make sure the file exists.{Style.RESET_ALL}"
         )
+
+
+def generate_report(report_data: dict) -> None:
+    """
+    Generate a `report.json` file in the project root from `report_data`.
+
+    :param report_data: The report dictionary built during processing
+    :return: None
+    """
+
+    report_data["generated_at"] = datetime.datetime.now().isoformat()  # Add ISO timestamp to the report
+    out_path = Path(__file__).parent / "report.json"  # Compute output path in project root
+    try:  # Guard file I/O to avoid raising
+        with out_path.open("w", encoding="utf-8") as f:  # Open file for writing with UTF-8 encoding
+            json.dump(report_data, f, indent=4, ensure_ascii=False)  # Write JSON with required options
+    except Exception as e:  # On any error while writing, report but do not raise
+        print(f"{BackgroundColors.RED}Failed to write report.json: {e}{Style.RESET_ALL}")  # Log write failure
+        return  # Ensure function exits without raising
 
 
 def main():
