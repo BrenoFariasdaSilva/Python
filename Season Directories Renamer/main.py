@@ -249,7 +249,7 @@ def rename_dirs():
     api_key = load_api_key()  # Load TMDb API key from environment before processing directories
     # Prepare a strict formatted-folder regex using configured suffixes
     suffix_group = "|".join([re.escape(s) for s in APPEND_STRINGS])  # Build alternation group from APPEND_STRINGS
-    formatted_pattern = rf"^Season\s(?P<season>\d{{2}})\s(?P<year>\d{{4}})(?:\s(?P<suffix>{suffix_group}))?$"  # Strict formatted folder regex
+    formatted_pattern = rf"^Season\s(?P<season>\d{{2}})\s(?P<year>\d{{4}})(?:\s(?P<resolution>\d{{3,4}}p|4k))?(?:\s(?P<suffix>{suffix_group}))?$"  # Strict formatted folder regex
 
     for entry in INPUT_DIR.iterdir():  # Iterate over entries in the INPUT_DIR path
         if not entry.is_dir():  # Skip non-directory entries such as files
@@ -264,10 +264,11 @@ def rename_dirs():
 
             year = None  # Initialize year variable before lookup
             # Check if the current folder is already strictly formatted
-            formatted_match = re.match(formatted_pattern, entry.name)  # Match strict formatted pattern against folder name
+            formatted_match = re.match(formatted_pattern, entry.name, re.IGNORECASE)  # Match strict formatted pattern against folder name (case-insensitive)
             if formatted_match:  # If folder already matches strict format
                 existing_season = formatted_match.group("season")  # Extract existing zero-padded season string
                 existing_year = formatted_match.group("year")  # Extract existing year string
+                existing_resolution = formatted_match.group("resolution")  # Extract existing optional resolution string
                 existing_suffix = formatted_match.group("suffix")  # Extract existing optional suffix string
 
                 # Validate numeric values for season and year
@@ -295,6 +296,8 @@ def rename_dirs():
                         continue  # Skip renaming since folder is already correct
                     if api_year is not None and str(api_year) != str(existing_year_int):  # If API year differs, correct the year in the folder name
                         corrected_name = f"Season {existing_season} {int(api_year)}"  # Build corrected name with new year
+                        if existing_resolution:  # Preserve existing resolution when present
+                            corrected_name = f"{corrected_name} {existing_resolution}"  # Append resolution after year
                         if existing_suffix:  # If an allowed suffix was present, preserve it
                             corrected_name = f"{corrected_name} {existing_suffix}"  # Append the existing suffix
                         corrected_name = " ".join(corrected_name.split())  # Normalize whitespace
@@ -369,10 +372,11 @@ def rename_dirs():
 
                 year = None  # Initialize year variable before lookup
                 # Check if subdirectory is already strictly formatted
-                formatted_match_sub = re.match(formatted_pattern, subentry.name)  # Match strict formatted pattern against subdirectory name
+                formatted_match_sub = re.match(formatted_pattern, subentry.name, re.IGNORECASE)  # Match strict formatted pattern against subdirectory name (case-insensitive)
                 if formatted_match_sub:  # If the subdirectory already matches strict format
                     existing_season = formatted_match_sub.group("season")  # Extract existing zero-padded season string from subdir
                     existing_year = formatted_match_sub.group("year")  # Extract existing year string from subdir
+                    existing_resolution = formatted_match_sub.group("resolution")  # Extract existing optional resolution string from subdir
                     existing_suffix = formatted_match_sub.group("suffix")  # Extract existing optional suffix string from subdir
 
                     # Validate numeric season/year values
@@ -399,6 +403,8 @@ def rename_dirs():
                             continue  # Skip renaming for this subdirectory
                         if api_year is not None and str(api_year) != str(existing_year_int):  # API year differs from folder year
                             corrected_name = f"Season {existing_season} {int(api_year)}"  # Build corrected name with new year
+                            if existing_resolution:  # Preserve existing resolution when present
+                                corrected_name = f"{corrected_name} {existing_resolution}"  # Append resolution after year
                             if existing_suffix:  # Preserve existing suffix when present
                                 corrected_name = f"{corrected_name} {existing_suffix}"  # Append suffix
                             corrected_name = " ".join(corrected_name.split())  # Normalize whitespace
