@@ -357,7 +357,7 @@ def rename_dirs():
                 new_name = " ".join(new_name.split())  # Normalize whitespace to prevent double spaces
                 new_path = subentry.parent / new_name  # Compute new path for subdirectory rename
 
-                print(f"{BackgroundColors.GREEN}Renaming subdir:{Style.RESET_ALL} '{subentry.name}' → '{new_name}'")  # Inform about the subdirectory rename
+                print(f"{BackgroundColors.GREEN}Renaming subdir: '{BackgroundColors.CYAN}{subentry.name}{BackgroundColors.GREEN}' → '{BackgroundColors.CYAN}{new_name}{BackgroundColors.GREEN}'{Style.RESET_ALL}")  # Inform about the subdirectory rename
                 subentry.rename(new_path)  # Perform the filesystem rename operation for subdirectory
 
 
