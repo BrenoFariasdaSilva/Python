@@ -72,7 +72,7 @@ class BackgroundColors:  # Colors for the terminal
 
 
 # Execution Constants:
-VERBOSE = True  # Set to True to output verbose messages
+VERBOSE = False  # Set to True to output verbose messages
 INPUT_DIR = Path("E:/Series")  # The input directory containing the season folders
 APPEND_STRINGS = ["Legendado", "Dual", "Dublado", "English"]  # User-defined suffixes for renaming
 TMDB_BASE_URL = "https://api.themoviedb.org/3"  # Base URL for TMDb API
