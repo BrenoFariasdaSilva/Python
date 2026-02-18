@@ -184,6 +184,36 @@ def get_series_id(api_key, series_name):
     return results[0]["id"]  # Return the id of the first search result
 
 
+def get_season_year(api_key, series_id, season_number):
+
+    """
+    Query TMDb to get season details for a given series_id & season_number.
+    Returns the year (e.g., 2012) of that season's air date.
+
+    :param api_key: TMDb API key string
+    :param series_id: TMDb series id integer
+    :param season_number: Season number integer
+    :return: Year string (e.g., '2012') for the season air date
+    """
+
+    url = f"{TMDB_BASE_URL}/tv/{series_id}/season/{season_number}"  # Build URL for season details endpoint
+    params = {"api_key": api_key}  # Prepare params with API key
+    response = requests.get(url, params=params)  # Request season details from TMDb
+    response.raise_for_status()  # Raise exception on HTTP errors
+    data = response.json()  # Parse JSON payload from response
+    air_date = data.get("air_date")  # Attempt to read top-level air_date for the season
+    
+    if not air_date:  # If top-level air_date is missing, fallback to episode-level air_date
+        episodes = data.get("episodes", [])  # Extract episodes array from season details
+        
+        if episodes and "air_date" in episodes[0]:  # Check first episode for an air_date field
+            air_date = episodes[0]["air_date"]  # Use first episode air_date as fallback
+        else:  # No air_date available anywhere in response
+            raise ValueError(f"No air_date found for series {series_id} season {season_number}")  # Raise descriptive error
+        
+    return air_date.split("-")[0]  # Return only the year portion of the date string
+
+
 def to_seconds(obj):
     """
     Converts various time-like objects to seconds.
