@@ -73,7 +73,7 @@ class BackgroundColors:  # Colors for the terminal
 
 # Execution Constants:
 VERBOSE = False  # Set to True to output verbose messages
-INPUT_DIR = [
+INPUT_DIRS = [
     Path("E:/Movies/Dual"),
     Path("E:/Movies/Dublado"),
     Path("E:/Movies/English"),
