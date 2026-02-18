@@ -259,15 +259,36 @@ def rename_dirs():
             series_name, season_num, resolution = parsed  # Unpack parsed metadata tuple
             season_str = f"{season_num:02d}"  # Format season number as two digits
 
+            year = None  # Initialize year variable before lookup
             try:  # Attempt TMDb lookups which may raise exceptions
                 series_id = get_series_id(api_key, series_name)  # Fetch TMDb series id by name
                 year = get_season_year(api_key, series_id, season_num)  # Fetch season year using series id
             except Exception as e:  # Catch any exception from TMDb calls
                 print(f"{BackgroundColors.RED}Error fetching year for {series_name} S{season_str}: {e}{Style.RESET_ALL}")  # Print error message when lookup fails
-                year = "Unknown"  # Fallback year value when TMDb lookup fails
 
-            append_str = APPEND_STRINGS[0]  # Select first append string from configured list
-            new_name = f"Season {season_str} {year} {resolution} {append_str}"  # Build new directory name
+            valid_year = None  # Assume invalid until proven otherwise
+            if year is not None:  # Only attempt conversion when year is not None
+                try:  # Attempt to coerce year to int
+                    valid_year = int(year)  # Convert year to integer
+                except Exception:  # Conversion failed, mark as invalid
+                    valid_year = None  # Ensure invalid status
+
+            if valid_year is None:  # If year could not be determined, skip renaming
+                print(f"{BackgroundColors.YELLOW}Skipping (no valid year found): {entry.name}{Style.RESET_ALL}")  # Inform about skipping due to missing year
+                continue  # Continue to next entry without renaming
+
+            append_str = None  # Default to no suffix
+            for s in APPEND_STRINGS:  # Iterate in configured order
+                if re.search(rf"\b{s}\b", entry.name, re.IGNORECASE):  # Case-insensitive whole-word match
+                    append_str = s  # Select the first matching configured suffix
+                    break  # Stop after the first match
+
+            if append_str:  # If a suffix was found
+                new_name = f"Season {season_str} {valid_year} {append_str}"  # Include suffix at end
+            else:  # No suffix found
+                new_name = f"Season {season_str} {valid_year}"  # No suffix appended
+
+            new_name = " ".join(new_name.split())  # Normalize whitespace to prevent double spaces
             new_path = entry.parent / new_name  # Compute new path for renaming
 
             print(f"{BackgroundColors.GREEN}Renaming:{Style.RESET_ALL} '{entry.name}' → '{new_name}'")  # Inform about the rename operation
@@ -304,15 +325,36 @@ def rename_dirs():
 
                 season_str = f"{season_num:02d}"  # Format season number as two digits for subdirectory
 
+                year = None  # Initialize year variable before lookup
                 try:  # Attempt TMDb lookups for the subdirectory using resolved series_name and season_num
                     series_id = get_series_id(api_key, series_name)  # Fetch TMDb series id by name for subdir
                     year = get_season_year(api_key, series_id, season_num)  # Fetch season year for subdir
                 except Exception as e:  # Catch any exception from TMDb calls for subdir
                     print(f"{BackgroundColors.RED}Error fetching year for {series_name} S{season_str}: {e}{Style.RESET_ALL}")  # Print error message when lookup fails for subdir
-                    year = "Unknown"  # Fallback year value when TMDb lookup fails for subdir
 
-                append_str = APPEND_STRINGS[0]  # Select first append string for subdirectory rename
-                new_name = f"Season {season_str} {year} {resolution} {append_str}"  # Build new name for subdirectory
+                valid_year = None  # Assume invalid until proven otherwise
+                if year is not None:  # Only attempt conversion when year is not None
+                    try:  # Attempt to coerce year to int
+                        valid_year = int(year)  # Convert year to integer
+                    except Exception:  # Conversion failed, mark as invalid
+                        valid_year = None  # Ensure invalid status
+
+                if valid_year is None:  # If year could not be determined, skip renaming this subdirectory
+                    print(f"{BackgroundColors.YELLOW}Skipping (no valid year found): {subentry.name}{Style.RESET_ALL}")  # Inform about skipping due to missing year
+                    continue  # Continue to next subentry without renaming
+
+                append_str = None  # Default to no suffix
+                for s in APPEND_STRINGS:  # Iterate in configured order
+                    if re.search(rf"\b{s}\b", subentry.name, re.IGNORECASE):  # Case-insensitive whole-word match
+                        append_str = s  # Select the first matching configured suffix
+                        break  # Stop after the first match
+
+                if append_str:  # If a suffix was found
+                    new_name = f"Season {season_str} {valid_year} {append_str}"  # Include suffix at end
+                else:  # No suffix found
+                    new_name = f"Season {season_str} {valid_year}"  # No suffix appended
+
+                new_name = " ".join(new_name.split())  # Normalize whitespace to prevent double spaces
                 new_path = subentry.parent / new_name  # Compute new path for subdirectory rename
 
                 print(f"{BackgroundColors.GREEN}Renaming subdir:{Style.RESET_ALL} '{subentry.name}' → '{new_name}'")  # Inform about the subdirectory rename
