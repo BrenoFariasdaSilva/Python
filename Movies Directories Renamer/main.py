@@ -492,7 +492,7 @@ def detect_changes(old_name, new_name):
     res_re = re.compile(r"\b(\d{3,4}p|4k)\b", re.IGNORECASE)  # Resolution regex
     old_res = res_re.search(old_name)  # Find resolution in old name
     new_res = res_re.search(new_name)  # Find resolution in new name
-
+    
     if new_res and not old_res:  # Resolution added
         tags.append("Add Resolution")  # Tag for added resolution
     elif new_res and old_res and new_res.group(0).lower() != old_res.group(0).lower():  # Resolution changed
