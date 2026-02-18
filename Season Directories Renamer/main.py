@@ -705,9 +705,9 @@ def rename_dirs():
                 except Exception:  # Conversion failed, mark as invalid
                     valid_year = None  # Ensure invalid status
 
-            if valid_year is None:  # If year could not be determined, skip renaming
-                print(f"{BackgroundColors.YELLOW}Skipping (no valid year found): {entry.name}{Style.RESET_ALL}")  # Inform about skipping due to missing year
-                continue  # Continue to next entry without renaming
+            existing_year_int = locals().get('existing_year_int', None)  # Safely fetch existing year int if present
+            if valid_year is None and existing_year_int is not None:  # If TMDb didn't provide a year but folder had one
+                valid_year = existing_year_int  # Use the existing year instead of aborting
 
             res_token = determine_resolution(entry, entry.name)  # Determine resolution for this season folder
 
@@ -725,7 +725,9 @@ def rename_dirs():
                     append_str = s  # Select the first matching configured suffix
                     break  # Stop after the first match
 
-            name_parts = ["Season", season_str, str(valid_year)]  # Base parts for new name
+            name_parts = ["Season", season_str]  # Base parts for new name (year optional)
+            if valid_year is not None:  # Append year only when available
+                name_parts.append(str(valid_year))  # Add year token when present
             if part_token:  # Insert part token after year when present
                 name_parts.append(part_token)  # Preserve standardized part token
             if res_token:  # Insert resolution if present in original
@@ -885,9 +887,9 @@ def rename_dirs():
                     except Exception:  # Conversion failed, mark as invalid
                         valid_year = None  # Ensure invalid status
 
-                if valid_year is None:  # If year could not be determined, skip renaming this subdirectory
-                    print(f"{BackgroundColors.YELLOW}Skipping (no valid year found): {subentry.name}{Style.RESET_ALL}")  # Inform about skipping due to missing year
-                    continue  # Continue to next subentry without renaming
+                existing_year_int = locals().get('existing_year_int', None)  # Safely fetch existing year int if present for subdir
+                if valid_year is None and existing_year_int is not None:  # If TMDb didn't provide a year but folder had one
+                    valid_year = existing_year_int  # Use the existing year instead of aborting
 
                 res_token_sub = determine_resolution(subentry, subentry.name)  # Determine resolution for this season subfolder
 
@@ -905,7 +907,9 @@ def rename_dirs():
                         append_str = s  # Select the first matching configured suffix
                         break  # Stop after the first match
 
-                name_parts = ["Season", season_str_sub, str(valid_year)]  # Base parts
+                name_parts = ["Season", season_str_sub]  # Base parts (year optional)
+                if valid_year is not None:  # Append year only when available
+                    name_parts.append(str(valid_year))  # Add year token when present
                 if part_token_sub:  # Insert part token after year when present in subdir
                     name_parts.append(part_token_sub)  # Preserve standardized part token for subdir
                 if res_token_sub:  # Insert resolution if present in original
