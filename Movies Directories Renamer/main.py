@@ -571,19 +571,6 @@ def determine_resolution(dir_path, name_hint):
     return res_from_file  # May be None when no resolution found
 
 
-def format_season_num(season):
-    """
-    Return a season number zero-padded to two digits.
-
-    Accepts int or string values. If conversion fails, returns the original value.
-    """
-    
-    try:  # Normalize to int then format with two digits
-        return f"{int(season):02d}"
-    except Exception:  # If conversion fails, return original (avoid raising)
-        return season
-
-
 def rename_dirs():
     """
     Iterates through the INPUT_DIRS, extracts metadata, fetches the release year from TMDb,
