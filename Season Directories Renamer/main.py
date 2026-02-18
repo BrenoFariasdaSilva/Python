@@ -679,8 +679,19 @@ def rename_dirs():
                             api_year = None  # Mark API year as unavailable
 
                         if api_year is not None and str(api_year) == str(existing_year_int):  # API year matches existing year
-                            verbose_output(f"{BackgroundColors.YELLOW}Skipping (already correctly formatted): {subentry.name}{Style.RESET_ALL}")  # Inform that subdir is already correct
-                            continue  # Skip renaming for this subdirectory
+                            series_prefix = entry.name.strip()  # Series name from parent for Case 2
+                            expected_prefix = f"{series_prefix} - "  # Exact prefix pattern required
+                            if subentry.name.startswith(expected_prefix):  # If subdir already has correct prefix
+                                verbose_output(f"{BackgroundColors.YELLOW}Skipping (already correctly formatted): {subentry.name}{Style.RESET_ALL}")  # Inform that subdir is already correct
+                                continue  # Skip renaming for this subdirectory
+
+                            stripped = re.sub(rf"^{re.escape(series_prefix)}\s*-?\s*", "", subentry.name).strip()  # Remove any malformed leading series tokens
+                            prefixed_name = f"{expected_prefix}{stripped}"  # Build new name with exact separator
+                            prefixed_name = " ".join(prefixed_name.split())  # Normalize whitespace to avoid double spaces
+                            new_path = subentry.parent / prefixed_name  # Compute final path for prefixed rename
+                            print(f"{BackgroundColors.GREEN}Renaming subdir (add prefix): '{BackgroundColors.CYAN}{subentry.name}{BackgroundColors.GREEN}' → '{BackgroundColors.CYAN}{prefixed_name}{BackgroundColors.GREEN}'{Style.RESET_ALL}")  # Inform about rename
+                            subentry.rename(new_path)  # Perform the filesystem rename to add series prefix
+                            continue  # Continue to next subentry after prefixing
 
                         if api_year is not None and str(api_year) != str(existing_year_int):  # API year differs from folder year
                             part_match_existing = re.search(r"\b(?P<label>part|pt|volume|vol|cour|arc)\b\.?\s*(?P<num>[A-Za-z0-9]+)\b", subentry.name, re.IGNORECASE)  # Detect existing part token in subdir
