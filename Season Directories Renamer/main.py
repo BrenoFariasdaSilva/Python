@@ -753,21 +753,17 @@ def rename_dirs():
                 new_name = standardize_final_name(new_name)  # Apply capitalization rules for subdir name
                 new_name = " ".join(new_name.split())  # Normalize whitespace again after standardization
                 series_prefix = entry.name.strip()  # Extract and trim series name from parent directory
+                expected_prefix = f"{series_prefix} - "  # Build the expected prefix pattern with exact separator
 
-                normalized_subdir_name = subentry.name.strip()  # Normalize current subdirectory name by stripping whitespace
-
-                expected_prefix = f"{series_prefix} - "  # Build the expected prefix pattern with correct separator
-
-                if normalized_subdir_name.startswith(series_prefix):  # Check if subdirectory already starts with series name
-                    if not normalized_subdir_name.startswith(expected_prefix):  # If separator is malformed or missing
-                        remainder = normalized_subdir_name[len(series_prefix):].lstrip(" -")  # Remove any incorrect separators
-                        normalized_subdir_name = f"{expected_prefix}{remainder.strip()}"  # Rebuild prefix with correct " - "
-                    new_name = normalized_subdir_name  # Use corrected name without duplicating prefix
-                else:
-                    new_name = f"{expected_prefix}{new_name.strip()}"  # Prepend correct prefix if not present
+                if subentry.name.startswith(expected_prefix):  # Already has correct prefix
+                    if not new_name.startswith(expected_prefix):  # If generated name lacks the prefix
+                        stripped = re.sub(rf"^{re.escape(series_prefix)}\s*-?\s*", "", new_name).strip()  # Strip any leading series tokens
+                        new_name = f"{expected_prefix}{stripped}"  # Rebuild with single correct prefix
+                else:  # Prefix not present, prepend it now for Case 2
+                    stripped = re.sub(rf"^{re.escape(series_prefix)}\s*-?\s*", "", new_name).strip()  # Strip any leading series tokens
+                    new_name = f"{expected_prefix}{stripped}"  # Prepend correct prefix
 
                 new_name = " ".join(new_name.split())  # Normalize internal whitespace to avoid double spaces
-
                 new_path = subentry.parent / new_name  # Compute final rename path
 
                 if new_name == subentry.name:  # If new name equals current, skip renaming
