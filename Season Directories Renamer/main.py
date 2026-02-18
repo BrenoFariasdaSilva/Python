@@ -74,7 +74,7 @@ class BackgroundColors:  # Colors for the terminal
 # Execution Constants:
 VERBOSE = False  # Set to True to output verbose messages
 INPUT_DIR = [Path("E:/Animes"), Path("E:/Series")]  # The input directory or list of input directories
-APPEND_STRINGS = ["Dual", "Dublado", "English", "Legendado", "Nacional"]  # User-defined suffixes for renaming
+LANGUAGE_OPTIONS = ["Dual", "Dublado", "English", "Legendado", "Nacional"]  # User-defined suffixes for renaming
 TMDB_BASE_URL = "https://api.themoviedb.org/3"  # Base URL for TMDb API
 IGNORE_DIR_REGEX = re.compile(r'^(featurettes|extras|making[-_\s]?of|behind[ _-]?the[ _-]?scenes|specials)$', re.IGNORECASE)  # Regex for ignore dirs
 
@@ -366,7 +366,7 @@ def standardize_final_name(name):
     - 'Season' is capitalized exactly as 'Season'.
     - Numeric tokens remain unchanged (season number, year).
     - Resolution tokens preserve original casing (e.g., 720p, 4K).
-    - Language suffixes are normalized to canonical values from APPEND_STRINGS.
+    - Language suffixes are normalized to canonical values from LANGUAGE_OPTIONS.
     - All other alphabetic words are Title-cased (first upper, rest lower).
     """
 
@@ -382,7 +382,7 @@ def standardize_final_name(name):
             continue  # Proceed to next token
 
         matched_suffix = None  # Default no match
-        for s in APPEND_STRINGS:  # Iterate configured canonical suffixes
+        for s in LANGUAGE_OPTIONS:  # Iterate configured canonical suffixes
             if tok.lower() == s.lower():  # Case-insensitive equality check
                 matched_suffix = s  # Use canonical form from configuration
                 break  # Stop searching when found
@@ -634,7 +634,7 @@ def rename_dirs():
     """
 
     api_key = load_api_key()  # Load TMDb API key from environment before processing directories
-    suffix_group = "|".join([re.escape(s) for s in APPEND_STRINGS])  # Build alternation group from APPEND_STRINGS
+    suffix_group = "|".join([re.escape(s) for s in LANGUAGE_OPTIONS])  # Build alternation group from LANGUAGE_OPTIONS
     formatted_pattern = rf"^Season\s(?P<season>\d{{2}})\s(?P<year>\d{{4}})(?:\s(?P<resolution>\d{{3,4}}p|4k))?(?:\s(?P<suffix>{suffix_group}))?$"  # Strict formatted folder regex
 
     roots = INPUT_DIR if isinstance(INPUT_DIR, (list, tuple)) else [INPUT_DIR]  # Normalize INPUT_DIR to a list of paths
@@ -752,7 +752,7 @@ def rename_dirs():
                 part_token = None  # Ensure part_token is None when absent
 
             append_str = None  # Default to no suffix
-            for s in APPEND_STRINGS:  # Iterate in configured order to detect suffix
+            for s in LANGUAGE_OPTIONS:  # Iterate in configured order to detect suffix
                 if re.search(rf"\b{s}\b", entry.name, re.IGNORECASE):  # Case-insensitive whole-word match
                     append_str = s  # Select the first matching configured suffix
                     break  # Stop after the first match
@@ -935,7 +935,7 @@ def rename_dirs():
                     part_token_sub = None  # Ensure part_token_sub is None when absent
 
                 append_str = None  # Default to no suffix
-                for s in APPEND_STRINGS:  # Iterate in configured order
+                for s in LANGUAGE_OPTIONS:  # Iterate in configured order
                     if re.search(rf"\b{s}\b", subentry.name, re.IGNORECASE):  # Case-insensitive whole-word match
                         append_str = s  # Select the first matching configured suffix
                         break  # Stop after the first match
