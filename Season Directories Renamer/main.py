@@ -625,7 +625,7 @@ def rename_dirs():
     formatted_pattern = rf"^Season\s(?P<season>\d{{2}})\s(?P<year>\d{{4}})(?:\s(?P<resolution>\d{{3,4}}p|4k))?(?:\s(?P<suffix>{suffix_group}))?$"  # Strict formatted folder regex
 
     for entry in INPUT_DIR.iterdir():  # Iterate over entries in the INPUT_DIR path
-        print(f"{BackgroundColors.CYAN}Processing: {entry.name}{Style.RESET_ALL}")  # Output the name of the current entry being processed
+        print(f"{BackgroundColors.GREEN}Processing: {BackgroundColors.CYAN}{entry.name}{Style.RESET_ALL}")  # Output the name of the current entry being processed
         if not entry.is_dir():  # Skip non-directory entries such as files
             continue  # Continue to next entry when current one is not a directory
 
@@ -953,7 +953,7 @@ def rename_dirs():
                 )  # Formatted rename output
                 subentry.rename(new_path)  # Perform the filesystem rename operation for subdirectory
                 
-        print(f"\n")  # Add spacing after processing a top-level directory
+        print()  # Add single spacing after processing a top-level directory
 
 
 def to_seconds(obj):
