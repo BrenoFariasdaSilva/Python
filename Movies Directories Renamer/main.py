@@ -492,16 +492,11 @@ def detect_changes(old_name, new_name):
     res_re = re.compile(r"\b(\d{3,4}p|4k)\b", re.IGNORECASE)  # Resolution regex
     old_res = res_re.search(old_name)  # Find resolution in old name
     new_res = res_re.search(new_name)  # Find resolution in new name
+
     if new_res and not old_res:  # Resolution added
         tags.append("Add Resolution")  # Tag for added resolution
     elif new_res and old_res and new_res.group(0).lower() != old_res.group(0).lower():  # Resolution changed
         tags.append("Correct Resolution")  # Tag for changed resolution
-
-    part_re = re.compile(r"\b(part|pt|volume|vol|cour|arc)\b\.?\s*([A-Za-z0-9]+)\b", re.IGNORECASE)  # Part token regex
-    old_part = part_re.search(old_name)  # Find part in old name
-    new_part = part_re.search(new_name)  # Find part in new name
-    if new_part and not old_part:  # Part added
-        tags.append("Add Part")  # Tag for added part
 
     def strip_prefix(s):  # Helper to remove leading 'X - ' if present
         m = re.match(r"^(?P<prefix>[^-]+)\s-\s(?P<rest>.+)$", s)  # Match prefix pattern
