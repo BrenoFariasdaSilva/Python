@@ -327,25 +327,29 @@ def get_movie_year(api_key, movie_name):
 
 def standardize_final_name(name):
     """
-    Standardize non-numeric words in the final folder name according to project rules.
+    Standardize tokens in the final folder name according to movie rules.
 
     Rules:
-    - 'Season' is capitalized exactly as 'Season'.
-    - Numeric tokens remain unchanged (season number, year).
-    - Resolution tokens preserve original casing (e.g., 720p, 4K).
+    - Numeric tokens remain unchanged (year).
+    - Convert '4K' to '2160p' and normalize resolutions to lowercase (e.g., 1080p).
     - Language suffixes are normalized to canonical values from LANGUAGE_OPTIONS.
-    - All other alphabetic words are Title-cased (first upper, rest lower).
+    - Movie title tokens preserve their original casing (except for token cleanup).
     """
 
     tokens = name.split()  # Split on whitespace to tokens
     out_tokens = []  # Container for transformed tokens
+    
     for tok in tokens:  # Iterate each token for classification
         if tok.isdigit():  # Numeric token check (keeps leading zeros)
             out_tokens.append(tok)  # Append numeric token unchanged
             continue  # Proceed to next token
 
-        if re.fullmatch(r"(\d{3,4}p|4k)", tok, re.IGNORECASE):  # Resolution detection
-            out_tokens.append(tok)  # Append resolution exactly as present
+        if re.fullmatch(r"4k", tok, re.IGNORECASE):  # Convert 4K token to canonical 2160p
+            out_tokens.append("2160p")  # Use canonical 2160p for 4K
+            continue  # Proceed to next token
+
+        if re.fullmatch(r"\d{3,4}p", tok, re.IGNORECASE):  # Resolution detection
+            out_tokens.append(tok.lower())  # Normalize resolution to lowercase (e.g., 1080p)
             continue  # Proceed to next token
 
         matched_suffix = None  # Default no match
@@ -357,11 +361,7 @@ def standardize_final_name(name):
             out_tokens.append(matched_suffix)  # Append canonical suffix exactly
             continue  # Proceed to next token
 
-        if tok.lower() == "season":  # Detect 'season' regardless of case
-            out_tokens.append("Season")  # Append canonical 'Season'
-            continue  # Proceed to next token
-
-        out_tokens.append(tok.capitalize())  # Title-case the token and append
+        out_tokens.append(tok)  # Preserve original token casing for movie title
 
     return " ".join(out_tokens)  # Reconstruct normalized name and return
 
