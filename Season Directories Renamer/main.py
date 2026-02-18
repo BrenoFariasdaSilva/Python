@@ -277,7 +277,7 @@ def standardize_final_name(name):
     return " ".join(out_tokens)  # Reconstruct normalized name and return
 
 
-def _get_resolution_from_first_video(dir_path):
+def get_resolution_from_first_video(dir_path):
     """
     Attempt to derive resolution from the first valid video file in `dir_path`.
 
@@ -472,7 +472,7 @@ def rename_dirs():
                 res_token = res_match.group(0) if res_match else None  # Preserve original matched token or None
                 
                 if not res_token:  # If no resolution token in folder name
-                    res_token = _get_resolution_from_first_video(entry)  # Probe first video file for resolution
+                    res_token = get_resolution_from_first_video(entry)  # Probe first video file for resolution
 
                 append_str = None  # Default to no suffix
                 for s in APPEND_STRINGS:  # Iterate in configured order
@@ -581,7 +581,7 @@ def rename_dirs():
                 res_match_sub = re.search(r"\b(\d{3,4}p|4k)\b", subentry.name, re.IGNORECASE)  # Find resolution token
                 res_token_sub = res_match_sub.group(0) if res_match_sub else None  # Preserve matched token or None
                 if not res_token_sub:  # If no resolution token in subdirectory name
-                    res_token_sub = _get_resolution_from_first_video(subentry)  # Probe first video file for resolution
+                    res_token_sub = get_resolution_from_first_video(subentry)  # Probe first video file for resolution
 
                 append_str = None  # Default to no suffix
                 for s in APPEND_STRINGS:  # Iterate in configured order
