@@ -664,7 +664,6 @@ def rename_dirs():
                         series_id_chk = get_series_id(api_key, series_lookup_name)  # Lookup series id for verification
                         api_year = get_season_year(api_key, series_id_chk, existing_season_int)  # Fetch year from API for existing season
                     except Exception as e:  # API lookup failed, cannot safely decide to rename
-                        print(f"{BackgroundColors.RED}Error verifying year for {series_lookup_name} S{existing_season}: {e}{Style.RESET_ALL}")  # Inform about verification error
                         api_year = None  # Mark API year as unavailable
 
                     if api_year is not None and str(api_year) == str(existing_year_int):  # If API year matches existing year exactly
