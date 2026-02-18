@@ -271,43 +271,30 @@ def verify_ffmpeg_is_installed():
 
 def parse_dir_name(dir_name):
     """
-    Parses folder name like 'Arrow.S01.1080p.Bluray.x265-HiQVE'.
+    Parses folder name like 'The Matrix 1999 1080p Dual'.
 
     :param dir_name: Directory name string to parse
-    :return: Tuple (series_name, season_number, resolution) or None when parsing fails
+    :return: Tuple (movie_name, year, resolution, language) or None when parsing fails
     """
     
-    match = re.match(r"(?P<series>[A-Za-z0-9\._]+)\.S(?P<season>\d{2})\.(?P<res>\d{3,4}p)", dir_name, re.IGNORECASE)  # Attempt classic regex match for series.Sxx.<res>
-    if match:  # If classic pattern matched
-        series = match.group("series").replace(".", " ")  # Convert dotted series token to readable series name
-        season = int(match.group("season"))  # Convert captured season string to integer
-        resolution = match.group("res")  # Capture resolution token (e.g., '1080p')
-        return series, season, resolution  # Return parsed tuple for classic pattern
+    match = re.match(
+        r"^(?P<movie>.+?)\s*(?P<year>\(\d{4}\)|\d{4})?\s*(?P<res>\d{3,4}p|4k)?\s*(?P<lang>Dual|Dublado|English|Legendado|Nacional)?$",
+        dir_name,
+        re.IGNORECASE,
+    )  # Regex to parse movie name, optional year, optional resolution, and optional language suffix
+    
+    if match:  # If the regex matched successfully
+        movie = match.group("movie").strip()  # Extract and clean movie name
+        year = match.group("year")  # Extract year string (may be None)
+        resolution = match.group("res")  # Extract resolution string (may be None)
+        language = match.group("lang")  # Extract language suffix (may be None)
 
-    name_only = os.path.basename(dir_name)  # Extract the final path component or the name itself
-    season_match = re.match(r"^Season\s*(?P<num>\d{1,2})", name_only, re.IGNORECASE)  # Match names starting with 'Season <number>'
-    if not season_match:  # If no season-style match found
-        return None  # Return None when neither classic nor season patterns match
+        if year:  # If a year was found, clean it by removing parentheses if present
+            year = year.strip("()")  # Remove parentheses from year if they exist
 
-    season = int(season_match.group("num"))  # Convert the matched season number to integer
-
-    res_search = re.search(r"\b(?P<res>\d{3,4}p?)\b", name_only, re.IGNORECASE)  # Search for 3-4 digit resolution with optional 'p'
-    if res_search:  # If a resolution-like token was found
-        res_digits = re.sub(r"\D", "", res_search.group("res"))  # Strip any non-digit chars to leave digits only
-        resolution = f"{res_digits}p"  # Normalize to '<digits>p' format
-    else:  # No resolution token found in season directory name
-        resolution = None  # Use None when no resolution is present
-
-    try:  # Use pathlib to safely derive parent directory name even if path doesn't exist
-        parent_name = Path(dir_name).parent.name  # Get parent directory name component
-    except Exception:  # Catch any unexpected error when handling Path operations
-        parent_name = ""  # Fallback to empty string when extraction fails
-
-    if not parent_name:  # If parent name is empty, we cannot infer the series
-        return None  # Return None because series cannot be inferred safely
-
-    series = parent_name.replace(".", " ")  # Normalize parent directory name by replacing dots with spaces
-    return series, season, resolution  # Return parsed tuple inferred from season-style directory
+        return movie, year, resolution, language  # Return the parsed components as a tuple
+    
+    return None  # Return None when parsing fails (no match)
 
 
 def get_series_id(api_key, series_name):
