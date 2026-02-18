@@ -160,6 +160,30 @@ def parse_dir_name(dir_name):
     return series, season, resolution  # Return parsed tuple with series name, season int, and resolution
 
 
+def get_series_id(api_key, series_name):
+
+    """
+    Query TMDb search endpoint to find series ID by name.
+
+    :param api_key: TMDb API key string
+    :param series_name: Series name to search for on TMDb
+    :return: Integer TMDb series id
+    """
+
+    url = f"{TMDB_BASE_URL}/search/tv"  # Build search URL for TMDb TV search endpoint
+    params = {"api_key": api_key, "query": series_name}  # Prepare query parameters including API key and series name
+    response = requests.get(url, params=params)  # Perform HTTP GET request to TMDb search endpoint
+    response.raise_for_status()  # Raise exception for HTTP error responses
+    data = response.json()  # Parse JSON body from response
+    
+    results = data.get("results", [])  # Extract results array from TMDb response
+    
+    if not results:  # If no results were returned from TMDb
+        raise ValueError(f"No TMDb series found for '{series_name}'")  # Raise descriptive error when not found
+    
+    return results[0]["id"]  # Return the id of the first search result
+
+
 def to_seconds(obj):
     """
     Converts various time-like objects to seconds.
