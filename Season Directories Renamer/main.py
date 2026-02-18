@@ -140,6 +140,22 @@ def load_api_key():
     return api_key  # Return the TMDb API key string
 
 
+def is_ffmpeg_installed():
+    """
+    Checks if FFmpeg is installed by running 'ffmpeg -version'.
+
+    :return: bool - True if FFmpeg is installed, False otherwise.
+    """
+
+    try:  # Try to execute FFmpeg
+        subprocess.run(
+            ["ffmpeg", "-version"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True
+        )  # Run the command
+        return True  # FFmpeg is installed
+    except (subprocess.CalledProcessError, FileNotFoundError):  # If an error occurs
+        return False  # FFmpeg is not installed
+
+
 def verify_ffmpeg_is_installed():
     """
     Checks if FFmpeg is installed and installs it if missing.
