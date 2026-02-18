@@ -214,6 +214,72 @@ def get_season_year(api_key, series_id, season_number):
     return air_date.split("-")[0]  # Return only the year portion of the date string
 
 
+def rename_dirs():
+    """
+    Iterates through the INPUT_DIR, extracts metadata, fetches the release year from TMDb,
+    and renames each directory according to the defined pattern.
+
+    If a directory does not match the regex pattern (i.e., missing season/resolution info),
+    the script assumes it contains season subdirectories and processes those instead.
+
+    :return: None
+    """
+
+    api_key = load_api_key()  # Load TMDb API key from environment before processing directories
+
+    for entry in INPUT_DIR.iterdir():  # Iterate over entries in the INPUT_DIR path
+        if not entry.is_dir():  # Skip non-directory entries such as files
+            continue  # Continue to next entry when current one is not a directory
+
+        parsed = parse_dir_name(entry.name)  # Try parsing the directory name for season metadata
+
+        # Case 1: The directory name contains season and resolution info
+        if parsed:  # When directory name matched the expected season/resolution pattern
+            series_name, season_num, resolution = parsed  # Unpack parsed metadata tuple
+            season_str = f"{season_num:02d}"  # Format season number as two digits
+
+            try:  # Attempt TMDb lookups which may raise exceptions
+                series_id = get_series_id(api_key, series_name)  # Fetch TMDb series id by name
+                year = get_season_year(api_key, series_id, season_num)  # Fetch season year using series id
+            except Exception as e:  # Catch any exception from TMDb calls
+                print(f"{BackgroundColors.RED}Error fetching year for {series_name} S{season_str}: {e}{Style.RESET_ALL}")  # Print error message when lookup fails
+                year = "Unknown"  # Fallback year value when TMDb lookup fails
+
+            append_str = APPEND_STRINGS[0]  # Select first append string from configured list
+            new_name = f"Season {season_str} {year} {resolution} {append_str}"  # Build new directory name
+            new_path = entry.parent / new_name  # Compute new path for renaming
+
+            print(f"{BackgroundColors.GREEN}Renaming:{Style.RESET_ALL} '{entry.name}' → '{new_name}'")  # Inform about the rename operation
+            entry.rename(new_path)  # Perform the filesystem rename operation
+
+        # Case 2: The directory likely contains subdirectories for seasons
+        else:  # When top-level directory does not contain season info, inspect its subdirectories
+            print(f"{BackgroundColors.YELLOW}No season info found in '{entry.name}', scanning subdirectories...{Style.RESET_ALL}")  # Inform about scanning subdirectories
+            for subentry in entry.iterdir():  # Iterate over subentries inside the directory
+                if subentry.is_dir():  # Only process subentries that are directories
+                    parsed_sub = parse_dir_name(subentry.name)  # Attempt to parse subdirectory name
+                    if not parsed_sub:  # If subdirectory does not match expected pattern
+                        print(f"{BackgroundColors.YELLOW}Skipping (no match in subdir): {subentry.name}{Style.RESET_ALL}")  # Inform about skipped subdirectory
+                        continue  # Continue to next subentry when parsing fails
+
+                    series_name, season_num, resolution = parsed_sub  # Unpack parsed metadata for subdirectory
+                    season_str = f"{season_num:02d}"  # Format season number as two digits for subdirectory
+
+                    try:  # Attempt TMDb lookups for the subdirectory
+                        series_id = get_series_id(api_key, series_name)  # Fetch TMDb series id by name for subdir
+                        year = get_season_year(api_key, series_id, season_num)  # Fetch season year for subdir
+                    except Exception as e:  # Catch any exception from TMDb calls for subdir
+                        print(f"{BackgroundColors.RED}Error fetching year for {series_name} S{season_str}: {e}{Style.RESET_ALL}")  # Print error message when lookup fails for subdir
+                        year = "Unknown"  # Fallback year value when TMDb lookup fails for subdir
+
+                    append_str = APPEND_STRINGS[0]  # Select first append string for subdirectory rename
+                    new_name = f"Season {season_str} {year} {resolution} {append_str}"  # Build new name for subdirectory
+                    new_path = subentry.parent / new_name  # Compute new path for subdirectory rename
+
+                    print(f"{BackgroundColors.GREEN}Renaming subdir:{Style.RESET_ALL} '{subentry.name}' → '{new_name}'")  # Inform about the subdirectory rename
+                    subentry.rename(new_path)  # Perform the filesystem rename operation for subdirectory
+
+
 def to_seconds(obj):
     """
     Converts various time-like objects to seconds.
