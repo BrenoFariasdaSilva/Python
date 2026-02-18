@@ -443,7 +443,14 @@ def rename_dirs():
                 new_name = " ".join(new_name.split())  # Normalize whitespace to prevent double spaces
                 new_path = subentry.parent / new_name  # Compute new path for subdirectory rename
 
-                print(f"{BackgroundColors.GREEN}Renaming subdir: '{BackgroundColors.CYAN}{subentry.name}{BackgroundColors.GREEN}' → '{BackgroundColors.CYAN}{new_name}{BackgroundColors.GREEN}'{Style.RESET_ALL}")  # Inform about the subdirectory rename
+                res_present = bool(re.search(r"\b(\d{3,4}p|4k)\b", subentry.name, re.IGNORECASE))  # Detect resolution token
+                lang_present = False  # Assume no language suffix until found
+                for s in APPEND_STRINGS:  # Iterate configured suffixes in order
+                    if re.search(rf"\b{s}\b", subentry.name, re.IGNORECASE):  # Case-insensitive whole-word match
+                        lang_present = True  # Mark language suffix present
+                        break  # Stop at first match
+                name_color = BackgroundColors.CYAN if (res_present and lang_present) else BackgroundColors.YELLOW  # Choose color
+                print(f"{BackgroundColors.GREEN}Renaming subdir: '{name_color}{subentry.name}{BackgroundColors.GREEN}' → '{BackgroundColors.CYAN}{new_name}{BackgroundColors.GREEN}'{Style.RESET_ALL}")  # Inform about the subdirectory rename
                 subentry.rename(new_path)  # Perform the filesystem rename operation for subdirectory
 
 
