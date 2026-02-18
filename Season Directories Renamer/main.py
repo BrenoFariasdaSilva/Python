@@ -72,7 +72,7 @@ class BackgroundColors:  # Colors for the terminal
 
 
 # Execution Constants:
-VERBOSE = False  # Set to True to output verbose messages
+VERBOSE = True  # Set to True to output verbose messages
 INPUT_DIR = Path("E:/Series")  # The input directory containing the season folders
 APPEND_STRINGS = ["Legendado", "Dual", "Dublado", "English"]  # User-defined suffixes for renaming
 TMDB_BASE_URL = "https://api.themoviedb.org/3"  # Base URL for TMDb API
@@ -503,7 +503,7 @@ def rename_dirs():
     """
 
     api_key = load_api_key()  # Load TMDb API key from environment before processing directories
-    # Prepare a strict formatted-folder regex using configured suffixes
+
     suffix_group = "|".join([re.escape(s) for s in APPEND_STRINGS])  # Build alternation group from APPEND_STRINGS
     formatted_pattern = rf"^Season\s(?P<season>\d{{2}})\s(?P<year>\d{{4}})(?:\s(?P<resolution>\d{{3,4}}p|4k))?(?:\s(?P<suffix>{suffix_group}))?$"  # Strict formatted folder regex
 
@@ -519,15 +519,15 @@ def rename_dirs():
             season_str = f"{season_num:02d}"  # Format season number as two digits
 
             year = None  # Initialize year variable before lookup
-            # Check if the current folder is already strictly formatted
+
             formatted_match = re.match(formatted_pattern, entry.name, re.IGNORECASE)  # Match strict formatted pattern against folder name (case-insensitive)
+            
             if formatted_match:  # If folder already matches strict format
                 existing_season = formatted_match.group("season")  # Extract existing zero-padded season string
                 existing_year = formatted_match.group("year")  # Extract existing year string
                 existing_resolution = formatted_match.group("resolution")  # Extract existing optional resolution string
                 existing_suffix = formatted_match.group("suffix")  # Extract existing optional suffix string
 
-                # Validate numeric values for season and year
                 try:  # Try to convert existing year to int for validation
                     existing_year_int = int(existing_year)  # Convert the existing year to integer
                 except Exception:  # Conversion failed, treat as invalid format
@@ -540,6 +540,7 @@ def rename_dirs():
 
                 if existing_year_int is not None and existing_season_int is not None:  # Only proceed when both parse as integers
                     series_lookup_name = series_name or entry.parent.name  # Prefer parsed series_name, fallback to parent directory name
+                    
                     try:  # Attempt to verify year with TMDb API
                         series_id_chk = get_series_id(api_key, series_lookup_name)  # Lookup series id for verification
                         api_year = get_season_year(api_key, series_id_chk, existing_season_int)  # Fetch year from API for existing season
@@ -550,17 +551,22 @@ def rename_dirs():
                     if api_year is not None and str(api_year) == str(existing_year_int):  # If API year matches existing year exactly
                         verbose_output(f"{BackgroundColors.YELLOW}Skipping (already correctly formatted): {entry.name}{Style.RESET_ALL}")  # Inform user that folder is already correct
                         continue  # Skip renaming since folder is already correct
+                    
                     if api_year is not None and str(api_year) != str(existing_year_int):  # If API year differs, correct the year in the folder name
                         corrected_name = f"Season {existing_season} {int(api_year)}"  # Build corrected name with new year
+                        
                         if existing_resolution:  # Preserve existing resolution when present
                             corrected_name = f"{corrected_name} {existing_resolution}"  # Append resolution after year
+                        
                         if existing_suffix:  # If an allowed suffix was present, preserve it
                             corrected_name = f"{corrected_name} {existing_suffix}"  # Append the existing suffix
+                        
                         corrected_name = " ".join(corrected_name.split())  # Normalize whitespace
                         corrected_path = entry.parent / corrected_name  # Compute corrected path
                         print(f"{BackgroundColors.GREEN}Correcting year: '{entry.name}' → '{corrected_name}'{Style.RESET_ALL}")  # Inform about correction
                         entry.rename(corrected_path)  # Perform rename to corrected year
                         continue  # Continue to next entry after correction
+                    
             try:  # Attempt TMDb lookups which may raise exceptions
                 series_id = get_series_id(api_key, series_name)  # Fetch TMDb series id by name
                 year = get_season_year(api_key, series_id, season_num)  # Fetch season year using series id
@@ -568,6 +574,7 @@ def rename_dirs():
                 print(f"{BackgroundColors.RED}Error fetching year for {series_name} S{season_str}: {e}{Style.RESET_ALL}")  # Print error message when lookup fails
 
             valid_year = None  # Assume invalid until proven otherwise
+            
             if year is not None:  # Only attempt conversion when year is not None
                 try:  # Attempt to coerce year to int
                     valid_year = int(year)  # Convert year to integer
@@ -579,6 +586,7 @@ def rename_dirs():
                 continue  # Continue to next entry without renaming
 
             append_str = None  # Default to no suffix
+            
             for s in APPEND_STRINGS:  # Iterate in configured order
                 if re.search(rf"\b{s}\b", entry.name, re.IGNORECASE):  # Case-insensitive whole-word match
                     append_str = s  # Select the first matching configured suffix
@@ -602,8 +610,10 @@ def rename_dirs():
                         break  # Stop after the first match
 
                 name_parts = ["Season", season_str, str(valid_year)]  # Base parts
+                
                 if res_token:  # Insert resolution if present in original
                     name_parts.append(res_token)  # Preserve original casing for resolution
+                    
                 if append_str:  # Append suffix only when present
                     name_parts.append(append_str)  # Append selected suffix
 
@@ -612,6 +622,7 @@ def rename_dirs():
 
             new_name = standardize_final_name(new_name)  # Apply capitalization rules
             new_name = " ".join(new_name.split())  # Normalize whitespace again
+            
             for subentry in entry.iterdir():  # Iterate over subentries inside the directory
                 if not subentry.is_dir():  # Skip non-directory subentries such as files
                     continue  # Continue to next subentry when current one is not a directory
@@ -622,13 +633,13 @@ def rename_dirs():
                     series_name, season_num, resolution = parsed_sub  # Unpack parsed metadata for subdirectory
                 else:  # Fallback: detect 'Season <number>' pattern in subdirectory name and infer series from parent
                     season_match = re.search(r"Season\s+(?P<num>\d{1,2})", subentry.name, re.IGNORECASE)  # Match 'Season <number>' case-insensitively
+                    
                     if not season_match:  # If no season-style pattern found in subdirectory name
                         print(f"{BackgroundColors.YELLOW}Skipping (no match in subdir): {subentry.name}{Style.RESET_ALL}")  # Inform about skipped subdirectory
                         continue  # Continue to next subentry when parsing fails
 
                     season_num = int(season_match.group("num"))  # Convert extracted season number to integer
 
-                    # Detect numeric resolution in subdirectory name (e.g., '720' or '1080' or '720p')
                     res_search = re.search(r"\b(?P<res>\d{3,4}p?)\b", subentry.name, re.IGNORECASE)  # Search for resolution token
                     if res_search:  # If resolution token found
                         res_digits = re.sub(r"\D", "", res_search.group("res"))  # Strip non-digits to leave digits only
@@ -641,19 +652,20 @@ def rename_dirs():
                 season_str = f"{season_num:02d}"  # Format season number as two digits for subdirectory
 
                 year = None  # Initialize year variable before lookup
-                # Check if subdirectory is already strictly formatted
+
                 formatted_match_sub = re.match(formatted_pattern, subentry.name, re.IGNORECASE)  # Match strict formatted pattern against subdirectory name (case-insensitive)
+                
                 if formatted_match_sub:  # If the subdirectory already matches strict format
                     existing_season = formatted_match_sub.group("season")  # Extract existing zero-padded season string from subdir
                     existing_year = formatted_match_sub.group("year")  # Extract existing year string from subdir
                     existing_resolution = formatted_match_sub.group("resolution")  # Extract existing optional resolution string from subdir
                     existing_suffix = formatted_match_sub.group("suffix")  # Extract existing optional suffix string from subdir
 
-                    # Validate numeric season/year values
                     try:  # Try convert existing year to int
                         existing_year_int = int(existing_year)  # Convert to integer
                     except Exception:  # Conversion failed
                         existing_year_int = None  # Mark invalid
+                    
                     try:  # Try convert existing season to int
                         existing_season_int = int(existing_season)  # Convert to integer
                     except Exception:  # Conversion failed
@@ -661,6 +673,7 @@ def rename_dirs():
 
                     if existing_year_int is not None and existing_season_int is not None:  # Only when both valid integers
                         series_lookup_name = series_name or entry.name  # Prefer parsed series_name, fallback to parent directory name for subdir
+                        
                         try:  # Attempt to verify year with TMDb API for subdir
                             series_id_chk = get_series_id(api_key, series_lookup_name)  # Lookup series id for verification
                             api_year = get_season_year(api_key, series_id_chk, existing_season_int)  # Fetch year from API for existing season
@@ -671,17 +684,22 @@ def rename_dirs():
                         if api_year is not None and str(api_year) == str(existing_year_int):  # API year matches existing year
                             verbose_output(f"{BackgroundColors.YELLOW}Skipping (already correctly formatted): {subentry.name}{Style.RESET_ALL}")  # Inform that subdir is already correct
                             continue  # Skip renaming for this subdirectory
+                        
                         if api_year is not None and str(api_year) != str(existing_year_int):  # API year differs from folder year
                             corrected_name = f"Season {existing_season} {int(api_year)}"  # Build corrected name with new year
+                            
                             if existing_resolution:  # Preserve existing resolution when present
                                 corrected_name = f"{corrected_name} {existing_resolution}"  # Append resolution after year
+                            
                             if existing_suffix:  # Preserve existing suffix when present
                                 corrected_name = f"{corrected_name} {existing_suffix}"  # Append suffix
+                            
                             corrected_name = " ".join(corrected_name.split())  # Normalize whitespace
                             corrected_path = subentry.parent / corrected_name  # Compute corrected path
                             print(f"{BackgroundColors.GREEN}Correcting year: '{subentry.name}' → '{corrected_name}'{Style.RESET_ALL}")  # Inform about correction
                             subentry.rename(corrected_path)  # Perform rename to corrected year for subdirectory
                             continue  # Continue to next subentry after correction
+                        
                 try:  # Attempt TMDb lookups for the subdirectory using resolved series_name and season_num
                     series_id = get_series_id(api_key, series_name)  # Fetch TMDb series id by name for subdir
                     year = get_season_year(api_key, series_id, season_num)  # Fetch season year for subdir
@@ -701,6 +719,7 @@ def rename_dirs():
 
                 res_match_sub = re.search(r"\b(\d{3,4}p|4k)\b", subentry.name, re.IGNORECASE)  # Find resolution token
                 res_token_sub = res_match_sub.group(0) if res_match_sub else None  # Preserve matched token or None
+                
                 if not res_token_sub:  # If no resolution token in subdirectory name
                     res_token_sub = get_resolution_from_first_video(subentry)  # Probe first video file for resolution
 
