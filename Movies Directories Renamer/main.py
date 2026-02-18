@@ -576,371 +576,130 @@ def rename_dirs():
     Iterates through the INPUT_DIRS, extracts metadata, fetches the release year from TMDb,
     and renames each directory according to the defined pattern.
 
-    If a directory does not match the regex pattern (i.e., missing season/resolution info),
-    the script assumes it contains season subdirectories and processes those instead.
-
     :return: None
     """
-
+    
     api_key = load_api_key()  # Load TMDb API key from environment before processing directories
-    suffix_group = "|".join([re.escape(s) for s in LANGUAGE_OPTIONS])  # Build alternation group from LANGUAGE_OPTIONS
-    formatted_pattern = rf"^Season\s(?P<season>\d{{2}})\s(?P<year>\d{{4}})(?:\s(?P<resolution>\d{{3,4}}p|4k))?(?:\s(?P<suffix>{suffix_group}))?$"  # Strict formatted folder regex
 
-    roots = INPUT_DIRS if isinstance(INPUT_DIRS, (list, tuple)) else [INPUT_DIRS]  # Normalize INPUT_DIRS to a list of paths
-    
-    entries = []  # Build list of directory entries only across all configured roots
-    
-    for root in roots:  # Iterate each configured root path
-        root_path = Path(root)  # Convert to Path object for consistent handling
-        if not root_path.exists():  # Check if the root path exists before processing
-            verbose_output(f"{BackgroundColors.YELLOW}Input path not found, skipping: {BackgroundColors.CYAN}{root_path}{Style.RESET_ALL}")
-            continue
-        try:  # Guard against any error when reading the directory contents
-            for p in root_path.iterdir():  # Iterate entries in the root directory
-                if p.is_dir():  # Only consider directories for processing, skip files at this stage
-                    entries.append(p)  # Add directory entry to the list for later processing
-        except Exception:
-            # If a particular input root can't be read, skip it and continue with others
-            verbose_output(f"{BackgroundColors.YELLOW}Cannot read input path, skipping: {BackgroundColors.CYAN}{root_path}{Style.RESET_ALL}")
-            continue
-        
-    total = len(entries)  # Compute total number of directories to process
-    
-    for idx, entry in enumerate(entries, start=1):  # Iterate with index and entry
-        print(f"{BackgroundColors.GREEN}Processing {BackgroundColors.CYAN}{idx}{BackgroundColors.GREEN}/{BackgroundColors.CYAN}{total}{BackgroundColors.GREEN}: {BackgroundColors.CYAN}{entry.name}{Style.RESET_ALL}")  # Output index/total and entry name
-        if not entry.is_dir():  # Skip non-directory entries such as files
-            continue  # Continue to next entry when current one is not a directory
+    for root in INPUT_DIRS:  # Process each input root independently per requirements
+        root_path = Path(root)  # Convert root to Path object for consistent handling
+        if not root_path.exists():  # If the configured root does not exist
+            verbose_output(f"{BackgroundColors.YELLOW}Input path not found, skipping: {BackgroundColors.CYAN}{root_path}{Style.RESET_ALL}")  # Verbose notification when skipping
+            continue  # Continue to next root when this one is missing
 
-        if re.match(IGNORE_DIR_REGEX, entry.name.strip()):  # Skip configured ignore directories at top-level
-            verbose_output(f"{BackgroundColors.YELLOW}Ignoring top-level directory: {entry.name}{Style.RESET_ALL}")  # Verbose notification when skipping
-            continue  # Continue to next entry when current one is an ignored directory
+        try:  # Attempt to list directories inside the current root safely
+            entries = [p for p in sorted(root_path.iterdir()) if p.is_dir()]  # Deterministic, directories only
+        except Exception:  # If listing fails for this root
+            verbose_output(f"{BackgroundColors.YELLOW}Cannot read input path, skipping: {BackgroundColors.CYAN}{root_path}{Style.RESET_ALL}")  # Verbose notification when skip
+            continue  # Continue to next root on error
 
-        parsed = parse_dir_name(entry.name)  # Try parsing the directory name for season metadata
+        total = len(entries)  # Compute number of movie directories in this root
 
-        if parsed:  # Case 1: The directory name contains season and resolution info
-            series_name, season_num, resolution = parsed  # Unpack parsed metadata tuple
-            season_str = f"{season_num:02d}"  # Format season number as two digits
+        for idx, entry in enumerate(entries, start=1):  # Iterate directories inside this root with index
+            print(f"{BackgroundColors.GREEN}Processing {BackgroundColors.CYAN}{idx}{BackgroundColors.GREEN}/{BackgroundColors.CYAN}{total}{BackgroundColors.GREEN}: {BackgroundColors.CYAN}{entry.name}{Style.RESET_ALL}")  # Print progress line
+            if not entry.is_dir():  # Skip non-directories defensively
+                continue  # Continue to next entry when current one is not a directory
 
-            formatted_match = re.match(formatted_pattern, entry.name, re.IGNORECASE)  # Match strict formatted pattern against folder name (case-insensitive)
-            if formatted_match:  # If folder already matches strict format
-                existing_season = formatted_match.group("season")  # Extract existing season string
-                existing_season = format_season_num(existing_season)  # Normalize to two digits
-                existing_year = formatted_match.group("year")  # Extract existing year string
-                existing_resolution = formatted_match.group("resolution")  # Extract existing optional resolution string
-                existing_suffix = formatted_match.group("suffix")  # Extract existing optional suffix string
+            if re.match(IGNORE_DIR_REGEX, entry.name.strip()):  # Skip known ignore directories
+                verbose_output(f"{BackgroundColors.YELLOW}Ignoring top-level directory: {entry.name}{Style.RESET_ALL}")  # Verbose notification when skipping
+                continue  # Continue to next entry when current one is ignored
 
-                try:  # Try to convert existing year to int for validation
-                    existing_year_int = int(existing_year)  # Convert the existing year to integer
-                except Exception:  # Conversion failed, treat as invalid format
-                    existing_year_int = None  # Mark as invalid
+            # Step 1: Extract language token if present (must be last token) without inventing one
+            append_lang = None  # Default to None when absent
+            for s in LANGUAGE_OPTIONS:  # Iterate canonical language options
+                if re.search(rf"\b{s}\b", entry.name, re.IGNORECASE):  # Detect whole-word match case-insensitively
+                    append_lang = s  # Use canonical form
+                    break  # Stop after first match
 
-                try:  # Try to convert existing season to int for validation
-                    existing_season_int = int(existing_season)  # Convert existing season to integer
-                except Exception:  # Conversion failed, treat as invalid format
-                    existing_season_int = None  # Mark as invalid
+            # Step 2: Extract resolution token from name (including 4K conversion)
+            res_match = re.search(r"\b(\d{3,4}p|4k)\b", entry.name, re.IGNORECASE)  # Search for resolution token
+            res_token = res_match.group(0) if res_match else None  # Preserve matched token or None
+            if res_token and res_token.lower() == "4k":  # Convert 4K to 2160p per rules
+                res_token = "2160p"  # Use canonical 2160p
 
-                if existing_year_int is not None and existing_season_int is not None:  # Only proceed when both parse as integers
-                    series_lookup_name = series_name or entry.parent.name  # Prefer parsed series_name, fallback to parent directory name
-                    try:  # Attempt to verify year with TMDb API
-                        series_id_chk = get_series_id(api_key, series_lookup_name)  # Lookup series id for verification
-                        api_year = get_season_year(api_key, series_id_chk, existing_season_int)  # Fetch year from API for existing season
-                    except Exception as e:  # API lookup failed, cannot safely decide to rename
-                        api_year = None  # Mark API year as unavailable
+            # Step 3: Extract year token (4 digits) from folder name if present
+            year_match = re.search(r"\b(19|20)\d{2}\b", entry.name)  # Year regex
+            existing_year = year_match.group(0) if year_match else None  # Existing year string or None
 
-                    if api_year is not None and str(api_year) == str(existing_year_int):  # If API year matches existing year exactly
-                        verbose_output(f"{BackgroundColors.YELLOW}Skipping (already correctly formatted): {entry.name}{Style.RESET_ALL}")  # Inform user that folder is already correct
-                        continue  # Skip renaming since folder is already correct
+            # Step 4: Clean movie title by removing year/resolution/language tokens and brackets
+            name_work = entry.name  # Work on a copy of the original name
+            if append_lang:  # Remove language token when present
+                name_work = re.sub(rf"\b{re.escape(append_lang)}\b", "", name_work, flags=re.IGNORECASE)  # Strip language token
+            if res_match:  # Remove resolution token when present in name
+                name_work = re.sub(re.escape(res_match.group(0)), "", name_work, flags=re.IGNORECASE)  # Strip resolution token
+            
+            name_work = re.sub(r"\((\d{4})\)", r"\1", name_work)  # Unwrap parenthesized year
+            if existing_year:  # Remove a bare year token once to avoid duplicates
+                name_work = re.sub(re.escape(existing_year), "", name_work, count=1)  # Remove first occurrence of year
+            
+            name_work = re.sub(r"[._]+", " ", name_work)  # Replace dots/underscores with space
+            movie_title = " ".join(name_work.split()).strip()  # Normalize whitespace and trim edges
+            if not movie_title:  # If title becomes empty after cleaning
+                verbose_output(f"{BackgroundColors.YELLOW}Skipping (empty title after cleanup): {entry.name}{Style.RESET_ALL}")  # Inform skip case
+                continue  # Continue to next entry when title can't be derived
 
-                    if api_year is not None and str(api_year) != str(existing_year_int):  # If API year differs, correct the year in the folder name
-                        part_match_existing = re.search(r"\b(?P<label>part|pt|volume|vol|cour|arc)\b\.?\s*(?P<num>[A-Za-z0-9]+)\b", entry.name, re.IGNORECASE)  # Detect existing part token
-                        if part_match_existing:  # If an existing part token exists
-                            part_label_existing = part_match_existing.group("label")  # Extract existing label
-                            part_num_existing = part_match_existing.group("num")  # Extract existing number/alpha
-                            existing_part_token = f"{part_label_existing.capitalize()} {part_num_existing}"  # Standardize existing part token
-                        else:  # No existing part token
-                            existing_part_token = None  # Ensure None when absent
-                        corrected_name = f"Season {existing_season} {int(api_year)}"  # Build corrected name with new year
-                        if existing_part_token:  # If a part token should be preserved
-                            corrected_name = f"{corrected_name} {existing_part_token}"  # Append part token after year
-                        if existing_resolution:  # Preserve existing resolution when present
-                            corrected_name = f"{corrected_name} {existing_resolution}"  # Append resolution after year/part
-                        if existing_suffix:  # If an allowed suffix was present, preserve it
-                            corrected_name = f"{corrected_name} {existing_suffix}"  # Append the existing suffix
-                        corrected_name = " ".join(corrected_name.split())  # Normalize whitespace
-                        corrected_path = entry.parent / corrected_name  # Compute corrected path
-                        print(f"{BackgroundColors.GREEN}Correcting year: '{entry.name}' → '{corrected_name}'{Style.RESET_ALL}")  # Inform about correction
-                        entry.rename(corrected_path)  # Perform rename to corrected year
-                        continue  # Continue to next entry after correction
+            # Step 5: Verify/fetch correct year via TMDb (non-blocking)
+            tmdb_year = None  # Default when lookup fails
+            try:  # Protect API call with try/except to avoid crash
+                tmdb_year = get_movie_year(api_key, movie_title)  # Query TMDb for movie year
+            except Exception as e:  # Any unexpected exception from helper
+                print(f"{BackgroundColors.RED}TMDb lookup error for '{movie_title}': {e}{Style.RESET_ALL}")  # Log error but continue processing
+                tmdb_year = None  # Ensure non-blocking behavior
 
-            try:  # Attempt TMDb lookups which may raise exceptions
-                series_id = get_series_id(api_key, series_name)  # Fetch TMDb series id by name
-                year = get_season_year(api_key, series_id, season_num)  # Fetch season year using series id
-            except Exception as e:  # Catch any exception from TMDb calls
-                print(f"{BackgroundColors.RED}Error fetching year for {series_name} S{season_str}: {e}{Style.RESET_ALL}")  # Print error message when lookup fails
-                year = None  # Mark year as unavailable after error
+            # Decide which year to use following rules: prefer TMDb when available, else keep existing year
+            final_year = None  # Final year to insert into name
+            if tmdb_year:  # If TMDb returned a year
+                final_year = tmdb_year  # Prefer the TMDb value
+            elif existing_year:  # Else fall back to folder-provided year when present
+                final_year = existing_year  # Use existing year
 
-            valid_year = None  # Assume invalid until proven otherwise
-            if year is not None:  # Only attempt conversion when year is not None
-                try:  # Attempt to coerce year to int
-                    valid_year = int(year)  # Convert year to integer
-                except Exception:  # Conversion failed, mark as invalid
-                    valid_year = None  # Ensure invalid status
+            # Step 6: If resolution missing, attempt to probe first video file (non-blocking)
+            if not res_token:  # Only probe when resolution not found in folder name
+                try:  # Protect filesystem/ffprobe calls from bubbling errors
+                    probed = get_resolution_from_first_video(entry)  # Probe the first video file for resolution
+                except Exception:  # Any probing error should not abort processing
+                    probed = None  # Treat as unavailable
+                if probed and probed.lower() == "4k":  # Convert probed 4K token to 2160p
+                    probed = "2160p"  # Normalize 4K to 2160p
+                res_token = probed or res_token  # Use probed value when present, else keep previous
 
-            existing_year_int = locals().get('existing_year_int', None)  # Safely fetch existing year int if present
-            if valid_year is None and existing_year_int is not None:  # If TMDb didn't provide a year but folder had one
-                valid_year = existing_year_int  # Use the existing year instead of aborting
+            # Step 7: Rebuild the final name strictly as 'MovieName Year Resolution Language' (omit missing tokens)
+            parts = [movie_title]  # Start with cleaned movie title
+            if final_year:  # Append year when available
+                parts.append(str(final_year))  # Year must be 4 digits when present
+            if res_token:  # Append resolution when available
+                parts.append(res_token)  # Resolution token (e.g., 1080p)
+            if append_lang:  # Append language when present
+                parts.append(append_lang)  # Language must always be last token
 
-            res_token = determine_resolution(entry, entry.name)  # Determine resolution for this season folder
+            new_name = " ".join(parts).strip()  # Join parts and trim edges
+            new_name = " ".join(new_name.split())  # Normalize internal whitespace
+            new_name = standardize_final_name(new_name)  # Apply canonical normalization rules
+            new_name = " ".join(new_name.split())  # Normalize whitespace again after standardization
 
-            part_match = re.search(r"\b(?P<label>part|pt|volume|vol|cour|arc)\b\.?\s*(?P<num>[A-Za-z0-9]+)\b", entry.name, re.IGNORECASE)  # Detect part/segment tokens
-            if part_match:  # If a part token was found
-                part_label = part_match.group("label")  # Extract matched label token
-                part_num = part_match.group("num")  # Extract matched numeric/alpha part token
-                part_token = f"{part_label.capitalize()} {part_num}"  # Standardize casing and build token
-            else:  # No part token found
-                part_token = None  # Ensure part_token is None when absent
-
-            append_str = None  # Default to no suffix
-            for s in LANGUAGE_OPTIONS:  # Iterate in configured order to detect suffix
-                if re.search(rf"\b{s}\b", entry.name, re.IGNORECASE):  # Case-insensitive whole-word match
-                    append_str = s  # Select the first matching configured suffix
-                    break  # Stop after the first match
-
-            name_parts = ["Season", season_str]  # Base parts for new name (year optional)
-            if valid_year is not None:  # Append year only when available
-                name_parts.append(str(valid_year))  # Add year token when present
-            if part_token:  # Insert part token after year when present
-                name_parts.append(part_token)  # Preserve standardized part token
-            if res_token:  # Insert resolution if present in original
-                name_parts.append(res_token)  # Preserve original casing for resolution
-            if append_str:  # Append suffix only when present
-                name_parts.append(append_str)  # Append selected suffix
-
-            new_name = " ".join(name_parts).strip()  # Join parts and trim edges
-            new_name = " ".join(new_name.split())  # Collapse multiple internal spaces
-            new_name = standardize_final_name(new_name)  # Apply capitalization rules
-            new_name = " ".join(new_name.split())  # Normalize whitespace again
-            new_path = entry.parent / new_name  # Compute new path for the top-level directory rename
-
-            if new_name == entry.name:  # If name is already correct, skip renaming
-                verbose_output(f"{BackgroundColors.YELLOW}Skipping (already named): {entry.name}{Style.RESET_ALL}")  # Inform skip
+            # Step 8: Detect differences and decide renaming action
+            if new_name == entry.name:  # If nothing changed compared to original name
+                verbose_output(f"{BackgroundColors.YELLOW}Skipping (already named): {entry.name}{Style.RESET_ALL}")  # Inform skip case
                 continue  # Continue to next entry
-            
-            change_desc = detect_changes(entry.name, new_name)  # Detect descriptive change tags
-            if not change_desc:  # If detect_changes returned empty, nothing to do
-                verbose_output(f"{BackgroundColors.YELLOW}Skipping (no detected meaningful change): {entry.name}{Style.RESET_ALL}")  # Inform skip
+
+            change_desc = detect_changes(entry.name, new_name)  # Compute a human-readable list of changes
+            if not change_desc:  # If no meaningful changes detected
+                verbose_output(f"{BackgroundColors.YELLOW}Skipping (no detected meaningful change): {entry.name}{Style.RESET_ALL}")  # Inform skip case
                 continue  # Continue to next entry
-            
-            res_present = bool(res_token)  # Detect presence of resolution token
-            lang_present = bool(append_str)  # Detect presence of language suffix
-            name_color = BackgroundColors.CYAN if (res_present and lang_present) else BackgroundColors.YELLOW  # Choose color
-            
+
             print(
-                f"{BackgroundColors.GREEN}Renaming subdir "  # Start message
+                f"{BackgroundColors.GREEN}Renaming "  # Start message
                 f"({change_desc}): "  # Show change tags
                 f"'{BackgroundColors.CYAN}{entry.name}{BackgroundColors.GREEN}' → "  # Old name
                 f"'{BackgroundColors.CYAN}{new_name}{BackgroundColors.GREEN}'"  # New name
                 f"{Style.RESET_ALL}"
             )  # Formatted rename output
-            entry.rename(new_path)  # Perform the filesystem rename operation for the top-level directory
+            try:  # Attempt filesystem rename operation under try/except
+                entry.rename(entry.parent / new_name)  # Perform the filesystem rename operation for the movie folder
+            except Exception as e:  # If rename fails, log error but continue processing
+                print(f"{BackgroundColors.RED}Failed to rename '{entry.name}' → '{new_name}': {e}{Style.RESET_ALL}")  # Inform about failure
 
-        else:  # Case 2: The directory likely contains season subdirectories, scan them here
-            verbose_output(f"{BackgroundColors.YELLOW}No season info found for '{entry.name}'. Scanning subdirectories...{Style.RESET_ALL}")  # Inform user about scanning
-            for subentry in entry.iterdir():  # Iterate over subentries inside the top-level directory
-                if not subentry.is_dir():  # Skip non-directory subentries such as files
-                    continue  # Continue to next subentry when current one is not a directory
-
-                if re.match(IGNORE_DIR_REGEX, subentry.name.strip()):  # Skip configured ignore subdirectories inside series folders
-                    verbose_output(f"{BackgroundColors.YELLOW}Ignoring subdirectory: {subentry.name}{Style.RESET_ALL}")  # Verbose notification when skipping
-                    continue  # Continue to next subentry when current one is an ignored directory
-
-                parsed_sub = parse_dir_name(subentry.name)  # Attempt to parse subdirectory name using generic parser
-                if parsed_sub:  # If parser returned a tuple, use it directly
-                    series_name_sub, season_num_sub, resolution_sub = parsed_sub  # Unpack parsed metadata for subdirectory
-                else:  # Fallback: detect 'Season <number>' pattern in subdirectory name and infer series from parent
-                    season_match = re.search(r"Season\s+(?P<num>\d{1,2})", subentry.name, re.IGNORECASE)  # Match 'Season <number>' case-insensitively
-                    if not season_match:  # If no season-style pattern found in subdirectory name
-                        print(f"{BackgroundColors.YELLOW}Skipping (no match in subdir): {subentry.name}{Style.RESET_ALL}")  # Inform about skipped subdirectory
-                        continue  # Continue to next subentry when parsing fails
-                    season_num_sub = int(season_match.group("num"))  # Convert extracted season number to integer
-                    res_search = re.search(r"\b(?P<res>\d{3,4}p?)\b", subentry.name, re.IGNORECASE)  # Search for resolution token
-                    if res_search:  # If resolution token found
-                        res_digits = re.sub(r"\D", "", res_search.group("res"))  # Strip non-digits to leave digits only
-                        resolution_sub = f"{res_digits}p"  # Normalize to '<digits>p' format
-                    else:  # No resolution token found for this subdirectory
-                        resolution_sub = None  # Use None when no resolution is present
-                    series_name_sub = entry.name  # Infer series name from parent directory name
-
-                season_str_sub = f"{season_num_sub:02d}"  # Format season number as two digits for subdirectory
-
-                formatted_match_sub = re.match(formatted_pattern, subentry.name, re.IGNORECASE)  # Match strict formatted pattern against subdirectory name (case-insensitive)
-                if formatted_match_sub:  # If the subdirectory already matches strict format
-                    existing_season = formatted_match_sub.group("season")  # Extract existing season string from subdir
-                    existing_season = format_season_num(existing_season)  # Normalize to two digits
-                    existing_year = formatted_match_sub.group("year")  # Extract existing year string from subdir
-                    existing_resolution = formatted_match_sub.group("resolution")  # Extract existing optional resolution string from subdir
-                    existing_suffix = formatted_match_sub.group("suffix")  # Extract existing optional suffix string from subdir
-                    try:  # Try convert existing year to int
-                        existing_year_int = int(existing_year)  # Convert to integer
-                    except Exception:  # Conversion failed
-                        existing_year_int = None  # Mark invalid
-                    try:  # Try convert existing season to int
-                        existing_season_int = int(existing_season)  # Convert to integer
-                    except Exception:  # Conversion failed
-                        existing_season_int = None  # Mark invalid
-
-                    if existing_year_int is not None and existing_season_int is not None:  # Only when both valid integers
-                        series_lookup_name = series_name_sub or entry.name  # Prefer parsed series_name_sub, fallback to parent directory name for subdir
-                        try:  # Attempt to verify year with TMDb API for subdir
-                            series_id_chk = get_series_id(api_key, series_lookup_name)  # Lookup series id for verification
-                            api_year = get_season_year(api_key, series_id_chk, existing_season_int)  # Fetch year from API for existing season
-                        except Exception as e:  # API lookup failed for subdir
-                            print(f"{BackgroundColors.RED}Error verifying year for {series_lookup_name} S{existing_season}: {e}{Style.RESET_ALL}")  # Inform about verification error
-                            api_year = None  # Mark API year as unavailable
-
-                        if api_year is not None and str(api_year) == str(existing_year_int):  # API year matches existing year
-                            series_prefix = entry.name.strip()  # Series name from parent for Case 2
-                            expected_prefix = f"{series_prefix} - "  # Exact prefix pattern required
-                            if subentry.name.startswith(expected_prefix):  # If subdir already has correct prefix
-                                verbose_output(f"{BackgroundColors.YELLOW}Skipping (already correctly formatted): {subentry.name}{Style.RESET_ALL}")  # Inform that subdir is already correct
-                                continue  # Skip renaming for this subdirectory
-                            stripped = re.sub(rf"^{re.escape(series_prefix)}\s*-?\s*", "", subentry.name).strip()  # Remove any malformed leading series tokens
-                            prefixed_name = f"{expected_prefix}{stripped}"  # Build new name with exact separator
-                            prefixed_name = " ".join(prefixed_name.split())  # Normalize whitespace to avoid double spaces
-                            new_path = subentry.parent / prefixed_name  # Compute final path for prefixed rename
-                            
-                            change_desc = detect_changes(subentry.name, prefixed_name)  # Compute tags
-                            if change_desc:  # If tags present, print structured message and rename
-                                print(
-                                    f"{BackgroundColors.GREEN}Renaming subdir "  # Start message
-                                    f"({change_desc}): "  # Show change tags
-                                    f"'{BackgroundColors.CYAN}{subentry.name}{BackgroundColors.GREEN}' → "  # Old name
-                                    f"'{BackgroundColors.CYAN}{prefixed_name}{BackgroundColors.GREEN}'"  # New name
-                                    f"{Style.RESET_ALL}"
-                                )  # Formatted rename output
-                                subentry.rename(new_path)  # Perform rename to add prefix
-                            else:  # No meaningful tags found, verbose skip
-                                verbose_output(f"{BackgroundColors.YELLOW}Skipping (no detected meaningful change): {subentry.name}{Style.RESET_ALL}")  # Inform skip
-                            continue  # Continue to next subentry after prefixing
-
-                        if api_year is not None and str(api_year) != str(existing_year_int):  # API year differs from folder year
-                            part_match_existing = re.search(r"\b(?P<label>part|pt|volume|vol|cour|arc)\b\.?\s*(?P<num>[A-Za-z0-9]+)\b", subentry.name, re.IGNORECASE)  # Detect existing part token in subdir
-                            if part_match_existing:  # If an existing part token exists in subdir
-                                part_label_existing = part_match_existing.group("label")  # Extract existing label
-                                part_num_existing = part_match_existing.group("num")  # Extract existing number/alpha
-                                existing_part_token = f"{part_label_existing.capitalize()} {part_num_existing}"  # Standardize existing part token
-                            else:  # No existing part token in subdir
-                                existing_part_token = None  # Ensure None when absent
-                            corrected_name = f"Season {existing_season} {int(api_year)}"  # Build corrected name with new year
-                            if existing_part_token:  # If a part token should be preserved
-                                corrected_name = f"{corrected_name} {existing_part_token}"  # Append part token after year
-                            if existing_resolution:  # Preserve existing resolution when present
-                                corrected_name = f"{corrected_name} {existing_resolution}"  # Append resolution after year/part
-                            if existing_suffix:  # Preserve existing suffix when present
-                                corrected_name = f"{corrected_name} {existing_suffix}"  # Append suffix
-                            corrected_name = " ".join(corrected_name.split())  # Normalize whitespace
-                            corrected_path = subentry.parent / corrected_name  # Compute corrected path
-                            
-                            change_desc = detect_changes(subentry.name, corrected_name)  # Compute tags
-                            if change_desc:  # If tags present, print structured message and rename
-                                print(
-                                    f"{BackgroundColors.GREEN}Renaming subdir "  # Start message
-                                    f"({change_desc}): "  # Show change tags
-                                    f"'{BackgroundColors.CYAN}{subentry.name}{BackgroundColors.GREEN}' → "  # Old name
-                                    f"'{BackgroundColors.CYAN}{corrected_name}{BackgroundColors.GREEN}'"  # New name
-                                    f"{Style.RESET_ALL}"
-                                )  # Formatted rename output
-                                subentry.rename(corrected_path)  # Perform the filesystem rename to corrected year for subdirectory
-                            else:  # No meaningful tags found
-                                verbose_output(f"{BackgroundColors.YELLOW}Skipping (no detected meaningful change): {subentry.name}{Style.RESET_ALL}")  # Inform skip
-                            continue  # Continue to next subentry after correction
-
-                try:  # Attempt TMDb lookups for the subdirectory using resolved series_name_sub and season_num_sub
-                    series_id = get_series_id(api_key, series_name_sub)  # Fetch TMDb series id by name for subdir
-                    year = get_season_year(api_key, series_id, season_num_sub)  # Fetch season year for subdir
-                except Exception as e:  # Catch any exception from TMDb calls for subdir
-                    print(f"{BackgroundColors.RED}Error fetching year for {series_name_sub} S{season_str_sub}: {e}{Style.RESET_ALL}")  # Print error message when lookup fails for subdir
-                    year = None  # Mark year as unavailable after error
-
-                valid_year = None  # Assume invalid until proven otherwise
-                if year is not None:  # Only attempt conversion when year is not None
-                    try:  # Attempt to coerce year to int
-                        valid_year = int(year)  # Convert year to integer
-                    except Exception:  # Conversion failed, mark as invalid
-                        valid_year = None  # Ensure invalid status
-
-                existing_year_int = locals().get('existing_year_int', None)  # Safely fetch existing year int if present for subdir
-                if valid_year is None and existing_year_int is not None:  # If TMDb didn't provide a year but folder had one
-                    valid_year = existing_year_int  # Use the existing year instead of aborting
-
-                res_token_sub = determine_resolution(subentry, subentry.name)  # Determine resolution for this season subfolder
-
-                part_match_sub = re.search(r"\b(?P<label>part|pt|volume|vol|cour|arc)\b\.?\s*(?P<num>[A-Za-z0-9]+)\b", subentry.name, re.IGNORECASE)  # Detect part/segment tokens in subdir
-                if part_match_sub:  # If a part token was found in subdir
-                    part_label_sub = part_match_sub.group("label")  # Extract matched label token
-                    part_num_sub = part_match_sub.group("num")  # Extract matched numeric/alpha part token
-                    part_token_sub = f"{part_label_sub.capitalize()} {part_num_sub}"  # Standardize casing and build token
-                else:  # No part token found in subdir
-                    part_token_sub = None  # Ensure part_token_sub is None when absent
-
-                append_str = None  # Default to no suffix
-                for s in LANGUAGE_OPTIONS:  # Iterate in configured order
-                    if re.search(rf"\b{s}\b", subentry.name, re.IGNORECASE):  # Case-insensitive whole-word match
-                        append_str = s  # Select the first matching configured suffix
-                        break  # Stop after the first match
-
-                name_parts = ["Season", season_str_sub]  # Base parts (year optional)
-                if valid_year is not None:  # Append year only when available
-                    name_parts.append(str(valid_year))  # Add year token when present
-                if part_token_sub:  # Insert part token after year when present in subdir
-                    name_parts.append(part_token_sub)  # Preserve standardized part token for subdir
-                if res_token_sub:  # Insert resolution if present in original
-                    name_parts.append(res_token_sub)  # Preserve original casing for resolution
-                if append_str:  # Append suffix only when present
-                    name_parts.append(append_str)  # Append selected suffix
-
-                new_name = " ".join(name_parts).strip()  # Join parts and trim edges
-                new_name = " ".join(new_name.split())  # Collapse multiple internal spaces
-                new_name = standardize_final_name(new_name)  # Apply capitalization rules for subdir name
-                new_name = " ".join(new_name.split())  # Normalize whitespace again after standardization
-                series_prefix = entry.name.strip()  # Extract and trim series name from parent directory
-                expected_prefix = f"{series_prefix} - "  # Build the expected prefix pattern with exact separator
-
-                if subentry.name.startswith(expected_prefix):  # Already has correct prefix
-                    if not new_name.startswith(expected_prefix):  # If generated name lacks the prefix
-                        stripped = re.sub(rf"^{re.escape(series_prefix)}\s*-?\s*", "", new_name).strip()  # Strip any leading series tokens
-                        new_name = f"{expected_prefix}{stripped}"  # Rebuild with single correct prefix
-                else:  # Prefix not present, prepend it now for Case 2
-                    stripped = re.sub(rf"^{re.escape(series_prefix)}\s*-?\s*", "", new_name).strip()  # Strip any leading series tokens
-                    new_name = f"{expected_prefix}{stripped}"  # Prepend correct prefix
-
-                new_name = " ".join(new_name.split())  # Normalize internal whitespace to avoid double spaces
-                new_path = subentry.parent / new_name  # Compute final rename path
-
-                if new_name == subentry.name:  # If new name equals current, skip renaming
-                    verbose_output(f"{BackgroundColors.YELLOW}Skipping (already named): {subentry.name}{Style.RESET_ALL}")  # Inform skip
-                    continue  # Continue to next subentry
-
-                
-                change_desc = detect_changes(subentry.name, new_name)  # Compute tags for final rename
-                if not change_desc:  # If no meaningful changes detected
-                    verbose_output(f"{BackgroundColors.YELLOW}Skipping (no detected meaningful change): {subentry.name}{Style.RESET_ALL}")  # Inform skip
-                    continue  # Continue to next subentry
-
-                res_present = bool(res_token_sub)  # Detect presence of resolution token
-                lang_present = bool(append_str)  # Detect presence of language suffix
-                name_color = BackgroundColors.CYAN if (res_present and lang_present) else BackgroundColors.YELLOW  # Choose color
-                
-                print(
-                    f"{BackgroundColors.GREEN}Renaming subdir "  # Start message
-                    f"({change_desc}): "  # Show change tags
-                    f"'{BackgroundColors.CYAN}{subentry.name}{BackgroundColors.GREEN}' → "  # Old name
-                    f"'{BackgroundColors.CYAN}{new_name}{BackgroundColors.GREEN}'"  # New name
-                    f"{Style.RESET_ALL}"
-                )  # Formatted rename output
-                subentry.rename(new_path)  # Perform the filesystem rename operation for subdirectory
-                
-        print()  # Add single spacing after processing a top-level directory
+        print()  # Add single spacing after processing this input root
 
 
 def to_seconds(obj):
