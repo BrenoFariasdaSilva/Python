@@ -50,6 +50,7 @@ Assumptions & Notes:
 
 import atexit  # For playing a sound when the program finishes
 import datetime  # For getting the current date and time
+import json  # For writing JSON report files
 import os  # For running a command in the terminal
 import platform  # For getting the operating system name
 import re  # For parsing directory names
@@ -583,6 +584,11 @@ def rename_dirs():
     
     api_key = load_api_key()  # Load TMDb API key from environment before processing directories
 
+    report_data = {  # Initialize report_data structure before processing
+        "generated_at": None,  # Placeholder timestamp to be filled by generate_report
+        "input_dirs": {},  # Container for per-input-directory modifications
+    }  # End report_data initialization
+
     for root in INPUT_DIRS:  # Process each input root independently per requirements
         root_path = Path(root)  # Convert root to Path object for consistent handling
         if not root_path.exists():  # If the configured root does not exist
@@ -696,15 +702,77 @@ def rename_dirs():
                 f"'{BackgroundColors.CYAN}{new_name}{BackgroundColors.GREEN}'"  # New name
                 f"{Style.RESET_ALL}"
             )  # Formatted rename output
+            dir_renamed = False  # Flag to indicate whether directory rename succeeded
             try:  # Attempt filesystem rename operation under try/except
                 entry.rename(entry.parent / new_name)  # Perform the filesystem rename operation for the movie folder
+                dir_renamed = True  # Mark rename as successful when no exception is raised
             except Exception as e:  # If rename fails, log error but continue processing
                 print(f"{BackgroundColors.RED}Failed to rename '{entry.name}' → '{new_name}': {e}{Style.RESET_ALL}")  # Inform about failure
 
             target_dir = entry.parent / new_name  # Compute the expected directory path after rename
-            if not target_dir.exists():  # If the target directory isn't present
+            if not target_dir.exists():  # If the target directory isn't present after attempted rename
                 verbose_output(f"{BackgroundColors.YELLOW}Skipping video sync (dir missing): {target_dir}{Style.RESET_ALL}")  # Inform skip and continue
                 continue  # Continue to next entry when directory is absent
+
+            if dir_renamed and entry.name != new_name:  # Check that rename happened and names are different
+                root_key = str(root_path)  # Use string form of input root as dictionary key
+                if root_key not in report_data["input_dirs"]:  # Lazily create per-root entry when first change occurs
+                    report_data["input_dirs"][root_key] = {  # Initialize per-root structure
+                        "directories_modified": [],  # List to hold directory modifications
+                        "video_files_renamed": [],  # List to hold video rename records
+                    }  # End initialization
+
+                labels = []  # Collect report labels for this rename
+                tags = [t.strip() for t in change_desc.split("+")] if change_desc else []  # Split the detect_changes tags
+
+                if any("Add Year" in t for t in tags):  # Map to Year Added
+                    labels.append("Year Added")  # Append label
+                if any("Correct Year" in t for t in tags):  # Map to Year Corrected
+                    labels.append("Year Corrected")  # Append label
+                if any("Add Resolution" in t for t in tags):  # Map to Resolution Added
+                    labels.append("Resolution Added")  # Append label
+                if any("Correct Resolution" in t for t in tags):  # Map to Resolution Corrected
+                    labels.append("Resolution Corrected")  # Append label
+                if any("Remove Duplicate Tokens" in t for t in tags):  # Map to Duplicate Tokens Removed
+                    labels.append("Duplicate Tokens Removed")  # Append label
+                if any("Reorder Tokens" in t for t in tags):  # Map to Format Reordered
+                    labels.append("Format Reordered")  # Append label
+                if any("Normalize Format" in t for t in tags):  # Map to Whitespace Normalized
+                    labels.append("Whitespace Normalized")  # Append label
+
+                try:  # Detect parentheses removal (guard regex)
+                    if re.search(r"\(\d{4}\)", entry.name) and not re.search(r"\(\d{4}\)", new_name):  # Parentheses removed
+                        labels.append("Parentheses Removed")  # Append label
+                except Exception:  # If regex fails
+                    pass  # Ignore detection errors
+
+                try:  # Detect 4K -> 2160p conversion (guard regex)
+                    if re.search(r"\b4k\b", entry.name, re.IGNORECASE) and "2160p" in new_name.lower():  # 4K converted
+                        labels.append("4K Converted to 2160p")  # Append label
+                except Exception:  # If detection fails
+                    pass  # Ignore detection errors
+
+                try:  # Detect language normalization differences (guard regex)
+                    old_lang_match = re.search(r"\b(Dual|Dublado|English|Legendado|Nacional)\b", entry.name, re.IGNORECASE)  # Find old lang token
+                    if old_lang_match:  # If an old language token existed
+                        old_lang_raw = old_lang_match.group(0)  # Extract raw matched token
+                        if append_lang and old_lang_raw != append_lang:  # If canonical differs from raw
+                            labels.append("Language Normalized")  # Append label
+                except Exception:  # On detection errors
+                    pass  # Ignore
+
+                seen = set()  # Deduplicate labels while preserving order
+                final_labels = []  # Ordered unique labels
+                for L in labels:  # Iterate computed labels
+                    if L not in seen:  # If label not yet recorded
+                        seen.add(L)  # Mark seen
+                        final_labels.append(L)  # Append to final list
+
+                report_data["input_dirs"][root_key]["directories_modified"].append({  # Append directory modification record
+                    "old_name": entry.name,  # Record old directory name
+                    "new_name": new_name,  # Record new directory name
+                    "changes": final_labels,  # Record detected change labels
+                })  # End append directory record
 
             main_video = None  # Placeholder for chosen main video file
             max_size = -1  # Track largest size seen so far
@@ -741,12 +809,29 @@ def rename_dirs():
                 f"'{BackgroundColors.CYAN}{expected_path.name}{BackgroundColors.GREEN}'"  # New video filename
                 f"{Style.RESET_ALL}"
             )  # Formatted video rename output
+            video_renamed = False  # Flag whether video rename succeeded
             try:  # Protect the video rename operation from raising
                 main_video.rename(expected_path)  # Perform the filesystem rename for the primary video file
+                video_renamed = True  # Mark success when no exception is raised
             except Exception as e:  # If video rename fails, log and continue processing other entries
                 print(f"{BackgroundColors.RED}Failed to rename video '{main_video.name}' → '{expected_path.name}': {e}{Style.RESET_ALL}")  # Log error and continue
 
+            if video_renamed:  # Only record successful renames in the report per requirements
+                root_key = str(root_path)  # Use string form of input root as dictionary key
+                if root_key not in report_data["input_dirs"]:  # Ensure per-root entry exists before appending
+                    report_data["input_dirs"][root_key] = {  # Initialize when missing
+                        "directories_modified": [],  # Directory mods list
+                        "video_files_renamed": [],  # Video rename list
+                    }  # End initialization
+                report_data["input_dirs"][root_key]["video_files_renamed"].append({  # Append video rename record
+                    "old_name": main_video.name,  # Old filename including extension
+                    "new_name": expected_path.name,  # New filename including extension
+                    "reason": "Sync With Dir",  # Constant reason per spec
+                })  # End append video rename record
+
         print()  # Add single spacing after processing this input root
+
+    generate_report(report_data)  # Call report writer with the built report_data
 
 
 def to_seconds(obj):
@@ -772,6 +857,26 @@ def to_seconds(obj):
         except Exception:
             pass  # Fallthrough on error
     return None  # Couldn't convert
+
+
+def generate_report(report_data: dict) -> None:
+    """
+    Generate a `report.json` file in the project root from `report_data`.
+
+    :param report_data: The report dictionary built during processing
+    :return: None
+    """
+
+    report_data["generated_at"] = datetime.datetime.now().isoformat()  # Add ISO timestamp to the report
+    
+    out_path = Path(__file__).parent / "report.json"  # Compute output path in project root
+    
+    try:  # Guard file I/O to avoid raising
+        with out_path.open("w", encoding="utf-8") as f:  # Open file for writing with UTF-8 encoding
+            json.dump(report_data, f, indent=4, ensure_ascii=False)  # Write JSON with required options
+    except Exception as e:  # On any error while writing, report but do not raise
+        print(f"{BackgroundColors.RED}Failed to write report.json: {e}{Style.RESET_ALL}")  # Log write failure
+        return  # Ensure function exits without raising
 
 
 def calculate_execution_time(start_time, finish_time=None):
