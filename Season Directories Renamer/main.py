@@ -609,6 +609,19 @@ def determine_resolution(dir_path, name_hint):
     return res_from_file  # May be None when no resolution found
 
 
+def format_season_num(season):
+    """
+    Return a season number zero-padded to two digits.
+
+    Accepts int or string values. If conversion fails, returns the original value.
+    """
+    
+    try:  # Normalize to int then format with two digits
+        return f"{int(season):02d}"
+    except Exception:  # If conversion fails, return original (avoid raising)
+        return season
+
+
 def rename_dirs():
     """
     Iterates through the INPUT_DIR, extracts metadata, fetches the release year from TMDb,
@@ -624,23 +637,26 @@ def rename_dirs():
     suffix_group = "|".join([re.escape(s) for s in APPEND_STRINGS])  # Build alternation group from APPEND_STRINGS
     formatted_pattern = rf"^Season\s(?P<season>\d{{2}})\s(?P<year>\d{{4}})(?:\s(?P<resolution>\d{{3,4}}p|4k))?(?:\s(?P<suffix>{suffix_group}))?$"  # Strict formatted folder regex
 
-    # Support either a single Path or a list/tuple of paths in `INPUT_DIR`.
-    roots = INPUT_DIR if isinstance(INPUT_DIR, (list, tuple)) else [INPUT_DIR]
+    roots = INPUT_DIR if isinstance(INPUT_DIR, (list, tuple)) else [INPUT_DIR]  # Normalize INPUT_DIR to a list of paths
+    
     entries = []  # Build list of directory entries only across all configured roots
-    for root in roots:
-        root_path = Path(root)
-        if not root_path.exists():
+    
+    for root in roots:  # Iterate each configured root path
+        root_path = Path(root)  # Convert to Path object for consistent handling
+        if not root_path.exists():  # Check if the root path exists before processing
             verbose_output(f"{BackgroundColors.YELLOW}Input path not found, skipping: {BackgroundColors.CYAN}{root_path}{Style.RESET_ALL}")
             continue
-        try:
-            for p in root_path.iterdir():
-                if p.is_dir():
-                    entries.append(p)
+        try:  # Guard against any error when reading the directory contents
+            for p in root_path.iterdir():  # Iterate entries in the root directory
+                if p.is_dir():  # Only consider directories for processing, skip files at this stage
+                    entries.append(p)  # Add directory entry to the list for later processing
         except Exception:
             # If a particular input root can't be read, skip it and continue with others
             verbose_output(f"{BackgroundColors.YELLOW}Cannot read input path, skipping: {BackgroundColors.CYAN}{root_path}{Style.RESET_ALL}")
             continue
+        
     total = len(entries)  # Compute total number of directories to process
+    
     for idx, entry in enumerate(entries, start=1):  # Iterate with index and entry
         print(f"{BackgroundColors.GREEN}Processing {BackgroundColors.CYAN}{idx}{BackgroundColors.GREEN}/{BackgroundColors.CYAN}{total}{BackgroundColors.GREEN}: {BackgroundColors.CYAN}{entry.name}{Style.RESET_ALL}")  # Output index/total and entry name
         if not entry.is_dir():  # Skip non-directory entries such as files
@@ -658,7 +674,8 @@ def rename_dirs():
 
             formatted_match = re.match(formatted_pattern, entry.name, re.IGNORECASE)  # Match strict formatted pattern against folder name (case-insensitive)
             if formatted_match:  # If folder already matches strict format
-                existing_season = formatted_match.group("season")  # Extract existing zero-padded season string
+                existing_season = formatted_match.group("season")  # Extract existing season string
+                existing_season = format_season_num(existing_season)  # Normalize to two digits
                 existing_year = formatted_match.group("year")  # Extract existing year string
                 existing_resolution = formatted_match.group("resolution")  # Extract existing optional resolution string
                 existing_suffix = formatted_match.group("suffix")  # Extract existing optional suffix string
@@ -809,7 +826,8 @@ def rename_dirs():
 
                 formatted_match_sub = re.match(formatted_pattern, subentry.name, re.IGNORECASE)  # Match strict formatted pattern against subdirectory name (case-insensitive)
                 if formatted_match_sub:  # If the subdirectory already matches strict format
-                    existing_season = formatted_match_sub.group("season")  # Extract existing zero-padded season string from subdir
+                    existing_season = formatted_match_sub.group("season")  # Extract existing season string from subdir
+                    existing_season = format_season_num(existing_season)  # Normalize to two digits
                     existing_year = formatted_match_sub.group("year")  # Extract existing year string from subdir
                     existing_resolution = formatted_match_sub.group("resolution")  # Extract existing optional resolution string from subdir
                     existing_suffix = formatted_match_sub.group("suffix")  # Extract existing optional suffix string from subdir
