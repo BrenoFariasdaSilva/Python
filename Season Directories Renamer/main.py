@@ -52,11 +52,12 @@ import atexit  # For playing a sound when the program finishes
 import datetime  # For getting the current date and time
 import os  # For running a command in the terminal
 import platform  # For getting the operating system name
-from colorama import Style  # For coloring the terminal
 import re  # For parsing directory names
 import requests  # For API requests
-from pathlib import Path  # For path handling
+import subprocess  # For probing video metadata with ffprobe
+from colorama import Style  # For coloring the terminal
 from dotenv import load_dotenv  # For loading environment variables
+from pathlib import Path  # For path handling
 
 
 # Macros:
@@ -276,6 +277,99 @@ def standardize_final_name(name):
     return " ".join(out_tokens)  # Reconstruct normalized name and return
 
 
+def _get_resolution_from_first_video(dir_path):
+    """
+    Attempt to derive resolution from the first valid video file in `dir_path`.
+
+    Steps:
+    1) Try to extract resolution token from the filename using regex.
+    2) If absent, attempt to call `ffprobe` to read video stream height.
+    3) Map height to standard resolution tokens (lowercase 'p').
+
+    Returns resolution token string (preserving filename casing) or None.
+    """
+
+    video_exts = {  # Known video file extensions
+        ".mkv",
+        ".mp4",
+        ".avi",
+        ".mov",
+        ".m4v",
+        ".webm",
+        ".ts",
+        ".flv",
+        ".mpg",
+        ".mpeg",
+        ".wmv",
+        ".m2ts",
+    }  # Set of extensions
+
+    try:  # Guard filesystem iteration
+        entries = sorted(dir_path.iterdir())  # Deterministic ordering of directory entries
+    except Exception:  # If directory cannot be read
+        return None  # Give up and return None
+
+    for candidate in entries:  # Iterate entries to find first video file
+        if not candidate.is_file():  # Skip non-file entries
+            continue  # Continue search
+        if candidate.suffix.lower() not in video_exts:  # Skip non-video extensions
+            continue  # Continue search
+
+        # First attempt: Extract resolution from filename
+        try:  # Regex can raise on weird inputs, guard it
+            name_match = re.search(r"\b(\d{3,4}p|4k)\b", candidate.name, re.IGNORECASE)  # Filename regex search
+        except Exception:  # Any regex-related error
+            name_match = None  # Treat as not found
+        if name_match:  # If token found in filename
+            return name_match.group(0)  # Preserve original filename casing
+
+        # Second attempt: Probe metadata with ffprobe (non-fatal)
+        try:  # Wrap external call to avoid crashes
+            proc = subprocess.run(  # Call ffprobe to get the height of the first video stream
+                [
+                    "ffprobe",
+                    "-v",
+                    "error",
+                    "-select_streams",
+                    "v:0",
+                    "-show_entries",
+                    "stream=height",
+                    "-of",
+                    "csv=p=0",
+                    str(candidate),
+                ],
+                capture_output=True,  # Capture stdout/stderr
+                text=True,  # Decode output as text
+                check=True,  # Raise CalledProcessError on non-zero exit
+            )  # Run ffprobe
+            
+            out = proc.stdout.strip()  # Strip whitespace from output
+            
+            if not out:  # No output returned
+                return None  # Give up and return None
+
+            try:  # Height parsing may fail on unexpected output
+                height = int(out.splitlines()[0])  # Convert to int
+            except Exception:  # Parsing failed
+                return None  # Unable to derive resolution
+
+            if height >= 2160:  # 4K and above map to 2160p
+                return "2160p"  # Use lowercase 'p' per rules
+            if height >= 1080:  # Map to 1080p
+                return "1080p"  # Use lowercase 'p'
+            if height >= 720:  # Map to 720p
+                return "720p"  # Use lowercase 'p'
+            if height >= 480:  # Map to 480p
+                return "480p"  # Use lowercase 'p'
+            return None  # Height exists but below thresholds
+        except FileNotFoundError:  # ffprobe not installed
+            return None  # Fail silently and return None
+        except Exception:  # Any other probing error
+            return None  # Fail silently and return None
+
+    return None  # No video file found in directory
+
+
 def rename_dirs():
     """
     Iterates through the INPUT_DIR, extracts metadata, fetches the release year from TMDb,
@@ -376,6 +470,9 @@ def rename_dirs():
 
                 res_match = re.search(r"\b(\d{3,4}p|4k)\b", entry.name, re.IGNORECASE)  # Find resolution token
                 res_token = res_match.group(0) if res_match else None  # Preserve original matched token or None
+                
+                if not res_token:  # If no resolution token in folder name
+                    res_token = _get_resolution_from_first_video(entry)  # Probe first video file for resolution
 
                 append_str = None  # Default to no suffix
                 for s in APPEND_STRINGS:  # Iterate in configured order
@@ -483,6 +580,8 @@ def rename_dirs():
 
                 res_match_sub = re.search(r"\b(\d{3,4}p|4k)\b", subentry.name, re.IGNORECASE)  # Find resolution token
                 res_token_sub = res_match_sub.group(0) if res_match_sub else None  # Preserve matched token or None
+                if not res_token_sub:  # If no resolution token in subdirectory name
+                    res_token_sub = _get_resolution_from_first_video(subentry)  # Probe first video file for resolution
 
                 append_str = None  # Default to no suffix
                 for s in APPEND_STRINGS:  # Iterate in configured order
