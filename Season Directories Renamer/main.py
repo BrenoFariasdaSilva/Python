@@ -235,6 +235,47 @@ def get_season_year(api_key, series_id, season_number):
     return air_date.split("-")[0]  # Return only the year portion of the date string
 
 
+def standardize_final_name(name):
+    """
+    Standardize non-numeric words in the final folder name according to project rules.
+
+    Rules:
+    - 'Season' is capitalized exactly as 'Season'.
+    - Numeric tokens remain unchanged (season number, year).
+    - Resolution tokens preserve original casing (e.g., 720p, 4K).
+    - Language suffixes are normalized to canonical values from APPEND_STRINGS.
+    - All other alphabetic words are Title-cased (first upper, rest lower).
+    """
+
+    tokens = name.split()  # Split on whitespace to tokens
+    out_tokens = []  # Container for transformed tokens
+    for tok in tokens:  # Iterate each token for classification
+        if tok.isdigit():  # Numeric token check (keeps leading zeros)
+            out_tokens.append(tok)  # Append numeric token unchanged
+            continue  # Proceed to next token
+
+        if re.fullmatch(r"(\d{3,4}p|4k)", tok, re.IGNORECASE):  # Resolution detection
+            out_tokens.append(tok)  # Append resolution exactly as present
+            continue  # Proceed to next token
+
+        matched_suffix = None  # Default no match
+        for s in APPEND_STRINGS:  # Iterate configured canonical suffixes
+            if tok.lower() == s.lower():  # Case-insensitive equality check
+                matched_suffix = s  # Use canonical form from configuration
+                break  # Stop searching when found
+        if matched_suffix:  # If suffix matched any canonical value
+            out_tokens.append(matched_suffix)  # Append canonical suffix exactly
+            continue  # Proceed to next token
+
+        if tok.lower() == "season":  # Detect 'season' regardless of case
+            out_tokens.append("Season")  # Append canonical 'Season'
+            continue  # Proceed to next token
+
+        out_tokens.append(tok.capitalize())  # Title-case the token and append
+
+    return " ".join(out_tokens)  # Reconstruct normalized name and return
+
+
 def rename_dirs():
     """
     Iterates through the INPUT_DIR, extracts metadata, fetches the release year from TMDb,
@@ -342,14 +383,17 @@ def rename_dirs():
                         append_str = s  # Select the first matching configured suffix
                         break  # Stop after the first match
 
-                    name_parts = ["Season", season_str, str(valid_year)]  # Base parts
-                    if res_token:  # Insert resolution if present in original
-                        name_parts.append(res_token)  # Preserve original casing for resolution
-                    if append_str:  # Append suffix only when present
-                        name_parts.append(append_str)  # Append selected suffix
+                name_parts = ["Season", season_str, str(valid_year)]  # Base parts
+                if res_token:  # Insert resolution if present in original
+                    name_parts.append(res_token)  # Preserve original casing for resolution
+                if append_str:  # Append suffix only when present
+                    name_parts.append(append_str)  # Append selected suffix
 
-                    new_name = " ".join(name_parts).strip()  # Join parts and trim edges
-                    new_name = " ".join(new_name.split())  # Collapse multiple internal spaces
+                new_name = " ".join(name_parts).strip()  # Join parts and trim edges
+                new_name = " ".join(new_name.split())  # Collapse multiple internal spaces
+
+            new_name = standardize_final_name(new_name)  # Apply capitalization rules
+            new_name = " ".join(new_name.split())  # Normalize whitespace again
             for subentry in entry.iterdir():  # Iterate over subentries inside the directory
                 if not subentry.is_dir():  # Skip non-directory subentries such as files
                     continue  # Continue to next subentry when current one is not a directory
@@ -454,6 +498,8 @@ def rename_dirs():
 
                 new_name = " ".join(name_parts).strip()  # Join parts and trim edges
                 new_name = " ".join(new_name.split())  # Collapse multiple internal spaces
+                new_name = standardize_final_name(new_name)  # Apply capitalization rules for subdir name
+                new_name = " ".join(new_name.split())  # Normalize whitespace again after standardization
                 new_path = subentry.parent / new_name  # Compute new path for subdirectory rename
 
                 res_present = bool(res_token_sub)  # Detect presence of resolution token
