@@ -73,7 +73,7 @@ class BackgroundColors:  # Colors for the terminal
 
 # Execution Constants:
 VERBOSE = False  # Set to True to output verbose messages
-INPUT_DIR = Path("E:/Series")  # The input directory containing the season folders
+INPUT_DIR = [Path("E:/Animes"), Path("E:/Series")]  # The input directory or list of input directories
 APPEND_STRINGS = ["Dual", "Dublado", "English", "Legendado", "Nacional"]  # User-defined suffixes for renaming
 TMDB_BASE_URL = "https://api.themoviedb.org/3"  # Base URL for TMDb API
 IGNORE_DIR_REGEX = re.compile(r'^(featurettes|extras|making[-_\s]?of|behind[ _-]?the[ _-]?scenes|specials)$', re.IGNORECASE)  # Regex for ignore dirs
@@ -624,7 +624,22 @@ def rename_dirs():
     suffix_group = "|".join([re.escape(s) for s in APPEND_STRINGS])  # Build alternation group from APPEND_STRINGS
     formatted_pattern = rf"^Season\s(?P<season>\d{{2}})\s(?P<year>\d{{4}})(?:\s(?P<resolution>\d{{3,4}}p|4k))?(?:\s(?P<suffix>{suffix_group}))?$"  # Strict formatted folder regex
 
-    entries = [p for p in INPUT_DIR.iterdir() if p.is_dir()]  # Build list of directory entries only
+    # Support either a single Path or a list/tuple of paths in `INPUT_DIR`.
+    roots = INPUT_DIR if isinstance(INPUT_DIR, (list, tuple)) else [INPUT_DIR]
+    entries = []  # Build list of directory entries only across all configured roots
+    for root in roots:
+        root_path = Path(root)
+        if not root_path.exists():
+            verbose_output(f"{BackgroundColors.YELLOW}Input path not found, skipping: {BackgroundColors.CYAN}{root_path}{Style.RESET_ALL}")
+            continue
+        try:
+            for p in root_path.iterdir():
+                if p.is_dir():
+                    entries.append(p)
+        except Exception:
+            # If a particular input root can't be read, skip it and continue with others
+            verbose_output(f"{BackgroundColors.YELLOW}Cannot read input path, skipping: {BackgroundColors.CYAN}{root_path}{Style.RESET_ALL}")
+            continue
     total = len(entries)  # Compute total number of directories to process
     for idx, entry in enumerate(entries, start=1):  # Iterate with index and entry
         print(f"{BackgroundColors.GREEN}Processing {BackgroundColors.CYAN}{idx}{BackgroundColors.GREEN}/{BackgroundColors.CYAN}{total}{BackgroundColors.GREEN}: {BackgroundColors.CYAN}{entry.name}{Style.RESET_ALL}")  # Output index/total and entry name
