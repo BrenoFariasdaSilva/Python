@@ -145,7 +145,7 @@ def install_ffmpeg_mac():
         )  # Inform the user
 
 
-def check_and_install_ffmpeg():
+def verify_ffmpeg_is_installed():
     """
     Checks if FFmpeg is installed and installs it if missing.
 
@@ -467,7 +467,9 @@ def main():
 
     os.makedirs(TIMESTAMP_DIR, exist_ok=True)  # Create the Timestamps directory if it doesn't exist
     mp3_files = list_valid_mp3_files()  # List the valid MP3 files
-
+    
+    verify_ffmpeg_is_installed()  # Verify ffmpeg is installed
+    
     if not mp3_files:  # If no valid MP3 files are found
         print(
             f"{BackgroundColors.RED}No valid MP3 files found in the {BackgroundColors.CYAN}Input{BackgroundColors.RED} directory. Please add MP3 files with corresponding timestamp files.{Style.RESET_ALL}"
