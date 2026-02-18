@@ -277,28 +277,46 @@ def rename_dirs():
         else:  # When top-level directory does not contain season info, inspect its subdirectories
             print(f"{BackgroundColors.YELLOW}No season info found in '{entry.name}', scanning subdirectories...{Style.RESET_ALL}")  # Inform about scanning subdirectories
             for subentry in entry.iterdir():  # Iterate over subentries inside the directory
-                if subentry.is_dir():  # Only process subentries that are directories
-                    parsed_sub = parse_dir_name(subentry.name)  # Attempt to parse subdirectory name
-                    if not parsed_sub:  # If subdirectory does not match expected pattern
+                if not subentry.is_dir():  # Skip non-directory subentries such as files
+                    continue  # Continue to next subentry when current one is not a directory
+
+                # First attempt: try parsing the subdirectory name with existing parser
+                parsed_sub = parse_dir_name(subentry.name)  # Attempt to parse subdirectory name using generic parser
+                if parsed_sub:  # If parser returned a tuple, use it directly
+                    series_name, season_num, resolution = parsed_sub  # Unpack parsed metadata for subdirectory
+                else:  # Fallback: detect 'Season <number>' pattern in subdirectory name and infer series from parent
+                    season_match = re.search(r"Season\s+(?P<num>\d{1,2})", subentry.name, re.IGNORECASE)  # Match 'Season <number>' case-insensitively
+                    if not season_match:  # If no season-style pattern found in subdirectory name
                         print(f"{BackgroundColors.YELLOW}Skipping (no match in subdir): {subentry.name}{Style.RESET_ALL}")  # Inform about skipped subdirectory
                         continue  # Continue to next subentry when parsing fails
 
-                    series_name, season_num, resolution = parsed_sub  # Unpack parsed metadata for subdirectory
-                    season_str = f"{season_num:02d}"  # Format season number as two digits for subdirectory
+                    season_num = int(season_match.group("num"))  # Convert extracted season number to integer
 
-                    try:  # Attempt TMDb lookups for the subdirectory
-                        series_id = get_series_id(api_key, series_name)  # Fetch TMDb series id by name for subdir
-                        year = get_season_year(api_key, series_id, season_num)  # Fetch season year for subdir
-                    except Exception as e:  # Catch any exception from TMDb calls for subdir
-                        print(f"{BackgroundColors.RED}Error fetching year for {series_name} S{season_str}: {e}{Style.RESET_ALL}")  # Print error message when lookup fails for subdir
-                        year = "Unknown"  # Fallback year value when TMDb lookup fails for subdir
+                    # Detect numeric resolution in subdirectory name (e.g., '720' or '1080' or '720p')
+                    res_search = re.search(r"\b(?P<res>\d{3,4}p?)\b", subentry.name, re.IGNORECASE)  # Search for resolution token
+                    if res_search:  # If resolution token found
+                        res_digits = re.sub(r"\D", "", res_search.group("res"))  # Strip non-digits to leave digits only
+                        resolution = f"{res_digits}p"  # Normalize to '<digits>p' format
+                    else:  # No resolution token found for this subdirectory
+                        resolution = None  # Use None when no resolution present
 
-                    append_str = APPEND_STRINGS[0]  # Select first append string for subdirectory rename
-                    new_name = f"Season {season_str} {year} {resolution} {append_str}"  # Build new name for subdirectory
-                    new_path = subentry.parent / new_name  # Compute new path for subdirectory rename
+                    series_name = entry.name  # Infer series name from parent directory name
 
-                    print(f"{BackgroundColors.GREEN}Renaming subdir:{Style.RESET_ALL} '{subentry.name}' → '{new_name}'")  # Inform about the subdirectory rename
-                    subentry.rename(new_path)  # Perform the filesystem rename operation for subdirectory
+                season_str = f"{season_num:02d}"  # Format season number as two digits for subdirectory
+
+                try:  # Attempt TMDb lookups for the subdirectory using resolved series_name and season_num
+                    series_id = get_series_id(api_key, series_name)  # Fetch TMDb series id by name for subdir
+                    year = get_season_year(api_key, series_id, season_num)  # Fetch season year for subdir
+                except Exception as e:  # Catch any exception from TMDb calls for subdir
+                    print(f"{BackgroundColors.RED}Error fetching year for {series_name} S{season_str}: {e}{Style.RESET_ALL}")  # Print error message when lookup fails for subdir
+                    year = "Unknown"  # Fallback year value when TMDb lookup fails for subdir
+
+                append_str = APPEND_STRINGS[0]  # Select first append string for subdirectory rename
+                new_name = f"Season {season_str} {year} {resolution} {append_str}"  # Build new name for subdirectory
+                new_path = subentry.parent / new_name  # Compute new path for subdirectory rename
+
+                print(f"{BackgroundColors.GREEN}Renaming subdir:{Style.RESET_ALL} '{subentry.name}' → '{new_name}'")  # Inform about the subdirectory rename
+                subentry.rename(new_path)  # Perform the filesystem rename operation for subdirectory
 
 
 def to_seconds(obj):
