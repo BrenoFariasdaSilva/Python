@@ -1,62 +1,59 @@
 """
 ================================================================================
-Rename TV Show Season Directories using TMDb Metadata
+<PROJECT OR SCRIPT TITLE>
 ================================================================================
 Author      : Breno Farias da Silva
-Created     : 2025-11-11
+Created     : <YYYY-MM-DD>
 Description :
-   This script reads all directories inside the INPUT folder and renames them
-   based on metadata extracted from their names and from The Movie Database (TMDb) API.
-   The renaming pattern follows the format:
-      "Season {SeasonNumberWithTwoDigits} {YearOfThatSeason} {Resolution} {Append_String}"
+    <Provide a concise and complete overview of what this script does.>
+    <Mention its purpose, scope, and relevance to the larger project.>
 
-   Key features include:
-      - Automatic extraction of season and resolution from folder names.
-      - Online lookup of release year for each season via TMDb API.
-      - Clean renaming with standardized format and user-defined suffix.
-      - Logging and verbose messages for better monitoring.
-      - .env integration for secure API key handling.
+    Key features include:
+        - <Feature 1 — e.g., automatic data loading and preprocessing>
+        - <Feature 2 — e.g., model training and evaluation>
+        - <Feature 3 — e.g., visualization or report generation>
+        - <Feature 4 — e.g., logging or notification system>
+        - <Feature 5 — e.g., integration with other modules or datasets>
 
 Usage:
-   1. Create a `.env` file in the project root containing your TMDb API key:
-         TMDB_API_KEY=your_api_key_here
-   2. Place the folders to be renamed inside the `./INPUT` directory.
-   3. Run the script via:
-         $ python rename_seasons.py
-   4. The renamed folders will appear in the same directory with the new format.
+    1. <Explain any configuration steps before running, such as editing variables or paths.>
+    2. <Describe how to execute the script — typically via Makefile or Python.>
+        $ make <target>   or   $ python <script_name>.py
+    3. <List what outputs are expected or where results are saved.>
 
 Outputs:
-   - Renamed directories under ./INPUT/
-   - Console logs for progress and any errors encountered
+    - <Output file or directory 1 — e.g., results.csv>
+    - <Output file or directory 2 — e.g., Feature_Analysis/plots/>
+    - <Output file or directory 3 — e.g., logs/output.txt>
 
 TODOs:
-   - Add command-line argument parsing for dynamic append string selection.
-   - Add caching for TMDb API responses to reduce requests.
-   - Add logging to file with timestamp and results summary.
-   - Handle batch renames for multiple append string variations.
+    - <Add a task or improvement — e.g., implement CLI argument parsing.>
+    - <Add another improvement — e.g., extend support to Parquet files.>
+    - <Add optimization — e.g., parallelize evaluation loop.>
+    - <Add robustness — e.g., error handling or data validation.>
 
 Dependencies:
-   - Python >= 3.9
-   - requests
-   - python-dotenv
-   - colorama
+    - Python >= <version>
+    - <Library 1 — e.g., pandas>
+    - <Library 2 — e.g., numpy>
+    - <Library 3 — e.g., scikit-learn>
+    - <Library 4 — e.g., matplotlib, seaborn, tqdm, colorama>
 
 Assumptions & Notes:
-   - Directory names must contain the season (e.g., S01) and resolution (e.g., 1080p).
-   - Internet access is required to query TMDb API for release years.
-   - The TMDb API key must be defined in a `.env` file in the project root.
+    - <List any key assumptions — e.g., last column is the target variable.>
+    - <Mention data format — e.g., CSV files only.>
+    - <Mention platform or OS-specific notes — e.g., sound disabled on Windows.>
+    - <Note on output structure or reusability.>
 """
-    
 
 import atexit  # For playing a sound when the program finishes
 import datetime  # For getting the current date and time
 import os  # For running a command in the terminal
 import platform  # For getting the operating system name
+import sys  # For system-specific parameters and functions
 from colorama import Style  # For coloring the terminal
-import re  # For parsing directory names
-import requests  # For API requests
-from pathlib import Path  # For path handling
-from dotenv import load_dotenv  # For loading environment variables
+from Logger import Logger  # For logging output to both terminal and file
+from pathlib import Path  # For handling file paths
 
 
 # Macros:
@@ -72,9 +69,11 @@ class BackgroundColors:  # Colors for the terminal
 
 # Execution Constants:
 VERBOSE = False  # Set to True to output verbose messages
-INPUT_DIR = Path("./INPUT")  # The input directory containing the season folders
-APPEND_STRINGS = ["Legendado", "Dual", "Dublado", "English"]  # User-defined suffixes for renaming
-TMDB_BASE_URL = "https://api.themoviedb.org/3"  # Base URL for TMDb API
+
+# Logger Setup:
+logger = Logger(f"./Logs/{Path(__file__).stem}.log", clean=True)  # Create a Logger instance
+sys.stdout = logger  # Redirect stdout to the logger
+sys.stderr = logger  # Redirect stderr to the logger
 
 # Sound Constants:
 SOUND_COMMANDS = {
@@ -120,164 +119,6 @@ def verify_filepath_exists(filepath):
     )  # Output the verbose message
 
     return os.path.exists(filepath)  # Return True if the file or folder exists, False otherwise
-
-
-def load_api_key():
-
-    """
-    Loads the TMDb API key from a .env file in the project root.
-
-    :return: API key string
-    """
-
-    load_dotenv()  # Load environment variables from a .env file into the process environment
-    api_key = os.getenv("TMDB_API_KEY")  # Read the TMDB_API_KEY value from environment
-    
-    if not api_key:  # Validate that the API key exists and is not falsy
-        raise ValueError("TMDB_API_KEY not found in .env file.")  # Raise a descriptive error when API key is missing
-    
-    return api_key  # Return the TMDb API key string
-
-
-def parse_dir_name(dir_name):
-
-    """
-    Parses folder name like 'Arrow.S01.1080p.Bluray.x265-HiQVE'.
-
-    :param dir_name: Directory name string to parse
-    :return: Tuple (series_name, season_number, resolution) or None when parsing fails
-    """
-
-    match = re.match(r"(?P<series>[A-Za-z0-9\._]+)\.S(?P<season>\d{2})\.(?P<res>\d{3,4}p)", dir_name, re.IGNORECASE)  # Attempt regex match for series, season and resolution
-    
-    if not match:  # If regex does not match the expected pattern
-        return None  # Return None to indicate parsing failure
-    
-    series = match.group("series").replace(".", " ")  # Convert dotted series token to readable series name
-    season = int(match.group("season"))  # Convert captured season string to integer
-    resolution = match.group("res")  # Capture resolution token (e.g., '1080p')
-    
-    return series, season, resolution  # Return parsed tuple with series name, season int, and resolution
-
-
-def get_series_id(api_key, series_name):
-
-    """
-    Query TMDb search endpoint to find series ID by name.
-
-    :param api_key: TMDb API key string
-    :param series_name: Series name to search for on TMDb
-    :return: Integer TMDb series id
-    """
-
-    url = f"{TMDB_BASE_URL}/search/tv"  # Build search URL for TMDb TV search endpoint
-    params = {"api_key": api_key, "query": series_name}  # Prepare query parameters including API key and series name
-    response = requests.get(url, params=params)  # Perform HTTP GET request to TMDb search endpoint
-    response.raise_for_status()  # Raise exception for HTTP error responses
-    data = response.json()  # Parse JSON body from response
-    
-    results = data.get("results", [])  # Extract results array from TMDb response
-    
-    if not results:  # If no results were returned from TMDb
-        raise ValueError(f"No TMDb series found for '{series_name}'")  # Raise descriptive error when not found
-    
-    return results[0]["id"]  # Return the id of the first search result
-
-
-def get_season_year(api_key, series_id, season_number):
-
-    """
-    Query TMDb to get season details for a given series_id & season_number.
-    Returns the year (e.g., 2012) of that season's air date.
-
-    :param api_key: TMDb API key string
-    :param series_id: TMDb series id integer
-    :param season_number: Season number integer
-    :return: Year string (e.g., '2012') for the season air date
-    """
-
-    url = f"{TMDB_BASE_URL}/tv/{series_id}/season/{season_number}"  # Build URL for season details endpoint
-    params = {"api_key": api_key}  # Prepare params with API key
-    response = requests.get(url, params=params)  # Request season details from TMDb
-    response.raise_for_status()  # Raise exception on HTTP errors
-    data = response.json()  # Parse JSON payload from response
-    air_date = data.get("air_date")  # Attempt to read top-level air_date for the season
-    
-    if not air_date:  # If top-level air_date is missing, fallback to episode-level air_date
-        episodes = data.get("episodes", [])  # Extract episodes array from season details
-        
-        if episodes and "air_date" in episodes[0]:  # Check first episode for an air_date field
-            air_date = episodes[0]["air_date"]  # Use first episode air_date as fallback
-        else:  # No air_date available anywhere in response
-            raise ValueError(f"No air_date found for series {series_id} season {season_number}")  # Raise descriptive error
-        
-    return air_date.split("-")[0]  # Return only the year portion of the date string
-
-
-def rename_dirs():
-    """
-    Iterates through the INPUT_DIR, extracts metadata, fetches the release year from TMDb,
-    and renames each directory according to the defined pattern.
-
-    If a directory does not match the regex pattern (i.e., missing season/resolution info),
-    the script assumes it contains season subdirectories and processes those instead.
-
-    :return: None
-    """
-
-    api_key = load_api_key()  # Load TMDb API key from environment before processing directories
-
-    for entry in INPUT_DIR.iterdir():  # Iterate over entries in the INPUT_DIR path
-        if not entry.is_dir():  # Skip non-directory entries such as files
-            continue  # Continue to next entry when current one is not a directory
-
-        parsed = parse_dir_name(entry.name)  # Try parsing the directory name for season metadata
-
-        # Case 1: The directory name contains season and resolution info
-        if parsed:  # When directory name matched the expected season/resolution pattern
-            series_name, season_num, resolution = parsed  # Unpack parsed metadata tuple
-            season_str = f"{season_num:02d}"  # Format season number as two digits
-
-            try:  # Attempt TMDb lookups which may raise exceptions
-                series_id = get_series_id(api_key, series_name)  # Fetch TMDb series id by name
-                year = get_season_year(api_key, series_id, season_num)  # Fetch season year using series id
-            except Exception as e:  # Catch any exception from TMDb calls
-                print(f"{BackgroundColors.RED}Error fetching year for {series_name} S{season_str}: {e}{Style.RESET_ALL}")  # Print error message when lookup fails
-                year = "Unknown"  # Fallback year value when TMDb lookup fails
-
-            append_str = APPEND_STRINGS[0]  # Select first append string from configured list
-            new_name = f"Season {season_str} {year} {resolution} {append_str}"  # Build new directory name
-            new_path = entry.parent / new_name  # Compute new path for renaming
-
-            print(f"{BackgroundColors.GREEN}Renaming:{Style.RESET_ALL} '{entry.name}' → '{new_name}'")  # Inform about the rename operation
-            entry.rename(new_path)  # Perform the filesystem rename operation
-
-        # Case 2: The directory likely contains subdirectories for seasons
-        else:  # When top-level directory does not contain season info, inspect its subdirectories
-            print(f"{BackgroundColors.YELLOW}No season info found in '{entry.name}', scanning subdirectories...{Style.RESET_ALL}")  # Inform about scanning subdirectories
-            for subentry in entry.iterdir():  # Iterate over subentries inside the directory
-                if subentry.is_dir():  # Only process subentries that are directories
-                    parsed_sub = parse_dir_name(subentry.name)  # Attempt to parse subdirectory name
-                    if not parsed_sub:  # If subdirectory does not match expected pattern
-                        print(f"{BackgroundColors.YELLOW}Skipping (no match in subdir): {subentry.name}{Style.RESET_ALL}")  # Inform about skipped subdirectory
-                        continue  # Continue to next subentry when parsing fails
-
-                    series_name, season_num, resolution = parsed_sub  # Unpack parsed metadata for subdirectory
-                    season_str = f"{season_num:02d}"  # Format season number as two digits for subdirectory
-
-                    try:  # Attempt TMDb lookups for the subdirectory
-                        series_id = get_series_id(api_key, series_name)  # Fetch TMDb series id by name for subdir
-                        year = get_season_year(api_key, series_id, season_num)  # Fetch season year for subdir
-                    except Exception as e:  # Catch any exception from TMDb calls for subdir
-                        print(f"{BackgroundColors.RED}Error fetching year for {series_name} S{season_str}: {e}{Style.RESET_ALL}")  # Print error message when lookup fails for subdir
-                        year = "Unknown"  # Fallback year value when TMDb lookup fails for subdir
-
-                    append_str = APPEND_STRINGS[0]  # Select first append string for subdirectory rename
-                    new_name = f"Season {season_str} {year} {resolution} {append_str}"  # Build new name for subdirectory
-                    new_path = subentry.parent / new_name  # Compute new path for subdirectory rename
-
-                    print(f"{BackgroundColors.GREEN}Renaming subdir:{Style.RESET_ALL} '{subentry.name}' → '{new_name}'")  # Inform about the subdirectory rename
-                    subentry.rename(new_path)  # Perform the filesystem rename operation for subdirectory
 
 
 def to_seconds(obj):
@@ -392,12 +233,12 @@ def main():
     """
 
     print(
-        f"{BackgroundColors.CLEAR_TERMINAL}{BackgroundColors.BOLD}{BackgroundColors.GREEN}Welcome to the {BackgroundColors.CYAN}Season Directory Renamer{BackgroundColors.GREEN} program!{Style.RESET_ALL}",
+        f"{BackgroundColors.CLEAR_TERMINAL}{BackgroundColors.BOLD}{BackgroundColors.GREEN}Welcome to the {BackgroundColors.CYAN}Main Template Python{BackgroundColors.GREEN} program!{Style.RESET_ALL}",
         end="\n\n",
     )  # Output the welcome message
     start_time = datetime.datetime.now()  # Get the start time of the program
     
-    rename_dirs()  # Execute the directory renaming workflow
+    # Implement logic here
 
     finish_time = datetime.datetime.now()  # Get the finish time of the program
     print(
