@@ -689,7 +689,7 @@ def rename_dirs():
                             prefixed_name = f"{expected_prefix}{stripped}"  # Build new name with exact separator
                             prefixed_name = " ".join(prefixed_name.split())  # Normalize whitespace to avoid double spaces
                             new_path = subentry.parent / prefixed_name  # Compute final path for prefixed rename
-                            print(f"{BackgroundColors.GREEN}Renaming subdir (add prefix): '{BackgroundColors.CYAN}{subentry.name}{BackgroundColors.GREEN}' → '{BackgroundColors.CYAN}{prefixed_name}{BackgroundColors.GREEN}'{Style.RESET_ALL}")  # Inform about rename
+                            print(f"{BackgroundColors.GREEN}Renaming subdir (Add Prefix): '{BackgroundColors.CYAN}{subentry.name}{BackgroundColors.GREEN}' → '{BackgroundColors.CYAN}{prefixed_name}{BackgroundColors.GREEN}'{Style.RESET_ALL}")  # Inform about rename
                             subentry.rename(new_path)  # Perform the filesystem rename to add series prefix
                             continue  # Continue to next subentry after prefixing
 
