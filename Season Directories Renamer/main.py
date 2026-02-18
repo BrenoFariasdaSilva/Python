@@ -76,6 +76,7 @@ VERBOSE = False  # Set to True to output verbose messages
 INPUT_DIR = Path("E:/Series")  # The input directory containing the season folders
 APPEND_STRINGS = ["Legendado", "Dual", "Dublado", "English"]  # User-defined suffixes for renaming
 TMDB_BASE_URL = "https://api.themoviedb.org/3"  # Base URL for TMDb API
+IGNORE_DIR_REGEX = re.compile(r'^(featurettes|extras|making[-_\s]?of|behind[ _-]?the[ _-]?scenes|specials)$', re.IGNORECASE)  # Regex for ignore dirs
 
 # Sound Constants:
 SOUND_COMMANDS = {
@@ -511,6 +512,10 @@ def rename_dirs():
         if not entry.is_dir():  # Skip non-directory entries such as files
             continue  # Continue to next entry when current one is not a directory
 
+        if re.match(IGNORE_DIR_REGEX, entry.name.strip()):  # Skip configured ignore directories at top-level
+            verbose_output(f"{BackgroundColors.YELLOW}Ignoring top-level directory: {entry.name}{Style.RESET_ALL}")  # Verbose notification when skipping
+            continue  # Continue to next entry when current one is an ignored directory
+
         parsed = parse_dir_name(entry.name)  # Try parsing the directory name for season metadata
 
         if parsed:  # Case 1: The directory name contains season and resolution info
@@ -634,6 +639,10 @@ def rename_dirs():
             for subentry in entry.iterdir():  # Iterate over subentries inside the top-level directory
                 if not subentry.is_dir():  # Skip non-directory subentries such as files
                     continue  # Continue to next subentry when current one is not a directory
+
+                if re.match(IGNORE_DIR_REGEX, subentry.name.strip()):  # Skip configured ignore subdirectories inside series folders
+                    verbose_output(f"{BackgroundColors.YELLOW}Ignoring subdirectory: {subentry.name}{Style.RESET_ALL}")  # Verbose notification when skipping
+                    continue  # Continue to next subentry when current one is an ignored directory
 
                 parsed_sub = parse_dir_name(subentry.name)  # Attempt to parse subdirectory name using generic parser
                 if parsed_sub:  # If parser returned a tuple, use it directly
