@@ -122,6 +122,23 @@ def verify_filepath_exists(filepath):
     return os.path.exists(filepath)  # Return True if the file or folder exists, False otherwise
 
 
+def load_api_key():
+
+    """
+    Loads the TMDb API key from a .env file in the project root.
+
+    :return: API key string
+    """
+
+    load_dotenv()  # Load environment variables from a .env file into the process environment
+    api_key = os.getenv("TMDB_API_KEY")  # Read the TMDB_API_KEY value from environment
+    
+    if not api_key:  # Validate that the API key exists and is not falsy
+        raise ValueError("TMDB_API_KEY not found in .env file.")  # Raise a descriptive error when API key is missing
+    
+    return api_key  # Return the TMDb API key string
+
+
 def to_seconds(obj):
     """
     Converts various time-like objects to seconds.
