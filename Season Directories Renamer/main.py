@@ -247,6 +247,9 @@ def rename_dirs():
     """
 
     api_key = load_api_key()  # Load TMDb API key from environment before processing directories
+    # Prepare a strict formatted-folder regex using configured suffixes
+    suffix_group = "|".join([re.escape(s) for s in APPEND_STRINGS])  # Build alternation group from APPEND_STRINGS
+    formatted_pattern = rf"^Season\s(?P<season>\d{{2}})\s(?P<year>\d{{4}})(?:\s(?P<suffix>{suffix_group}))?$"  # Strict formatted folder regex
 
     for entry in INPUT_DIR.iterdir():  # Iterate over entries in the INPUT_DIR path
         if not entry.is_dir():  # Skip non-directory entries such as files
@@ -260,6 +263,45 @@ def rename_dirs():
             season_str = f"{season_num:02d}"  # Format season number as two digits
 
             year = None  # Initialize year variable before lookup
+            # Check if the current folder is already strictly formatted
+            formatted_match = re.match(formatted_pattern, entry.name)  # Match strict formatted pattern against folder name
+            if formatted_match:  # If folder already matches strict format
+                existing_season = formatted_match.group("season")  # Extract existing zero-padded season string
+                existing_year = formatted_match.group("year")  # Extract existing year string
+                existing_suffix = formatted_match.group("suffix")  # Extract existing optional suffix string
+
+                # Validate numeric values for season and year
+                try:  # Try to convert existing year to int for validation
+                    existing_year_int = int(existing_year)  # Convert the existing year to integer
+                except Exception:  # Conversion failed, treat as invalid format
+                    existing_year_int = None  # Mark as invalid
+
+                try:  # Try to convert existing season to int for validation
+                    existing_season_int = int(existing_season)  # Convert existing season to integer
+                except Exception:  # Conversion failed, treat as invalid format
+                    existing_season_int = None  # Mark as invalid
+
+                if existing_year_int is not None and existing_season_int is not None:  # Only proceed when both parse as integers
+                    series_lookup_name = series_name or entry.parent.name  # Prefer parsed series_name, fallback to parent directory name
+                    try:  # Attempt to verify year with TMDb API
+                        series_id_chk = get_series_id(api_key, series_lookup_name)  # Lookup series id for verification
+                        api_year = get_season_year(api_key, series_id_chk, existing_season_int)  # Fetch year from API for existing season
+                    except Exception as e:  # API lookup failed, cannot safely decide to rename
+                        print(f"{BackgroundColors.RED}Error verifying year for {series_lookup_name} S{existing_season}: {e}{Style.RESET_ALL}")  # Inform about verification error
+                        api_year = None  # Mark API year as unavailable
+
+                    if api_year is not None and str(api_year) == str(existing_year_int):  # If API year matches existing year exactly
+                        print(f"{BackgroundColors.YELLOW}Skipping (already correctly formatted): {entry.name}{Style.RESET_ALL}")  # Inform user that folder is already correct
+                        continue  # Skip renaming since folder is already correct
+                    if api_year is not None and str(api_year) != str(existing_year_int):  # If API year differs, correct the year in the folder name
+                        corrected_name = f"Season {existing_season} {int(api_year)}"  # Build corrected name with new year
+                        if existing_suffix:  # If an allowed suffix was present, preserve it
+                            corrected_name = f"{corrected_name} {existing_suffix}"  # Append the existing suffix
+                        corrected_name = " ".join(corrected_name.split())  # Normalize whitespace
+                        corrected_path = entry.parent / corrected_name  # Compute corrected path
+                        print(f"{BackgroundColors.GREEN}Correcting year: '{entry.name}' → '{corrected_name}'{Style.RESET_ALL}")  # Inform about correction
+                        entry.rename(corrected_path)  # Perform rename to corrected year
+                        continue  # Continue to next entry after correction
             try:  # Attempt TMDb lookups which may raise exceptions
                 series_id = get_series_id(api_key, series_name)  # Fetch TMDb series id by name
                 year = get_season_year(api_key, series_id, season_num)  # Fetch season year using series id
@@ -326,6 +368,44 @@ def rename_dirs():
                 season_str = f"{season_num:02d}"  # Format season number as two digits for subdirectory
 
                 year = None  # Initialize year variable before lookup
+                # Check if subdirectory is already strictly formatted
+                formatted_match_sub = re.match(formatted_pattern, subentry.name)  # Match strict formatted pattern against subdirectory name
+                if formatted_match_sub:  # If the subdirectory already matches strict format
+                    existing_season = formatted_match_sub.group("season")  # Extract existing zero-padded season string from subdir
+                    existing_year = formatted_match_sub.group("year")  # Extract existing year string from subdir
+                    existing_suffix = formatted_match_sub.group("suffix")  # Extract existing optional suffix string from subdir
+
+                    # Validate numeric season/year values
+                    try:  # Try convert existing year to int
+                        existing_year_int = int(existing_year)  # Convert to integer
+                    except Exception:  # Conversion failed
+                        existing_year_int = None  # Mark invalid
+                    try:  # Try convert existing season to int
+                        existing_season_int = int(existing_season)  # Convert to integer
+                    except Exception:  # Conversion failed
+                        existing_season_int = None  # Mark invalid
+
+                    if existing_year_int is not None and existing_season_int is not None:  # Only when both valid integers
+                        series_lookup_name = series_name or entry.name  # Prefer parsed series_name, fallback to parent directory name for subdir
+                        try:  # Attempt to verify year with TMDb API for subdir
+                            series_id_chk = get_series_id(api_key, series_lookup_name)  # Lookup series id for verification
+                            api_year = get_season_year(api_key, series_id_chk, existing_season_int)  # Fetch year from API for existing season
+                        except Exception as e:  # API lookup failed for subdir
+                            print(f"{BackgroundColors.RED}Error verifying year for {series_lookup_name} S{existing_season}: {e}{Style.RESET_ALL}")  # Inform about verification error
+                            api_year = None  # Mark API year as unavailable
+
+                        if api_year is not None and str(api_year) == str(existing_year_int):  # API year matches existing year
+                            print(f"{BackgroundColors.YELLOW}Skipping (already correctly formatted): {subentry.name}{Style.RESET_ALL}")  # Inform that subdir is already correct
+                            continue  # Skip renaming for this subdirectory
+                        if api_year is not None and str(api_year) != str(existing_year_int):  # API year differs from folder year
+                            corrected_name = f"Season {existing_season} {int(api_year)}"  # Build corrected name with new year
+                            if existing_suffix:  # Preserve existing suffix when present
+                                corrected_name = f"{corrected_name} {existing_suffix}"  # Append suffix
+                            corrected_name = " ".join(corrected_name.split())  # Normalize whitespace
+                            corrected_path = subentry.parent / corrected_name  # Compute corrected path
+                            print(f"{BackgroundColors.GREEN}Correcting year: '{subentry.name}' → '{corrected_name}'{Style.RESET_ALL}")  # Inform about correction
+                            subentry.rename(corrected_path)  # Perform rename to corrected year for subdirectory
+                            continue  # Continue to next subentry after correction
                 try:  # Attempt TMDb lookups for the subdirectory using resolved series_name and season_num
                     series_id = get_series_id(api_key, series_name)  # Fetch TMDb series id by name for subdir
                     year = get_season_year(api_key, series_id, season_num)  # Fetch season year for subdir
