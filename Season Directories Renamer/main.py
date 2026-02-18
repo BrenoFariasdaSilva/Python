@@ -139,6 +139,27 @@ def load_api_key():
     return api_key  # Return the TMDb API key string
 
 
+def parse_dir_name(dir_name):
+
+    """
+    Parses folder name like 'Arrow.S01.1080p.Bluray.x265-HiQVE'.
+
+    :param dir_name: Directory name string to parse
+    :return: Tuple (series_name, season_number, resolution) or None when parsing fails
+    """
+
+    match = re.match(r"(?P<series>[A-Za-z0-9\._]+)\.S(?P<season>\d{2})\.(?P<res>\d{3,4}p)", dir_name, re.IGNORECASE)  # Attempt regex match for series, season and resolution
+    
+    if not match:  # If regex does not match the expected pattern
+        return None  # Return None to indicate parsing failure
+    
+    series = match.group("series").replace(".", " ")  # Convert dotted series token to readable series name
+    season = int(match.group("season"))  # Convert captured season string to integer
+    resolution = match.group("res")  # Capture resolution token (e.g., '1080p')
+    
+    return series, season, resolution  # Return parsed tuple with series name, season int, and resolution
+
+
 def to_seconds(obj):
     """
     Converts various time-like objects to seconds.
