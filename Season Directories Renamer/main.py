@@ -263,7 +263,6 @@ def verify_ffmpeg_is_installed():
 
 
 def parse_dir_name(dir_name):
-
     """
     Parses folder name like 'Arrow.S01.1080p.Bluray.x265-HiQVE'.
 
@@ -549,9 +548,18 @@ def rename_dirs():
                         continue  # Skip renaming since folder is already correct
 
                     if api_year is not None and str(api_year) != str(existing_year_int):  # If API year differs, correct the year in the folder name
+                        part_match_existing = re.search(r"\b(?P<label>part|pt|volume|vol|cour|arc)\b\.?\s*(?P<num>[A-Za-z0-9]+)\b", entry.name, re.IGNORECASE)  # Detect existing part token
+                        if part_match_existing:  # If an existing part token exists
+                            part_label_existing = part_match_existing.group("label")  # Extract existing label
+                            part_num_existing = part_match_existing.group("num")  # Extract existing number/alpha
+                            existing_part_token = f"{part_label_existing.capitalize()} {part_num_existing}"  # Standardize existing part token
+                        else:  # No existing part token
+                            existing_part_token = None  # Ensure None when absent
                         corrected_name = f"Season {existing_season} {int(api_year)}"  # Build corrected name with new year
+                        if existing_part_token:  # If a part token should be preserved
+                            corrected_name = f"{corrected_name} {existing_part_token}"  # Append part token after year
                         if existing_resolution:  # Preserve existing resolution when present
-                            corrected_name = f"{corrected_name} {existing_resolution}"  # Append resolution after year
+                            corrected_name = f"{corrected_name} {existing_resolution}"  # Append resolution after year/part
                         if existing_suffix:  # If an allowed suffix was present, preserve it
                             corrected_name = f"{corrected_name} {existing_suffix}"  # Append the existing suffix
                         corrected_name = " ".join(corrected_name.split())  # Normalize whitespace
@@ -583,6 +591,14 @@ def rename_dirs():
             if not res_token:  # If no resolution token in folder name
                 res_token = get_resolution_from_first_video(entry)  # Probe first video file for resolution
 
+            part_match = re.search(r"\b(?P<label>part|pt|volume|vol|cour|arc)\b\.?\s*(?P<num>[A-Za-z0-9]+)\b", entry.name, re.IGNORECASE)  # Detect part/segment tokens
+            if part_match:  # If a part token was found
+                part_label = part_match.group("label")  # Extract matched label token
+                part_num = part_match.group("num")  # Extract matched numeric/alpha part token
+                part_token = f"{part_label.capitalize()} {part_num}"  # Standardize casing and build token
+            else:  # No part token found
+                part_token = None  # Ensure part_token is None when absent
+
             append_str = None  # Default to no suffix
             for s in APPEND_STRINGS:  # Iterate in configured order to detect suffix
                 if re.search(rf"\b{s}\b", entry.name, re.IGNORECASE):  # Case-insensitive whole-word match
@@ -590,6 +606,8 @@ def rename_dirs():
                     break  # Stop after the first match
 
             name_parts = ["Season", season_str, str(valid_year)]  # Base parts for new name
+            if part_token:  # Insert part token after year when present
+                name_parts.append(part_token)  # Preserve standardized part token
             if res_token:  # Insert resolution if present in original
                 name_parts.append(res_token)  # Preserve original casing for resolution
             if append_str:  # Append suffix only when present
@@ -665,9 +683,18 @@ def rename_dirs():
                             continue  # Skip renaming for this subdirectory
 
                         if api_year is not None and str(api_year) != str(existing_year_int):  # API year differs from folder year
+                            part_match_existing = re.search(r"\b(?P<label>part|pt|volume|vol|cour|arc)\b\.?\s*(?P<num>[A-Za-z0-9]+)\b", subentry.name, re.IGNORECASE)  # Detect existing part token in subdir
+                            if part_match_existing:  # If an existing part token exists in subdir
+                                part_label_existing = part_match_existing.group("label")  # Extract existing label
+                                part_num_existing = part_match_existing.group("num")  # Extract existing number/alpha
+                                existing_part_token = f"{part_label_existing.capitalize()} {part_num_existing}"  # Standardize existing part token
+                            else:  # No existing part token in subdir
+                                existing_part_token = None  # Ensure None when absent
                             corrected_name = f"Season {existing_season} {int(api_year)}"  # Build corrected name with new year
+                            if existing_part_token:  # If a part token should be preserved
+                                corrected_name = f"{corrected_name} {existing_part_token}"  # Append part token after year
                             if existing_resolution:  # Preserve existing resolution when present
-                                corrected_name = f"{corrected_name} {existing_resolution}"  # Append resolution after year
+                                corrected_name = f"{corrected_name} {existing_resolution}"  # Append resolution after year/part
                             if existing_suffix:  # Preserve existing suffix when present
                                 corrected_name = f"{corrected_name} {existing_suffix}"  # Append suffix
                             corrected_name = " ".join(corrected_name.split())  # Normalize whitespace
@@ -699,6 +726,14 @@ def rename_dirs():
                 if not res_token_sub:  # If no resolution token in subdirectory name
                     res_token_sub = get_resolution_from_first_video(subentry)  # Probe first video file for resolution
 
+                part_match_sub = re.search(r"\b(?P<label>part|pt|volume|vol|cour|arc)\b\.?\s*(?P<num>[A-Za-z0-9]+)\b", subentry.name, re.IGNORECASE)  # Detect part/segment tokens in subdir
+                if part_match_sub:  # If a part token was found in subdir
+                    part_label_sub = part_match_sub.group("label")  # Extract matched label token
+                    part_num_sub = part_match_sub.group("num")  # Extract matched numeric/alpha part token
+                    part_token_sub = f"{part_label_sub.capitalize()} {part_num_sub}"  # Standardize casing and build token
+                else:  # No part token found in subdir
+                    part_token_sub = None  # Ensure part_token_sub is None when absent
+
                 append_str = None  # Default to no suffix
                 for s in APPEND_STRINGS:  # Iterate in configured order
                     if re.search(rf"\b{s}\b", subentry.name, re.IGNORECASE):  # Case-insensitive whole-word match
@@ -706,6 +741,8 @@ def rename_dirs():
                         break  # Stop after the first match
 
                 name_parts = ["Season", season_str_sub, str(valid_year)]  # Base parts
+                if part_token_sub:  # Insert part token after year when present in subdir
+                    name_parts.append(part_token_sub)  # Preserve standardized part token for subdir
                 if res_token_sub:  # Insert resolution if present in original
                     name_parts.append(res_token_sub)  # Preserve original casing for resolution
                 if append_str:  # Append suffix only when present
