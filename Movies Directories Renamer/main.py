@@ -1,6 +1,6 @@
 """
 ================================================================================
-Rename TV Show Season Directories using TMDb Metadata
+Rename Movie Directories using TMDb Metadata
 ================================================================================
 Author      : Breno Farias da Silva
 Created     : 2025-11-11
@@ -8,11 +8,11 @@ Description :
    This script reads all directories inside the INPUT folder and renames them
    based on metadata extracted from their names and from The Movie Database (TMDb) API.
    The renaming pattern follows the format:
-      "Season {SeasonNumberWithTwoDigits} {YearOfThatSeason} {Resolution} {Append_String}"
+      "{MovieName} {YearOfRelease} {Resolution} {Append_String}"
 
    Key features include:
-      - Automatic extraction of season and resolution from folder names.
-      - Online lookup of release year for each season via TMDb API.
+      - Automatic extraction of movie name, year, resolution, and language from folder names.
+      - Online lookup of release year for each movie via TMDb API.
       - Clean renaming with standardized format and user-defined suffix.
       - Logging and verbose messages for better monitoring.
       - .env integration for secure API key handling.
@@ -22,7 +22,7 @@ Usage:
          TMDB_API_KEY=your_api_key_here
    2. Place the folders to be renamed inside the `./INPUT` directory.
    3. Run the script via:
-         $ python rename_seasons.py
+         $ python rename_movies.py
    4. The renamed folders will appear in the same directory with the new format.
 
 Outputs:
@@ -42,7 +42,7 @@ Dependencies:
    - colorama
 
 Assumptions & Notes:
-   - Directory names must contain the season (e.g., S01) and resolution (e.g., 1080p).
+   - Directory names must contain the movie name, year, resolution, and language.
    - Internet access is required to query TMDb API for release years.
    - The TMDb API key must be defined in a `.env` file in the project root.
 """
