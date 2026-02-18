@@ -630,7 +630,7 @@ def format_season_num(season):
 
 def rename_dirs():
     """
-    Iterates through the INPUT_DIR, extracts metadata, fetches the release year from TMDb,
+    Iterates through the INPUT_DIRS, extracts metadata, fetches the release year from TMDb,
     and renames each directory according to the defined pattern.
 
     If a directory does not match the regex pattern (i.e., missing season/resolution info),
@@ -643,7 +643,7 @@ def rename_dirs():
     suffix_group = "|".join([re.escape(s) for s in LANGUAGE_OPTIONS])  # Build alternation group from LANGUAGE_OPTIONS
     formatted_pattern = rf"^Season\s(?P<season>\d{{2}})\s(?P<year>\d{{4}})(?:\s(?P<resolution>\d{{3,4}}p|4k))?(?:\s(?P<suffix>{suffix_group}))?$"  # Strict formatted folder regex
 
-    roots = INPUT_DIR if isinstance(INPUT_DIR, (list, tuple)) else [INPUT_DIR]  # Normalize INPUT_DIR to a list of paths
+    roots = INPUT_DIRS if isinstance(INPUT_DIRS, (list, tuple)) else [INPUT_DIRS]  # Normalize INPUT_DIRS to a list of paths
     
     entries = []  # Build list of directory entries only across all configured roots
     
