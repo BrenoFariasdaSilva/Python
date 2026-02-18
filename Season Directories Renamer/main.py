@@ -333,15 +333,23 @@ def rename_dirs():
             else:  # No suffix found
                 new_name = f"Season {season_str} {valid_year}"  # No suffix appended
 
-            new_name = " ".join(new_name.split())  # Normalize whitespace to prevent double spaces
-            new_path = entry.parent / new_name  # Compute new path for renaming
+                res_match = re.search(r"\b(\d{3,4}p|4k)\b", entry.name, re.IGNORECASE)  # Find resolution token
+                res_token = res_match.group(0) if res_match else None  # Preserve original matched token or None
 
-            print(f"{BackgroundColors.GREEN}Renaming:{Style.RESET_ALL} '{entry.name}' → '{new_name}'")  # Inform about the rename operation
-            entry.rename(new_path)  # Perform the filesystem rename operation
+                append_str = None  # Default to no suffix
+                for s in APPEND_STRINGS:  # Iterate in configured order
+                    if re.search(rf"\b{s}\b", entry.name, re.IGNORECASE):  # Case-insensitive whole-word match
+                        append_str = s  # Select the first matching configured suffix
+                        break  # Stop after the first match
 
-        # Case 2: The directory likely contains subdirectories for seasons
-        else:  # When top-level directory does not contain season info, inspect its subdirectories
-            print(f"{BackgroundColors.YELLOW}No season info found in '{entry.name}', scanning subdirectories...{Style.RESET_ALL}")  # Inform about scanning subdirectories
+                    name_parts = ["Season", season_str, str(valid_year)]  # Base parts
+                    if res_token:  # Insert resolution if present in original
+                        name_parts.append(res_token)  # Preserve original casing for resolution
+                    if append_str:  # Append suffix only when present
+                        name_parts.append(append_str)  # Append selected suffix
+
+                    new_name = " ".join(name_parts).strip()  # Join parts and trim edges
+                    new_name = " ".join(new_name.split())  # Collapse multiple internal spaces
             for subentry in entry.iterdir():  # Iterate over subentries inside the directory
                 if not subentry.is_dir():  # Skip non-directory subentries such as files
                     continue  # Continue to next subentry when current one is not a directory
@@ -429,26 +437,27 @@ def rename_dirs():
                     print(f"{BackgroundColors.YELLOW}Skipping (no valid year found): {subentry.name}{Style.RESET_ALL}")  # Inform about skipping due to missing year
                     continue  # Continue to next subentry without renaming
 
+                res_match_sub = re.search(r"\b(\d{3,4}p|4k)\b", subentry.name, re.IGNORECASE)  # Find resolution token
+                res_token_sub = res_match_sub.group(0) if res_match_sub else None  # Preserve matched token or None
+
                 append_str = None  # Default to no suffix
                 for s in APPEND_STRINGS:  # Iterate in configured order
                     if re.search(rf"\b{s}\b", subentry.name, re.IGNORECASE):  # Case-insensitive whole-word match
                         append_str = s  # Select the first matching configured suffix
                         break  # Stop after the first match
 
-                if append_str:  # If a suffix was found
-                    new_name = f"Season {season_str} {valid_year} {append_str}"  # Include suffix at end
-                else:  # No suffix found
-                    new_name = f"Season {season_str} {valid_year}"  # No suffix appended
+                name_parts = ["Season", season_str, str(valid_year)]  # Base parts
+                if res_token_sub:  # Insert resolution if present in original
+                    name_parts.append(res_token_sub)  # Preserve original casing for resolution
+                if append_str:  # Append suffix only when present
+                    name_parts.append(append_str)  # Append selected suffix
 
-                new_name = " ".join(new_name.split())  # Normalize whitespace to prevent double spaces
+                new_name = " ".join(name_parts).strip()  # Join parts and trim edges
+                new_name = " ".join(new_name.split())  # Collapse multiple internal spaces
                 new_path = subentry.parent / new_name  # Compute new path for subdirectory rename
 
-                res_present = bool(re.search(r"\b(\d{3,4}p|4k)\b", subentry.name, re.IGNORECASE))  # Detect resolution token
-                lang_present = False  # Assume no language suffix until found
-                for s in APPEND_STRINGS:  # Iterate configured suffixes in order
-                    if re.search(rf"\b{s}\b", subentry.name, re.IGNORECASE):  # Case-insensitive whole-word match
-                        lang_present = True  # Mark language suffix present
-                        break  # Stop at first match
+                res_present = bool(res_token_sub)  # Detect presence of resolution token
+                lang_present = bool(append_str)  # Detect presence of language suffix
                 name_color = BackgroundColors.CYAN if (res_present and lang_present) else BackgroundColors.YELLOW  # Choose color
                 print(f"{BackgroundColors.GREEN}Renaming subdir: '{name_color}{subentry.name}{BackgroundColors.GREEN}' → '{BackgroundColors.CYAN}{new_name}{BackgroundColors.GREEN}'{Style.RESET_ALL}")  # Inform about the subdirectory rename
                 subentry.rename(new_path)  # Perform the filesystem rename operation for subdirectory
