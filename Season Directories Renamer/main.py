@@ -292,7 +292,7 @@ def rename_dirs():
                         api_year = None  # Mark API year as unavailable
 
                     if api_year is not None and str(api_year) == str(existing_year_int):  # If API year matches existing year exactly
-                        print(f"{BackgroundColors.YELLOW}Skipping (already correctly formatted): {entry.name}{Style.RESET_ALL}")  # Inform user that folder is already correct
+                        verbose_output(f"{BackgroundColors.YELLOW}Skipping (already correctly formatted): {entry.name}{Style.RESET_ALL}")  # Inform user that folder is already correct
                         continue  # Skip renaming since folder is already correct
                     if api_year is not None and str(api_year) != str(existing_year_int):  # If API year differs, correct the year in the folder name
                         corrected_name = f"Season {existing_season} {int(api_year)}"  # Build corrected name with new year
@@ -399,7 +399,7 @@ def rename_dirs():
                             api_year = None  # Mark API year as unavailable
 
                         if api_year is not None and str(api_year) == str(existing_year_int):  # API year matches existing year
-                            print(f"{BackgroundColors.YELLOW}Skipping (already correctly formatted): {subentry.name}{Style.RESET_ALL}")  # Inform that subdir is already correct
+                            verbose_output(f"{BackgroundColors.YELLOW}Skipping (already correctly formatted): {subentry.name}{Style.RESET_ALL}")  # Inform that subdir is already correct
                             continue  # Skip renaming for this subdirectory
                         if api_year is not None and str(api_year) != str(existing_year_int):  # API year differs from folder year
                             corrected_name = f"Season {existing_season} {int(api_year)}"  # Build corrected name with new year
