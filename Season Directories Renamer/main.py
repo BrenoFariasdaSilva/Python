@@ -624,8 +624,10 @@ def rename_dirs():
     suffix_group = "|".join([re.escape(s) for s in APPEND_STRINGS])  # Build alternation group from APPEND_STRINGS
     formatted_pattern = rf"^Season\s(?P<season>\d{{2}})\s(?P<year>\d{{4}})(?:\s(?P<resolution>\d{{3,4}}p|4k))?(?:\s(?P<suffix>{suffix_group}))?$"  # Strict formatted folder regex
 
-    for entry in INPUT_DIR.iterdir():  # Iterate over entries in the INPUT_DIR path
-        print(f"{BackgroundColors.GREEN}Processing: {BackgroundColors.CYAN}{entry.name}{Style.RESET_ALL}")  # Output the name of the current entry being processed
+    entries = [p for p in INPUT_DIR.iterdir() if p.is_dir()]  # Build list of directory entries only
+    total = len(entries)  # Compute total number of directories to process
+    for idx, entry in enumerate(entries, start=1):  # Iterate with index and entry
+        print(f"{BackgroundColors.GREEN}Processing {BackgroundColors.CYAN}{idx}{BackgroundColors.GREEN}/{BackgroundColors.CYAN}{total}{BackgroundColors.GREEN}: {BackgroundColors.CYAN}{entry.name}{Style.RESET_ALL}")  # Output index/total and entry name
         if not entry.is_dir():  # Skip non-directory entries such as files
             continue  # Continue to next entry when current one is not a directory
 
