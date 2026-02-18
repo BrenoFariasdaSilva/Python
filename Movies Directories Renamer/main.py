@@ -297,58 +297,32 @@ def parse_dir_name(dir_name):
     return None  # Return None when parsing fails (no match)
 
 
-def get_series_id(api_key, series_name):
+def get_movie_year(api_key, movie_name):
 
     """
-    Query TMDb search endpoint to find series ID by name.
+    Query TMDb movie search endpoint to find a movie and return its release year.
 
     :param api_key: TMDb API key string
-    :param series_name: Series name to search for on TMDb
-    :return: Integer TMDb series id
+    :param movie_name: Movie title to search for on TMDb
+    :return: Year string (e.g., '1999') or None when not found
     """
 
-    url = f"{TMDB_BASE_URL}/search/tv"  # Build search URL for TMDb TV search endpoint
-    params = {"api_key": api_key, "query": series_name}  # Prepare query parameters including API key and series name
-    response = requests.get(url, params=params)  # Perform HTTP GET request to TMDb search endpoint
-    response.raise_for_status()  # Raise exception for HTTP error responses
-    data = response.json()  # Parse JSON body from response
-    
-    results = data.get("results", [])  # Extract results array from TMDb response
-    
-    if not results:  # If no results were returned from TMDb
-        raise ValueError(f"No TMDb series found for '{series_name}'")  # Raise descriptive error when not found
-    
-    return results[0]["id"]  # Return the id of the first search result
-
-
-def get_season_year(api_key, series_id, season_number):
-
-    """
-    Query TMDb to get season details for a given series_id & season_number.
-    Returns the year (e.g., 2012) of that season's air date.
-
-    :param api_key: TMDb API key string
-    :param series_id: TMDb series id integer
-    :param season_number: Season number integer
-    :return: Year string (e.g., '2012') for the season air date
-    """
-
-    url = f"{TMDB_BASE_URL}/tv/{series_id}/season/{season_number}"  # Build URL for season details endpoint
-    params = {"api_key": api_key}  # Prepare params with API key
-    response = requests.get(url, params=params)  # Request season details from TMDb
-    response.raise_for_status()  # Raise exception on HTTP errors
-    data = response.json()  # Parse JSON payload from response
-    air_date = data.get("air_date")  # Attempt to read top-level air_date for the season
-    
-    if not air_date:  # If top-level air_date is missing, fallback to episode-level air_date
-        episodes = data.get("episodes", [])  # Extract episodes array from season details
-        
-        if episodes and "air_date" in episodes[0]:  # Check first episode for an air_date field
-            air_date = episodes[0]["air_date"]  # Use first episode air_date as fallback
-        else:  # No air_date available anywhere in response
-            raise ValueError(f"No air_date found for series {series_id} season {season_number}")  # Raise descriptive error
-        
-    return air_date.split("-")[0]  # Return only the year portion of the date string
+    try:  # Wrap network call to prevent propagation
+        url = f"{TMDB_BASE_URL}/search/movie"  # Build search URL for TMDb movie search endpoint
+        params = {"api_key": api_key, "query": movie_name}  # Prepare query parameters including API key and movie name
+        response = requests.get(url, params=params, timeout=10)  # Perform HTTP GET request to TMDb search endpoint
+        response.raise_for_status()  # Raise exception for HTTP error responses
+        data = response.json()  # Parse JSON body from response
+        results = data.get("results", [])  # Extract results array from TMDb response
+        if not results:  # If no results were returned from TMDb
+            return None  # Return None when not found
+        first = results[0]  # Use first (best) search result
+        release_date = first.get("release_date", "")  # Extract release_date if present
+        if release_date and len(release_date) >= 4:  # Ensure a year portion exists
+            return release_date.split("-")[0]  # Return year portion only
+        return None  # No usable release_date available
+    except Exception:  # Any network or parsing error must not crash the program
+        return None  # Fail silently and allow caller to continue
 
 
 def standardize_final_name(name):
