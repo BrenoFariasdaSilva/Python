@@ -587,6 +587,28 @@ def detect_changes(old_name, new_name):
     return " + ".join(tags)  # Return combined tags
 
 
+def determine_resolution(dir_path, name_hint):
+    """
+    Unified resolution detection for a given season folder.
+
+    1) Check for resolution token in `name_hint` using the project's regex.
+    2) If not found, probe the first video file inside `dir_path` (non-recursive)
+       using `get_resolution_from_first_video()`.
+    Preserves casing from filename results and returns None when absent.
+    """
+
+    res_search = re.search(r"\b(\d{3,4}p|4k)\b", name_hint, re.IGNORECASE)  # Search name hint for resolution
+    if res_search:  # If token found in folder name hint
+        return res_search.group(0)  # Preserve original matched casing
+
+    try:  # Guard the probe call which may access filesystem
+        res_from_file = get_resolution_from_first_video(dir_path)  # Probe videos inside dir_path
+    except Exception:  # Any unexpected error while probing
+        res_from_file = None  # Fail silently and return None
+
+    return res_from_file  # May be None when no resolution found
+
+
 def rename_dirs():
     """
     Iterates through the INPUT_DIR, extracts metadata, fetches the release year from TMDb,
@@ -686,10 +708,7 @@ def rename_dirs():
                 print(f"{BackgroundColors.YELLOW}Skipping (no valid year found): {entry.name}{Style.RESET_ALL}")  # Inform about skipping due to missing year
                 continue  # Continue to next entry without renaming
 
-            res_match = re.search(r"\b(\d{3,4}p|4k)\b", entry.name, re.IGNORECASE)  # Find resolution token in folder name
-            res_token = res_match.group(0) if res_match else None  # Preserve original matched token or None
-            if not res_token:  # If no resolution token in folder name
-                res_token = get_resolution_from_first_video(entry)  # Probe first video file for resolution
+            res_token = determine_resolution(entry, entry.name)  # Determine resolution for this season folder
 
             part_match = re.search(r"\b(?P<label>part|pt|volume|vol|cour|arc)\b\.?\s*(?P<num>[A-Za-z0-9]+)\b", entry.name, re.IGNORECASE)  # Detect part/segment tokens
             if part_match:  # If a part token was found
@@ -869,10 +888,7 @@ def rename_dirs():
                     print(f"{BackgroundColors.YELLOW}Skipping (no valid year found): {subentry.name}{Style.RESET_ALL}")  # Inform about skipping due to missing year
                     continue  # Continue to next subentry without renaming
 
-                res_match_sub = re.search(r"\b(\d{3,4}p|4k)\b", subentry.name, re.IGNORECASE)  # Find resolution token
-                res_token_sub = res_match_sub.group(0) if res_match_sub else None  # Preserve matched token or None
-                if not res_token_sub:  # If no resolution token in subdirectory name
-                    res_token_sub = get_resolution_from_first_video(subentry)  # Probe first video file for resolution
+                res_token_sub = determine_resolution(subentry, subentry.name)  # Determine resolution for this season subfolder
 
                 part_match_sub = re.search(r"\b(?P<label>part|pt|volume|vol|cour|arc)\b\.?\s*(?P<num>[A-Za-z0-9]+)\b", subentry.name, re.IGNORECASE)  # Detect part/segment tokens in subdir
                 if part_match_sub:  # If a part token was found in subdir
