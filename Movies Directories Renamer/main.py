@@ -74,12 +74,11 @@ class BackgroundColors:  # Colors for the terminal
 # Execution Constants:
 VERBOSE = False  # Set to True to output verbose messages
 INPUT_DIRS = [
-    Path("D:/Sem Backup/Download/Temp/Movies"),
-    # Path("E:/Movies/Dual"),
-    # Path("E:/Movies/Dublado"),
-    # Path("E:/Movies/English"),
-    # Path("E:/Movies/Legendado"),
-    # Path("E:/Movies/Nacional"),
+    Path("E:/Movies/Dual"),
+    Path("E:/Movies/Dublado"),
+    Path("E:/Movies/English"),
+    Path("E:/Movies/Legendado"),
+    Path("E:/Movies/Nacional"),
 ]  # The input directory or list of input directories
 LANGUAGE_OPTIONS = ["Dual", "Dublado", "English", "Legendado", "Nacional"]  # User-defined suffixes for renaming
 TMDB_BASE_URL = "https://api.themoviedb.org/3"  # Base URL for TMDb API
