@@ -832,6 +832,7 @@ def rename_dirs():
         print()  # Add single spacing after processing this input root
 
     generate_report(report_data)  # Call report writer with the built report_data
+    generate_duplicate_movies_report(report_data)  # Call duplicate report writer with the built report_data
 
 
 def to_seconds(obj):
@@ -861,7 +862,7 @@ def to_seconds(obj):
 
 def generate_report(report_data: dict) -> None:
     """
-    Generate a `report.json` file in the project root from `report_data`.
+    Generate a `movies_renaming_report.json` file in the project root from `report_data`.
 
     :param report_data: The report dictionary built during processing
     :return: None
@@ -869,14 +870,105 @@ def generate_report(report_data: dict) -> None:
 
     report_data["generated_at"] = datetime.datetime.now().isoformat()  # Add ISO timestamp to the report
     
-    out_path = Path(__file__).parent / "report.json"  # Compute output path in project root
+    out_path = Path(__file__).parent / "movies_renaming_report.json"  # Compute output path in project root
     
     try:  # Guard file I/O to avoid raising
         with out_path.open("w", encoding="utf-8") as f:  # Open file for writing with UTF-8 encoding
             json.dump(report_data, f, indent=4, ensure_ascii=False)  # Write JSON with required options
     except Exception as e:  # On any error while writing, report but do not raise
-        print(f"{BackgroundColors.RED}Failed to write report.json: {e}{Style.RESET_ALL}")  # Log write failure
+        print(f"{BackgroundColors.RED}Failed to write movies_renaming_report.json: {e}{Style.RESET_ALL}")  # Log write failure
         return  # Ensure function exits without raising
+
+
+def generate_duplicate_movies_report(report_data: dict) -> None:
+    """
+    Generate a `duplicate_movies_report.json` summarizing movies with the same
+    base title but different language or resolution across input roots.
+
+    This function receives the already-built `report_data` dictionary,
+    computes groups of duplicates, and writes the resulting JSON file to
+    the project root. The function is defensive and never raises.
+    """
+
+    try:  # Guard the whole duplicate report generation
+        duplicates_map = {}  # Initialize mapping of base_title -> list of records
+        for root_key, root_info in report_data.get("input_dirs", {}).items():  # Iterate configured input roots
+            for rec in root_info.get("directories_modified", []):  # Iterate modifications for this root
+                new_name = rec.get("new_name", "")  # Read the new directory name safely
+                old_name = rec.get("old_name", "")  # Read the old directory name safely
+                
+                try:  # Guard regex operations
+                    base = re.sub(r"\b(19|20)\d{2}\b", "", new_name)  # Strip year tokens
+                except Exception:  # On regex failure
+                    base = new_name  # Fallback to full new_name
+                
+                try:  # Guard regex operations
+                    base = re.sub(r"\b(\d{3,4}p|4k)\b", "", base, flags=re.IGNORECASE)  # Strip resolution tokens
+                except Exception:  # On regex failure
+                    base = base  # Keep as-is on failure
+                
+                try:  # Guard language stripping
+                    for s in LANGUAGE_OPTIONS:  # Iterate canonical language options
+                        base = re.sub(rf"\b{re.escape(s)}\b", "", base, flags=re.IGNORECASE)  # Strip language token
+                except Exception:  # On any failure
+                    base = base  # Keep as-is on failure
+                base_title = " ".join(base.split()).strip()  # Normalize whitespace to produce canonical base title
+
+                try:  # Guard extraction
+                    res_m = re.search(r"\b(\d{3,4}p|4k)\b", new_name, re.IGNORECASE)  # Search for resolution token
+                except Exception:  # On regex failure
+                    res_m = None  # Treat as missing
+                resolution = None if not res_m else ("2160p" if res_m.group(0).lower() == "4k" else res_m.group(0))  # Normalize 4K
+
+                lang = None  # Default when absent
+                try:  # Guard language extraction
+                    for s in LANGUAGE_OPTIONS:  # Iterate canonical suffix list
+                        if re.search(rf"\b{s}\b", new_name, re.IGNORECASE):  # Detect whole-word match
+                            lang = s  # Use canonical form
+                            break  # Stop after first match
+                except Exception:  # On any error
+                    lang = None  # Keep as None on failure
+
+                record = {  # Prepare record dictionary
+                    "input_root": root_key,  # Source input root path
+                    "old_name": old_name,  # Original directory name
+                    "new_name": new_name,  # Final directory name
+                    "resolution": resolution,  # Detected resolution or None
+                    "language": lang,  # Detected language or None
+                }  # End record
+
+                try:  # Guard mapping append
+                    if not base_title:  # Skip empty base titles defensively
+                        continue  # Skip to next record
+                    duplicates_map.setdefault(base_title, []).append(record)  # Append record into list for base_title
+                except Exception:  # On failure to append
+                    continue  # Skip problematic record
+
+        filtered = {}  # Initialize filtered duplicates dictionary
+        for title, records in duplicates_map.items():  # Iterate candidate groups
+            try:  # Guard comparison logic
+                combos = set()  # Track distinct (resolution, language) pairs
+                for r in records:  # Iterate records in group
+                    combos.add((r.get("resolution"), r.get("language")))  # Add tuple to set
+                if len(records) > 1 and len(combos) > 1:  # Require multiple entries and differing resolution/lang combos
+                    filtered[title] = records  # Keep this title as duplicate group
+            except Exception:  # On any error while filtering
+                continue  # Skip this title on error
+
+        dup_report = {  # Top-level structure for duplicate report
+            "generated_at": datetime.datetime.now().isoformat(),  # ISO timestamp
+            "duplicates": filtered,  # Mapping of base title -> list of records
+        }  # End dup_report
+
+        out_dup_path = Path(__file__).parent / "duplicate_movies_report.json"  # Compute output path
+        try:  # Guard file writing
+            with out_dup_path.open("w", encoding="utf-8") as f:  # Open file for writing in UTF-8
+                json.dump(dup_report, f, indent=4, ensure_ascii=False)  # Dump JSON using required parameters
+        except Exception as e:  # On file write failure
+            print(f"{BackgroundColors.RED}Failed to write duplicate_movies_report.json: {e}{Style.RESET_ALL}")  # Log write failure
+            return  # Ensure function exits without raising
+    except Exception:  # Catch-all to prevent any exception from escaping
+        return  # Never raise outward
 
 
 def calculate_execution_time(start_time, finish_time=None):
