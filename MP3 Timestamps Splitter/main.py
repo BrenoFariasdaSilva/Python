@@ -483,9 +483,10 @@ def main():
         timestamps = parse_timestamps(timestamps_file)  # Parse the timestamps from the timestamp file
 
         if not timestamps:  # If no valid timestamps are found
+            rel_path = os.path.normpath(os.path.relpath(timestamps_file))
             print(
-                f"{BackgroundColors.RED}No valid timestamps found in the {BackgroundColors.CYAN}{timestamps_file}{BackgroundColors.RED} file. Please add valid timestamps.{Style.RESET_ALL}"
-            )  # Output the error message
+                f"{BackgroundColors.RED}No valid timestamps found in the expected file: {BackgroundColors.CYAN}{rel_path}{BackgroundColors.RED}. Please add valid timestamps.{Style.RESET_ALL}"
+            )  # Output the error message with full relative path
             continue  # Skip to the next MP3 file
 
         write_updated_timestamps(timestamps, timestamps_file)  # Write the updated timestamps to the timestamp file
