@@ -241,7 +241,6 @@ def normalize_timestamp(timestamp):
     if not hours:  # If hours are missing (meaning we had "mm:ss"), default to "00"
         hours = "00"  # Default hours to "00"
 
-    # Ensure each part has two digits
     hours = hours.zfill(2)  # Fill the hours with leading zeros if needed
     minutes = minutes.zfill(2)  # Fill the minutes with leading zeros if needed
     seconds = seconds.zfill(2)  # Fill the seconds with leading zeros if needed
@@ -377,10 +376,9 @@ def split_mp3(mp3_path, timestamps_file, output_subdir):
             song_filename = f"{str(i+1).zfill(2)} - {song_name}.mp3"  # Create the song filename
             output_path = os.path.join(output_subdir, song_filename)  # Path to the output file
 
-            # Run ffmpeg and catch errors
             ffmpeg.input(mp3_path, **duration_option).output(output_path, format="mp3", loglevel="error").run(
                 overwrite_output=True
-            )
+            )  # Run ffmpeg and catch errors
 
             print(f"{BackgroundColors.GREEN}✅ Split: {BackgroundColors.CYAN}{song_filename}{Style.RESET_ALL}")
 
