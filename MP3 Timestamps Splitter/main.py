@@ -248,6 +248,23 @@ def normalize_timestamp(timestamp):
     return f"{hours}:{minutes}:{seconds}"  # Return the normalized timestamp
 
 
+def sanitize_filename(name: str) -> str:
+    """
+    Make a song name safe for use as a filename by replacing path separators
+    and other characters invalid on Windows/other OSes.
+
+    :param name: original song name
+    :return: sanitized filename-friendly song name
+    """
+
+    sanitized = re.sub(r"[\\/]+", " - ", name)  # Replace path separators with " - "
+    sanitized = re.sub(r'[<>:"|?*]+', "-", sanitized)  # Replace characters invalid on Windows with "-"
+    sanitized = re.sub(r"\s+", " ", sanitized).strip()  # Replace multiple spaces with a single space and trim
+    sanitized = re.sub(r"[-]{2,}", "-", sanitized)  # Replace multiple hyphens with a single hyphen
+    sanitized = sanitized.strip(" .")  # Remove leading/trailing spaces and dots
+
+    return sanitized or "untitled"  # Return "untitled" if the sanitized name is empty
+
 def parse_timestamps(timestamps_file):
     """
     Parses timestamps from a file, handling both "name timestamp" and "timestamp name" formats.
@@ -373,7 +390,8 @@ def split_mp3(mp3_path, timestamps_file, output_subdir):
                 {"ss": start_time, "to": next_start_time} if next_start_time else {"ss": start_time}
             )  # Set the duration option based on the start and next start time
 
-            song_filename = f"{str(i+1).zfill(2)} - {song_name}.mp3"  # Create the song filename
+            safe_song_name = sanitize_filename(song_name)
+            song_filename = f"{str(i+1).zfill(2)} - {safe_song_name}.mp3"  # Create the song filename
             output_path = os.path.join(output_subdir, song_filename)  # Path to the output file
 
             ffmpeg.input(mp3_path, **duration_option).output(output_path, format="mp3", loglevel="error").run(
