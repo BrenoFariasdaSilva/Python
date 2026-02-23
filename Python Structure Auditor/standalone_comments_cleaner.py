@@ -1,0 +1,348 @@
+"""
+================================================================================
+Standalone Comments Cleaner
+================================================================================
+Author      : Breno Farias da Silva
+Created     : 2026-02-14
+Description :
+    This script removes standalone comments from Python source files while
+    preserving important section headers and structured comments.
+    It processes specified files and cleans unnecessary inline comments.
+
+    Key features include:
+        - Automatic detection and removal of standalone comments
+        - Preservation of important section headers (Functions, Classes, etc.)
+        - Batch processing of multiple Python files
+        - UTF-8 encoding support for international characters
+        - Logging of all operations to both terminal and file
+
+Usage:
+    1. Add the Python files you want to clean to the FILES list constant.
+    2. Run the script using the Makefile or directly with Python:
+        $ make run   or   $ python main.py
+    3. Cleaned files will be written back in place (original files are overwritten).
+
+Outputs:
+    - Modified Python source files (in place)
+    - Log file in ./Logs/ directory with execution details
+    - Terminal output showing processing status for each file
+
+TODOs:
+    - Add backup functionality before overwriting files
+    - Implement dry-run mode to preview changes
+    - Add command-line argument support for file selection
+    - Support for processing entire directories recursively
+
+Dependencies:
+    - Python >= 3.6
+    - re (built-in)
+    - pathlib (built-in)
+    - colorama
+    - datetime, os, platform, sys, atexit (built-in)
+
+Assumptions & Notes:
+    - Files must be UTF-8 encoded
+    - Original files are overwritten without backup
+    - Section headers like "Functions Definitions:", "Classes Definitions:", etc. are preserved
+    - Only processes files listed in the FILES constant
+    - Sound notification disabled on Windows
+"""
+
+import atexit  # For playing a sound when the program finishes
+import datetime  # For getting the current date and time
+import os  # For running a command in the terminal
+import sys  # For system-specific parameters and functions
+import platform  # For getting the operating system name
+import re  # For regular expressions
+import sys  # For system-specific parameters and functions
+from colorama import Style  # For coloring the terminal
+from Logger import Logger  # For logging output to both terminal and file
+from pathlib import Path  # For handling file paths
+
+
+# Macros:
+class BackgroundColors:  # Colors for the terminal
+    CYAN = "\033[96m"  # Cyan
+    GREEN = "\033[92m"  # Green
+    YELLOW = "\033[93m"  # Yellow
+    RED = "\033[91m"  # Red
+    BOLD = "\033[1m"  # Bold
+    UNDERLINE = "\033[4m"  # Underline
+    CLEAR_TERMINAL = "\033[H\033[J"  # Clear the terminal
+
+
+# Execution Constants:
+VERBOSE = False  # Set to True to output verbose messages
+
+# Files to Process:
+FILES = [
+    "dataset_converter.py",
+    "dataset_descriptor.py",
+    "genetic_algorithm.py",
+    "hyperparameters_optimization.py",
+    "Logger.py",
+    "main.py",
+    "pca.py",
+    "rfe.py",
+    "stacking.py",
+    "telegram_bot.py",
+    "wgangp.py",
+    "Scripts/class_block_functions_committer.py",
+    "Scripts/comments_standardizer.py",
+    "Scripts/functions_committer.py",
+    "Scripts/functions_validator.py",
+    "Scripts/imports_placement.py",
+    "Scripts/main-template.py",
+    "Scripts/readme_sections_committer.py",
+    "Scripts/unused_functions_finder.py",
+]  # List of Python files to clean (e.g., ["main.py", "logger.py"])
+
+# Regex Constants:
+COMMENT_PATTERN = re.compile(
+    r'^[ \t]*#(?!\s*(?:Functions? Definitions:?|Classes? Definitions:?|Class Definitions:?|Class Definition:?|Telegram Bot Setup:?|Logger Setup:?|Sound Constants:?|RUN_FUNCTIONS:?|Macros:?|Execution Constants:?|Warnings:?|Regex Constants:?|Constants:?|Files to Process:?|Root directory to process \(non-recursive\):?|Telegram Configuration:?|Implement logic here:?)).*(?:\r?\n)?',
+    re.MULTILINE,
+)  # Regex pattern to match standalone comments while preserving section headers
+
+# Logger Setup:
+logger = Logger(f"./Logs/{Path(__file__).stem}.log", clean=True)  # Create a Logger instance
+sys.stdout = logger  # Redirect stdout to the logger
+sys.stderr = logger  # Redirect stderr to the logger
+
+# Sound Constants:
+SOUND_COMMANDS = {
+    "Darwin": "afplay",
+    "Linux": "aplay",
+    "Windows": "start",
+}  # The commands to play a sound for each operating system
+SOUND_FILE = "./.assets/Sounds/NotificationSound.wav"  # The path to the sound file
+
+# RUN_FUNCTIONS:
+RUN_FUNCTIONS = {
+    "Play Sound": True,  # Set to True to play a sound when the program finishes
+}
+
+# Functions Definitions:
+
+
+def verbose_output(true_string="", false_string=""):
+    """
+    Outputs a message if the VERBOSE constant is set to True.
+
+    :param true_string: The string to be outputted if the VERBOSE constant is set to True.
+    :param false_string: The string to be outputted if the VERBOSE constant is set to False.
+    :return: None
+    """
+
+    if VERBOSE and true_string != "":  # If VERBOSE is True and a true_string was provided
+        print(true_string)  # Output the true statement string
+    elif false_string != "":  # If a false_string was provided
+        print(false_string)  # Output the false statement string
+
+
+def verify_filepath_exists(filepath):
+    """
+    Verify if a file or folder exists at the specified path.
+
+    :param filepath: Path to the file or folder
+    :return: True if the file or folder exists, False otherwise
+    """
+
+    verbose_output(
+        f"{BackgroundColors.GREEN}Verifying if the file or folder exists at the path: {BackgroundColors.CYAN}{filepath}{Style.RESET_ALL}"
+    )  # Output the verbose message
+
+    return os.path.exists(filepath)  # Return True if the file or folder exists, False otherwise
+
+
+def clean_standalone_comments(filepath):
+    """
+    Removes standalone comments from a Python file while preserving section headers.
+
+    :param filepath: Path to the Python file to clean
+    :return: True if successful, False otherwise
+    """
+
+    path = Path(filepath)  # Convert to Path object
+
+    verbose_output(
+        f"{BackgroundColors.GREEN}Reading file: {BackgroundColors.CYAN}{filepath}{Style.RESET_ALL}"
+    )  # Output verbose message
+
+    try:  # Attempt to read and process the file
+        content = path.read_text(encoding="utf-8")  # Read the file content
+        cleaned = re.sub(COMMENT_PATTERN, "", content)  # Remove standalone comments using regex
+
+        path.write_text(cleaned, encoding="utf-8")  # Write the cleaned content back to the file
+        print(
+            f"{BackgroundColors.GREEN}Processed: {BackgroundColors.CYAN}{filepath}{Style.RESET_ALL}"
+        )  # Output success message
+        return True  # Return success
+
+    except Exception as e:  # Catch any exceptions
+        print(
+            f"{BackgroundColors.RED}Error processing {BackgroundColors.CYAN}{filepath}{BackgroundColors.RED}: {e}{Style.RESET_ALL}"
+        )  # Output error message
+        return False  # Return failure
+
+
+def to_seconds(obj):
+    """
+    Converts various time-like objects to seconds.
+    
+    :param obj: The object to convert (can be int, float, timedelta, datetime, etc.)
+    :return: The equivalent time in seconds as a float, or None if conversion fails
+    """
+    
+    if obj is None:  # None can't be converted
+        return None  # Signal failure to convert
+    if isinstance(obj, (int, float)):  # Already numeric (seconds or timestamp)
+        return float(obj)  # Return as float seconds
+    if hasattr(obj, "total_seconds"):  # Timedelta-like objects
+        try:  # Attempt to call total_seconds()
+            return float(obj.total_seconds())  # Use the total_seconds() method
+        except Exception:
+            pass  # Fallthrough on error
+    if hasattr(obj, "timestamp"):  # Datetime-like objects
+        try:  # Attempt to call timestamp()
+            return float(obj.timestamp())  # Use timestamp() to get seconds since epoch
+        except Exception:
+            pass  # Fallthrough on error
+    return None  # Couldn't convert
+
+
+def calculate_execution_time(start_time, finish_time=None):
+    """
+    Calculates the execution time and returns a human-readable string.
+
+    Accepts either:
+    - Two datetimes/timedeltas: `calculate_execution_time(start, finish)`
+    - A single timedelta or numeric seconds: `calculate_execution_time(delta)`
+    - Two numeric timestamps (seconds): `calculate_execution_time(start_s, finish_s)`
+
+    Returns a string like "1h 2m 3s".
+    """
+
+    if finish_time is None:  # Single-argument mode: start_time already represents duration or seconds
+        total_seconds = to_seconds(start_time)  # Try to convert provided value to seconds
+        if total_seconds is None:  # Conversion failed
+            try:  # Attempt numeric coercion
+                total_seconds = float(start_time)  # Attempt numeric coercion
+            except Exception:
+                total_seconds = 0.0  # Fallback to zero
+    else:  # Two-argument mode: Compute difference finish_time - start_time
+        st = to_seconds(start_time)  # Convert start to seconds if possible
+        ft = to_seconds(finish_time)  # Convert finish to seconds if possible
+        if st is not None and ft is not None:  # Both converted successfully
+            total_seconds = ft - st  # Direct numeric subtraction
+        else:  # Fallback to other methods
+            try:  # Attempt to subtract (works for datetimes/timedeltas)
+                delta = finish_time - start_time  # Try subtracting (works for datetimes/timedeltas)
+                total_seconds = float(delta.total_seconds())  # Get seconds from the resulting timedelta
+            except Exception:  # Subtraction failed
+                try:  # Final attempt: Numeric coercion
+                    total_seconds = float(finish_time) - float(start_time)  # Final numeric coercion attempt
+                except Exception:  # Numeric coercion failed
+                    total_seconds = 0.0  # Fallback to zero on failure
+
+    if total_seconds is None:  # Ensure a numeric value
+        total_seconds = 0.0  # Default to zero
+    if total_seconds < 0:  # Normalize negative durations
+        total_seconds = abs(total_seconds)  # Use absolute value
+
+    days = int(total_seconds // 86400)  # Compute full days
+    hours = int((total_seconds % 86400) // 3600)  # Compute remaining hours
+    minutes = int((total_seconds % 3600) // 60)  # Compute remaining minutes
+    seconds = int(total_seconds % 60)  # Compute remaining seconds
+
+    if days > 0:  # Include days when present
+        return f"{days}d {hours}h {minutes}m {seconds}s"  # Return formatted days+hours+minutes+seconds
+    if hours > 0:  # Include hours when present
+        return f"{hours}h {minutes}m {seconds}s"  # Return formatted hours+minutes+seconds
+    if minutes > 0:  # Include minutes when present
+        return f"{minutes}m {seconds}s"  # Return formatted minutes+seconds
+    return f"{seconds}s"  # Fallback: only seconds
+
+
+def play_sound():
+    """
+    Plays a sound when the program finishes and skips if the operating system is Windows.
+
+    :param: None
+    :return: None
+    """
+
+    current_os = platform.system()  # Get the current operating system
+    if current_os == "Windows":  # If the current operating system is Windows
+        return  # Do nothing
+
+    if verify_filepath_exists(SOUND_FILE):  # If the sound file exists
+        if current_os in SOUND_COMMANDS:  # If the platform.system() is in the SOUND_COMMANDS dictionary
+            os.system(f"{SOUND_COMMANDS[current_os]} {SOUND_FILE}")  # Play the sound
+        else:  # If the platform.system() is not in the SOUND_COMMANDS dictionary
+            print(
+                f"{BackgroundColors.RED}The {BackgroundColors.CYAN}{current_os}{BackgroundColors.RED} is not in the {BackgroundColors.CYAN}SOUND_COMMANDS dictionary{BackgroundColors.RED}. Please add it!{Style.RESET_ALL}"
+            )
+    else:  # If the sound file does not exist
+        print(
+            f"{BackgroundColors.RED}Sound file {BackgroundColors.CYAN}{SOUND_FILE}{BackgroundColors.RED} not found. Make sure the file exists.{Style.RESET_ALL}"
+        )
+
+
+def main():
+    """
+    Main function.
+
+    :param: None
+    :return: None
+    """
+
+    print(
+        f"{BackgroundColors.CLEAR_TERMINAL}{BackgroundColors.BOLD}{BackgroundColors.GREEN}Welcome to the {BackgroundColors.CYAN}Standalone Comments Cleaner{BackgroundColors.GREEN} program!{Style.RESET_ALL}",
+        end="\n\n",
+    )  # Output the welcome message
+    start_time = datetime.datetime.now()  # Get the start time of the program
+
+    if not FILES:  # Verify if FILES list is empty
+        print(
+            f"{BackgroundColors.YELLOW}No files specified in the FILES list. Please add Python files to process.{Style.RESET_ALL}"
+        )  # Output warning message
+    else:  # Process the files
+        print(
+            f"{BackgroundColors.GREEN}Processing {BackgroundColors.CYAN}{len(FILES)}{BackgroundColors.GREEN} file(s)...{Style.RESET_ALL}",
+            end="\n\n",
+        )  # Output processing message
+
+        success_count = 0  # Initialize success counter
+        for file in FILES:  # Iterate through each file in the list
+            if verify_filepath_exists(file):  # Verify if the file exists
+                if clean_standalone_comments(file):  # Clean the file
+                    success_count += 1  # Increment success counter
+            else:  # If the file does not exist
+                print(
+                    f"{BackgroundColors.YELLOW}Skipping missing file: {BackgroundColors.CYAN}{file}{Style.RESET_ALL}"
+                )  # Output warning message
+
+        print(
+            f"\n{BackgroundColors.GREEN}Successfully processed {BackgroundColors.CYAN}{success_count}{BackgroundColors.GREEN} out of {BackgroundColors.CYAN}{len(FILES)}{BackgroundColors.GREEN} file(s).{Style.RESET_ALL}"
+        )  # Output summary
+
+    finish_time = datetime.datetime.now()  # Get the finish time of the program
+    print(
+        f"{BackgroundColors.GREEN}Start time: {BackgroundColors.CYAN}{start_time.strftime('%d/%m/%Y - %H:%M:%S')}\n{BackgroundColors.GREEN}Finish time: {BackgroundColors.CYAN}{finish_time.strftime('%d/%m/%Y - %H:%M:%S')}\n{BackgroundColors.GREEN}Execution time: {BackgroundColors.CYAN}{calculate_execution_time(start_time, finish_time)}{Style.RESET_ALL}"
+    )  # Output the start and finish times
+    print(
+        f"\n{BackgroundColors.BOLD}{BackgroundColors.GREEN}Program finished.{Style.RESET_ALL}"
+    )  # Output the end of the program message
+    (
+        atexit.register(play_sound) if RUN_FUNCTIONS["Play Sound"] else None
+    )  # Register the play_sound function to be called when the program finishes
+
+
+if __name__ == "__main__":
+    """
+    This is the standard boilerplate that calls the main() function.
+
+    :return: None
+    """
+
+    main()  # Call the main function
