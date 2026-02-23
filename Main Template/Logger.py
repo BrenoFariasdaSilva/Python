@@ -36,12 +36,15 @@ Assumptions:
     - The logger is safe for short-lived scripts and long-running processes.
 """
 
+
 import os  # For interacting with the filesystem
 import re  # For stripping ANSI escape sequences
 import sys  # For replacing stdout/stderr
 
+
 # Regex Constants:
 ANSI_ESCAPE_REGEX = re.compile(r"\x1B\[[0-9;]*[a-zA-Z]")  # Pattern to remove ANSI colors
+
 
 # Classes Definitions:
 
@@ -58,6 +61,7 @@ class Logger:
     :param logfile_path: Path to the log file.
     :param clean: If True, truncate the log file on init; otherwise append.
     """
+
 
     def __init__(self, logfile_path, clean=False):
         """
@@ -77,6 +81,7 @@ class Logger:
         mode = "w" if clean else "a"  # Choose file mode based on 'clean' flag
         self.logfile = open(logfile_path, mode, encoding="utf-8")  # Open log file
         self.is_tty = sys.stdout.isatty()  # Verify if stdout is a TTY
+
 
     def write(self, message):
         """
@@ -112,6 +117,7 @@ class Logger:
         except Exception:  # Fail silently to avoid breaking user code
             pass  # Silent fail
 
+
     def flush(self):
         """
         Flush the log file.
@@ -123,6 +129,7 @@ class Logger:
             self.logfile.flush()  # Flush log file
         except Exception:  # Fail silently
             pass  # Silent fail
+
 
     def close(self):
         """
