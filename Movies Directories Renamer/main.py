@@ -340,6 +340,7 @@ def get_movie_year(api_key, movie_name, filename_year=None):
         response.raise_for_status()  # Raise exception for HTTP error responses
         data = response.json()  # Parse JSON body from response
         results = data.get("results", [])  # Extract results array from TMDb response
+        
         if not results:  # If no results were returned from TMDb
             return None  # Return None when not found
 
