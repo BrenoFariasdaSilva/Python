@@ -124,6 +124,20 @@ def verify_filepath_exists(filepath):
     return os.path.exists(filepath)  # Return True if the file or folder exists, False otherwise
 
 
+def load_report_file():
+    """
+    Load Report JSON File.
+    
+    :param: None
+    :return: Parsed Report Data As A Dictionary
+    """
+    
+    with open(REPORT_PATH, "r", encoding="utf-8") as f:  # Open report file
+        report = json.load(f)  # Parse JSON
+    
+    return report  # Return report data
+
+
 def initialize_counters():
     """
     Initialize Counters Dictionary.
