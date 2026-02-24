@@ -405,34 +405,6 @@ def find_resolution_index(tokens):
     return None  # Return None if resolution not found
 
 
-def insert_special_tokens(tokens, imax_token, ai_tokens):
-    """
-    Insert IMAX and AI Upscaled 60FPS tokens immediately after resolution.
-
-    :param tokens: Cleaned token list without special markers
-    :param imax_token: Extracted IMAX token or None
-    :param ai_tokens: Extracted AI tokens list
-    :return: New ordered token list
-    """
-
-    res_index = find_resolution_index(tokens)  # Recompute resolution index
-    if res_index is None:
-        return tokens  # Return unchanged tokens if resolution missing
-
-    insert_index = res_index + 1  # Determine insertion index
-
-    if imax_token is not None:
-        tokens.insert(insert_index, imax_token)  # Insert IMAX after resolution
-        insert_index += 1  # Advance insertion index
-
-    if ai_tokens:
-        for t in ai_tokens:  # Insert AI tokens preserving order
-            tokens.insert(insert_index, t)  # Insert AI token
-            insert_index += 1  # Advance insertion index
-
-    return tokens  # Return updated tokens
-
-
 def normalize_special_tokens_position(filename):
     """
     Reposition IMAX and AI Upscaled 60FPS tokens immediately after the resolution token in a filename.
