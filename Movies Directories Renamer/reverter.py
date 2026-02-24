@@ -124,6 +124,19 @@ def verify_filepath_exists(filepath):
     return os.path.exists(filepath)  # Return True if the file or folder exists, False otherwise
 
 
+def update_expected_counter(counters, video_logs, dir_logs):
+    """
+    Update Expected Counter Based On Logs.
+    
+    :param counters: Counters Dictionary
+    :param video_logs: List Of Video File Log Entries
+    :param dir_logs: List Of Directory Log Entries
+    :return: None
+    """
+    
+    counters["expected"] += len(video_logs) + len(dir_logs)  # Add expected operations
+
+
 def resolve_video_file_entry(base_dir, file_entry, dir_logs, counters):
     """
     Resolve And Revert A Single Video File Entry.
