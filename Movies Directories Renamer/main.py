@@ -567,50 +567,47 @@ def normalize_special_tokens_position(filename):
     if imax_idx is None and hdr_idx is None and not ai_raw:  # If no special markers found
         return filename  # Return original filename unchanged
 
-    expected = build_expected_sequence(imax_raw, hdr_raw, ai_raw)  # Build expected ordered sequence
-
     year_re = re.compile(r"^(?:19|20)\d{2}$")  # Year-only token regex
-    first_year_idx = None
-    for i, t in enumerate(tokens):  # Scan tokens for year token
-        if year_re.match(t):  # Found a year token
-            first_year_idx = i  # Record index
-            break  # Stop after first year
 
-    res_idx = find_resolution_index(tokens)  # Find resolution index in original tokens
+    res_idx_orig = find_resolution_index(tokens)  # Find resolution index in original tokens
+    if res_idx_orig is not None and res_idx_orig + 1 < len(tokens) and re.fullmatch(r"(?i)HDR", tokens[res_idx_orig + 1]):  # HDR already correctly placed
+        return filename  # Return unchanged when HDR is already after resolution
 
-    insertion_index_expected = None  # Calculate expected insertion index for special tokens
-    if first_year_idx is not None:  # If a year token exists prefer placing special tokens before the year to maintain natural order of title - year - resolution - special tokens
-        insertion_index_expected = first_year_idx  # Place special tokens before year
-    elif res_idx is not None:
-        insertion_index_expected = res_idx  # Place special tokens before resolution when no year
-    else:
-        insertion_index_expected = len(tokens)  # Append at end when no year/resolution
-
-    check_slice = tokens[insertion_index_expected:insertion_index_expected + len(expected)]  # Slice tokens at expected position for comparison
-    if len(check_slice) == len(expected) and all(a.lower() == b.lower() for a, b in zip(check_slice, expected)):  # If expected tokens already in correct order at expected position
-        return filename  # Sequence already correct
-
-    cleaned = remove_special_tokens(tokens)  # Remove special tokens
-
-    first_year_idx_clean = None  # Find year index in cleaned tokens to determine where to insert special tokens
-    for i, t in enumerate(cleaned):  # Scan for year in cleaned tokens
-        if year_re.match(t):  # Found a year token
-            first_year_idx_clean = i  # Record index of year in cleaned tokens
-            break  # Stop after first year
+    cleaned = remove_special_tokens(tokens)  # Remove first occurrences of special tokens
 
     res_idx_clean = find_resolution_index(cleaned)  # Find resolution index in cleaned tokens
+    if res_idx_clean is not None:  # When resolution exists
+        insert_at = res_idx_clean + 1  # Insert HDR right after resolution
+    else:  # When no resolution found fall back to inserting before first year or at end
+        first_year_idx_clean = None  # Initialize first year index in cleaned tokens
+        for i, t in enumerate(cleaned):  # Scan cleaned tokens for a year token
+            if year_re.match(t):  # Found a year token
+                first_year_idx_clean = i  # Record index
+                break  # Stop after first match
+        if first_year_idx_clean is not None:  # If a year was found
+            insert_at = first_year_idx_clean  # Insert before year when resolution missing
+        else:
+            insert_at = len(cleaned)  # Append at end when no natural anchor
 
-    if first_year_idx_clean is not None:  # Prefer inserting before the year to maintain natural order of title - year - resolution - special tokens
-        insert_at = first_year_idx_clean  # Insert before year when year exists
-    elif res_idx_clean is not None:  # If no year exists insert after resolution to maintain natural order of title - resolution - special tokens
-        insert_at = res_idx_clean  # Insert after resolution when no year exists
-    else:  # If no year or resolution exists append at end since there's no natural anchor for special tokens
-        insert_at = len(cleaned)  # Append at end when no year or resolution to anchor special tokens
+    insertion = []  # Container for tokens to insert
+    if hdr_raw is not None:  # Preserve original HDR casing when available
+        insertion.append(hdr_raw)  # Ensure HDR is first among special tokens
+    else:  # Fallback: find any HDR-like token in original tokens to preserve casing
+        for t in tokens:  # Iterate original tokens
+            if re.fullmatch(r"(?i)HDR", t):  # Match HDR case-insensitively
+                insertion.append(t)  # Use found token casing
+                break  # Stop after first match
 
-    for tok in reversed(expected):  # Insert in reverse to maintain final order
-        cleaned.insert(insert_at, tok)  # Insert token at calculated position
+    if imax_raw is not None:  # If IMAX present, append it after HDR for deterministic ordering
+        insertion.append(imax_raw)  # Add IMAX preserving original casing
 
-    new_name = " ".join(cleaned)  # Reconstruct filename body
+    if ai_raw:  # If AI group present append it after IMAX
+        insertion.extend(ai_raw)  # Add AI tokens preserving original order and casing
+
+    for tok in reversed(insertion):  # Insert tokens in reverse to maintain final sequence
+        cleaned.insert(insert_at, tok)  # Insert token at the computed insertion index
+
+    new_name = " ".join(cleaned)  # Reconstruct filename body from tokens
 
     return new_name + ext  # Reattach extension and return normalized filename
 
