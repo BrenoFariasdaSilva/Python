@@ -561,30 +561,57 @@ def normalize_special_tokens_position(filename):
     ext = p.suffix  # Extract file extension
     name = p.stem  # Extract filename without extension
     tokens = name.split()  # Split filename into tokens
-    res_index = find_resolution_index(tokens)  # Locate resolution token
-    
-    if res_index is None:  # If resolution missing, nothing to do
-        return filename  # Return original filename unchanged
-    
-    imax_idx, hdr_idx, ai_idx, imax_raw, hdr_raw, ai_raw = extract_special_tokens(tokens)  # Extract special tokens
-    
+
+    imax_idx, hdr_idx, ai_idx, imax_raw, hdr_raw, ai_raw = extract_special_tokens(tokens)  # Extract special tokens and their raw casing
+
     if imax_idx is None and hdr_idx is None and not ai_raw:  # If no special markers found
         return filename  # Return original filename unchanged
-    
+
     expected = build_expected_sequence(imax_raw, hdr_raw, ai_raw)  # Build expected ordered sequence
-    
-    if is_sequence_correct(tokens, res_index, expected):  # Validate ordering
-        return filename  # Return original filename unchanged
-    
-    cleaned = remove_special_tokens(tokens)  # Remove first occurrence of special tokens
-    res_index_new = find_resolution_index(cleaned)  # Recompute resolution index in cleaned list
-    
-    if res_index_new is None:  # Defensive: if resolution lost, abort
-        return filename  # Return original filename unchanged
-    
-    cleaned = insert_special_tokens(cleaned, res_index_new, imax_raw, hdr_raw, ai_raw)  # Insert tokens correctly
+
+    year_re = re.compile(r"^(?:19|20)\d{2}$")  # Year-only token regex
+    first_year_idx = None
+    for i, t in enumerate(tokens):  # Scan tokens for year token
+        if year_re.match(t):  # Found a year token
+            first_year_idx = i  # Record index
+            break  # Stop after first year
+
+    res_idx = find_resolution_index(tokens)  # Find resolution index in original tokens
+
+    insertion_index_expected = None  # Calculate expected insertion index for special tokens
+    if first_year_idx is not None:  # If a year token exists prefer placing special tokens before the year to maintain natural order of title - year - resolution - special tokens
+        insertion_index_expected = first_year_idx  # Place special tokens before year
+    elif res_idx is not None:
+        insertion_index_expected = res_idx  # Place special tokens before resolution when no year
+    else:
+        insertion_index_expected = len(tokens)  # Append at end when no year/resolution
+
+    check_slice = tokens[insertion_index_expected:insertion_index_expected + len(expected)]  # Slice tokens at expected position for comparison
+    if len(check_slice) == len(expected) and all(a.lower() == b.lower() for a, b in zip(check_slice, expected)):  # If expected tokens already in correct order at expected position
+        return filename  # Sequence already correct
+
+    cleaned = remove_special_tokens(tokens)  # Remove special tokens
+
+    first_year_idx_clean = None  # Find year index in cleaned tokens to determine where to insert special tokens
+    for i, t in enumerate(cleaned):  # Scan for year in cleaned tokens
+        if year_re.match(t):  # Found a year token
+            first_year_idx_clean = i  # Record index of year in cleaned tokens
+            break  # Stop after first year
+
+    res_idx_clean = find_resolution_index(cleaned)  # Find resolution index in cleaned tokens
+
+    if first_year_idx_clean is not None:  # Prefer inserting before the year to maintain natural order of title - year - resolution - special tokens
+        insert_at = first_year_idx_clean  # Insert before year when year exists
+    elif res_idx_clean is not None:  # If no year exists insert after resolution to maintain natural order of title - resolution - special tokens
+        insert_at = res_idx_clean  # Insert after resolution when no year exists
+    else:  # If no year or resolution exists append at end since there's no natural anchor for special tokens
+        insert_at = len(cleaned)  # Append at end when no year or resolution to anchor special tokens
+
+    for tok in reversed(expected):  # Insert in reverse to maintain final order
+        cleaned.insert(insert_at, tok)  # Insert token at calculated position
+
     new_name = " ".join(cleaned)  # Reconstruct filename body
-    
+
     return new_name + ext  # Reattach extension and return normalized filename
 
 
@@ -921,7 +948,7 @@ def protect_title_abbreviation_dots(s):
     :return: String with abbreviation dots replaced by '<<DOT>>'
     """
 
-    abbr_re = re.compile(r"\b(?:[A-Za-z]{1,3}\.){1,}[A-Za-z]{1,3}\.?\b")  # Abbreviation pattern
+    abbr_re = re.compile(r'(?:(?<=\s)|^)(?:[A-Za-z]\.){1,4}(?:[A-Za-z]\.)?(?=(\s|$))')  # Abbreviation pattern
 
     return abbr_re.sub(replace, s)  # Return string with protected abbreviations
 
