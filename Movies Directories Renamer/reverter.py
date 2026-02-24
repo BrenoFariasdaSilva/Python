@@ -71,6 +71,8 @@ class BackgroundColors:  # Colors for the terminal
 # Execution Constants:
 VERBOSE = False  # Set to True to output verbose messages
 
+REPORT_PATH = r"./movies_renaming_report.json"  # The path to the report file
+
 # Logger Setup:
 logger = Logger(f"./Logs/{Path(__file__).stem}.log", clean=True)  # Create a Logger instance
 sys.stdout = logger  # Redirect stdout to the logger
