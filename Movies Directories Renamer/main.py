@@ -513,20 +513,94 @@ def normalize_special_tokens_position(filename):
     tokens = name.split()  # Split filename into tokens
 
     res_index = find_resolution_index(tokens)  # Locate resolution token
-    if res_index is None:
-        return filename  # Return original filename if resolution not found
+    if res_index is None:  # If resolution missing, nothing to do
+        return filename  # Return original filename unchanged
 
-    if is_already_ordered(tokens, res_index):
-        return filename  # Return original filename if already ordered
+    imax_idx = None  # Index of IMAX when found
+    hdr_idx = None  # Index of HDR when found
+    ai_idx = None  # Start index of AI group when found
+    ai_raw = []  # Original AI tokens when found
+    imax_raw = None  # Original IMAX token casing
+    hdr_raw = None  # Original HDR token casing
+    i = 0  # Iterator index
 
-    imax_token, ai_tokens, cleaned_tokens = extract_special_tokens(tokens)  # Extract special tokens
+    while i < len(tokens):  # Scan tokens for special markers
+        if imax_idx is None and re.fullmatch(r"(?i)IMAX", tokens[i]):  # Check IMAX token
+            imax_idx = i  # Record IMAX index
+            imax_raw = tokens[i]  # Capture original IMAX casing
+            i += 1  # Advance after IMAX
+            continue  # Continue scanning
+        if hdr_idx is None and re.fullmatch(r"(?i)HDR", tokens[i]):  # Check HDR token
+            hdr_idx = i  # Record HDR index
+            hdr_raw = tokens[i]  # Capture original HDR casing
+            i += 1  # Advance after HDR
+            continue  # Continue scanning
+        if ai_idx is None and i + 2 < len(tokens) and tokens[i].lower() == "ai" and tokens[i + 1].lower() == "upscaled" and tokens[i + 2].lower() == "60fps":  # Check AI group
+            ai_idx = i  # Record AI group start index
+            ai_raw = [tokens[i], tokens[i + 1], tokens[i + 2]]  # Capture original AI tokens
+            i += 3  # Advance past AI group
+            continue  # Continue scanning
+        i += 1  # Advance index when no special token matched
 
-    if imax_token is None and not ai_tokens:
-        return filename  # Return original filename if no special tokens found
+    if imax_idx is None and hdr_idx is None and not ai_raw:  # If no special markers found
+        return filename  # Return original filename unchanged
 
-    new_tokens = insert_special_tokens(cleaned_tokens, imax_token, ai_tokens)  # Insert tokens correctly
+    expected = []  # Expected tokens sequence after resolution
+    if imax_raw is not None:  # If IMAX present it precedes HDR and AI
+        expected.append(imax_raw)  # Add IMAX preserving casing
+    if hdr_raw is not None:  # If HDR present it follows IMAX when IMAX exists
+        expected.append(hdr_raw)  # Add HDR preserving casing
+    if ai_raw:  # If AI present it follows IMAX or HDR or resolution
+        expected.extend(ai_raw)  # Add AI group preserving original order and casing
 
-    return " ".join(new_tokens) + ext  # Reconstruct and return normalized filename
+    check_slice = tokens[res_index + 1 : res_index + 1 + len(expected)]  # Slice tokens after resolution for comparison
+    match_ok = False  # Flag for match status
+    if len(check_slice) == len(expected) and all(a.lower() == b.lower() for a, b in zip(check_slice, expected)):  # Case-insensitive compare for exact sequence
+        match_ok = True  # Sequence already correct
+    if match_ok:  # If ordering already correct
+        return filename  # Return original filename unchanged
+
+    cleaned = []  # Tokens after removal of first occurrences
+    removed_imax = False  # Track removal
+    removed_hdr = False  # Track removal
+    removed_ai = False  # Track removal
+    j = 0  # Index for removal pass
+    while j < len(tokens):  # Iterate original tokens
+        if not removed_ai and j + 2 < len(tokens) and tokens[j].lower() == "ai" and tokens[j + 1].lower() == "upscaled" and tokens[j + 2].lower() == "60fps":  # Remove AI group once
+            removed_ai = True  # Mark AI removed
+            j += 3  # Skip AI tokens
+            continue  # Continue after skipping
+        if not removed_imax and re.fullmatch(r"(?i)IMAX", tokens[j]):  # Remove IMAX once
+            removed_imax = True  # Mark IMAX removed
+            j += 1  # Skip IMAX token
+            continue  # Continue after skipping
+        if not removed_hdr and re.fullmatch(r"(?i)HDR", tokens[j]):  # Remove HDR once
+            removed_hdr = True  # Mark HDR removed
+            j += 1  # Skip HDR token
+            continue  # Continue after skipping
+        cleaned.append(tokens[j])  # Keep non-removed token
+        j += 1  # Advance index
+
+    res_index_new = find_resolution_index(cleaned)  # Recompute resolution index in cleaned list
+    if res_index_new is None:  # Defensive: if resolution lost, abort
+        return filename  # Return original filename unchanged
+
+    insert_index = res_index_new + 1  # Insert immediately after resolution
+
+    insertion = []  # Tokens to insert
+    if imax_raw is not None:  # If IMAX originally present
+        insertion.append(imax_raw)  # Add IMAX preserving casing
+    if hdr_raw is not None:  # If HDR originally present
+        insertion.append(hdr_raw)  # Add HDR preserving casing
+    if ai_raw:  # If AI originally present
+        insertion.extend(ai_raw)  # Add AI tokens preserving original order and casing
+
+    for tok in reversed(insertion):  # Insert in reverse to maintain final order
+        cleaned.insert(insert_index, tok)  # Insert token at calculated position
+
+    new_name = " ".join(cleaned)  # Reconstruct the filename body using single-space separators
+    return new_name + ext  # Reattach extension and return normalized filename
+
 
 def get_resolution_from_first_video(dir_path):
     """
