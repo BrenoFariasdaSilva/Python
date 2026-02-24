@@ -124,6 +124,26 @@ def verify_filepath_exists(filepath):
     return os.path.exists(filepath)  # Return True if the file or folder exists, False otherwise
 
 
+def handle_missing_source(src_path, dst_path, counters):
+    """
+    Handle Missing Source Scenario.
+
+    :param src_path: Source Path
+    :param dst_path: Destination Path
+    :param counters: Counters Dictionary
+    :return: True if handled, False otherwise
+    """
+    
+    if os.path.exists(dst_path):  # Check already reverted case
+        increment_counter(counters, "already_reverted")  # Increment already reverted
+        return True  # Signal handled
+
+    increment_counter(counters, "missing")  # Increment missing counter
+    print_skip_not_found(src_path)  # Print missing message
+    
+    return True  # Signal handled
+
+
 def handle_destination_conflict(dst_path, counters):
     """
     Handle Destination Already Existing.
