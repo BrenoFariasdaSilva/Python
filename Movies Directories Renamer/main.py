@@ -587,84 +587,113 @@ def normalize_special_tokens_position(filename):
     return new_name + ext  # Reattach extension and return normalized filename
 
 
+def extract_resolution_from_filename(filename):
+    """
+    Extract resolution token directly from filename using regex.
+
+    :param filename: Filename string
+    :return: Resolution token preserving original casing or None
+    """
+    try:  # Guard regex execution
+        match = re.search(r"\b(\d{3,4}p|4k)\b", filename, re.IGNORECASE)  # Search for resolution token in filename
+    except Exception:  # Handle any regex-related error
+        return None  # Return None if regex fails
+    if match:  # If a resolution token was found
+        return match.group(0)  # Return matched token preserving original casing
+    return None  # Return None when no resolution token found
+
+
+def map_height_to_resolution(height):
+    """
+    Map numeric height to standard lowercase resolution token.
+
+    :param height: Integer video height
+    :return: Resolution token string or None
+    """
+    if height >= 2160:  # Map 2160 and above to 2160p
+        return "2160p"  # Return 2160p
+    if height >= 1080:  # Map 1080 and above to 1080p
+        return "1080p"  # Return 1080p
+    if height >= 720:  # Map 720 and above to 720p
+        return "720p"  # Return 720p
+    if height >= 480:  # Map 480 and above to 480p
+        return "480p"  # Return 480p
+    return None  # Return None when below supported thresholds
+
+
+def probe_resolution_with_ffprobe(filepath):
+    """
+    Use ffprobe to extract video height and map to resolution.
+
+    :param filepath: Path to video file
+    :return: Resolution token string or None
+    """
+    
+    try:  # Wrap subprocess call to avoid crashes
+        proc = subprocess.run(  # Execute ffprobe command
+            [  # Command arguments list
+                "ffprobe",  # ffprobe executable
+                "-v",  # Set verbosity flag
+                "error",  # Only show errors
+                "-select_streams",  # Select specific streams
+                "v:0",  # First video stream
+                "-show_entries",  # Specify entries to show
+                "stream=height",  # Request stream height
+                "-of",  # Output format flag
+                "csv=p=0",  # CSV output without prefix
+                str(filepath),  # Target file path
+            ],
+            capture_output=True,  # Capture stdout and stderr
+            text=True,  # Decode output as text
+            check=True,  # Raise exception on non-zero exit
+        )  # Run subprocess
+    except FileNotFoundError:  # ffprobe not installed
+        return None  # Return None when ffprobe missing
+    except Exception:  # Any other subprocess error
+        return None  # Return None on probing failure
+
+    out = proc.stdout.strip()  # Strip whitespace from ffprobe output
+    if not out:  # If no output received
+        return None  # Return None when height missing
+
+    try:  # Attempt to parse height
+        height = int(out.splitlines()[0])  # Convert first line to integer
+    except Exception:  # Parsing failure
+        return None  # Return None when parsing fails
+
+    return map_height_to_resolution(height)  # Map height to resolution token
+
+
 def get_resolution_from_first_video(dir_path):
     """
     Attempt to derive resolution from the first valid video file in `dir_path`.
-
-    Steps:
-    1) Try to extract resolution token from the filename using regex.
-    2) If absent, attempt to call `ffprobe` to read video stream height.
-    3) Map height to standard resolution tokens (lowercase 'p').
-
-    Returns resolution token string (preserving filename casing) or None.
     """
 
-    video_exts = VIDEO_EXTS  # Reuse global set of video extensions to ensure consistency
+    video_exts = VIDEO_EXTS  # Reference global video extensions set
 
-    try:  # Guard filesystem iteration
-        entries = sorted(dir_path.iterdir())  # Deterministic ordering of directory entries
-    except Exception:  # If directory cannot be read
-        return None  # Give up and return None
+    try:  # Guard directory iteration
+        entries = sorted(dir_path.iterdir())  # Retrieve sorted directory entries
+    except Exception:  # Directory access failure
+        return None  # Return None if directory cannot be read
 
-    for candidate in entries:  # Iterate entries to find first video file
+    for candidate in entries:  # Iterate directory entries
         if not candidate.is_file():  # Skip non-file entries
-            continue  # Continue search
-        if candidate.suffix.lower() not in video_exts:  # Skip non-video extensions
-            continue  # Continue search
+            continue  # Continue to next entry
+        
+        if candidate.suffix.lower() not in video_exts:  # Skip non-video files
+            continue  # Continue to next entry
 
-        # First attempt: Extract resolution from filename
-        try:  # Regex can raise on weird inputs, guard it
-            name_match = re.search(r"\b(\d{3,4}p|4k)\b", candidate.name, re.IGNORECASE)  # Filename regex search
-        except Exception:  # Any regex-related error
-            name_match = None  # Treat as not found
-        if name_match:  # If token found in filename
-            return name_match.group(0)  # Preserve original filename casing
+        filename_resolution = extract_resolution_from_filename(candidate.name)  # Attempt filename-based extraction
+        if filename_resolution:  # If resolution found in filename
+            return filename_resolution  # Return filename resolution immediately
 
-        # Second attempt: Probe metadata with ffprobe (non-fatal)
-        try:  # Wrap external call to avoid crashes
-            proc = subprocess.run(  # Call ffprobe to get the height of the first video stream
-                [
-                    "ffprobe",
-                    "-v",
-                    "error",
-                    "-select_streams",
-                    "v:0",
-                    "-show_entries",
-                    "stream=height",
-                    "-of",
-                    "csv=p=0",
-                    str(candidate),
-                ],
-                capture_output=True,  # Capture stdout/stderr
-                text=True,  # Decode output as text
-                check=True,  # Raise CalledProcessError on non-zero exit
-            )  # Run ffprobe
-            
-            out = proc.stdout.strip()  # Strip whitespace from output
-            
-            if not out:  # No output returned
-                return None  # Give up and return None
+        probed_resolution = probe_resolution_with_ffprobe(candidate)  # Attempt ffprobe-based extraction
+        if probed_resolution:  # If resolution obtained from ffprobe
+            return probed_resolution  # Return probed resolution immediately
 
-            try:  # Height parsing may fail on unexpected output
-                height = int(out.splitlines()[0])  # Convert to int
-            except Exception:  # Parsing failed
-                return None  # Unable to derive resolution
+        return None  # Stop after first video file even if resolution not found
 
-            if height >= 2160:  # 4K and above map to 2160p
-                return "2160p"  # Use lowercase 'p' per rules
-            if height >= 1080:  # Map to 1080p
-                return "1080p"  # Use lowercase 'p'
-            if height >= 720:  # Map to 720p
-                return "720p"  # Use lowercase 'p'
-            if height >= 480:  # Map to 480p
-                return "480p"  # Use lowercase 'p'
-            return None  # Height exists but below thresholds
-        except FileNotFoundError:  # ffprobe not installed
-            return None  # Fail silently and return None
-        except Exception:  # Any other probing error
-            return None  # Fail silently and return None
-
-    return None  # No video file found in directory
+    return None  # Return None when no video files found
 
 
 def detect_changes(old_name, new_name):
