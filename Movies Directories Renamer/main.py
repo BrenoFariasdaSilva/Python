@@ -298,8 +298,10 @@ def find_exact_year_match(results, filename_year):
     for r in results:  # Iterate TMDb results in ranking order
         release_date = r.get("release_date", "")  # Extract release_date if present
         extracted_year = extract_year_from_release_date(release_date)  # Extract year safely from release_date
+        
         if extracted_year and extracted_year == target_year:  # Require exact numeric year equality
             return target_year  # Return matched year when exact-year match found
+        
     return None  # Return None when no exact-year match found
 
 
