@@ -845,43 +845,90 @@ def rename_dirs():
             if res_token and res_token.lower() == "4k":  # Convert 4K to 2160p per rules
                 res_token = "2160p"  # Use canonical 2160p
 
-            # Step 3: Extract year token (4 digits) from folder name if present
-            year_match = re.search(r"\b(19|20)\d{2}\b", entry.name)  # Year regex
-            existing_year = year_match.group(0) if year_match else None  # Existing year string or None
+            # Step 3: Gather all 4-digit numbers and prepare a cleaned title for TMDb lookup
+            years_in_name = re.findall(r"\b((?:19|20)\d{2})\b", entry.name)  # All 4-digit tokens found in the original name
 
-            # Step 4: Clean movie title by removing year/resolution/language tokens and brackets
             name_work = entry.name  # Work on a copy of the original name
-            if append_lang:  # Remove language token when present
-                name_work = re.sub(rf"\b{re.escape(append_lang)}\b", "", name_work, flags=re.IGNORECASE)  # Strip language token
-            if res_match:  # Remove resolution token when present in name
-                name_work = re.sub(re.escape(res_match.group(0)), "", name_work, flags=re.IGNORECASE)  # Strip resolution token
-            
-            name_work = re.sub(r"\((\d{4})\)", r"\1", name_work)  # Unwrap parenthesized year
-            if existing_year:  # Remove a bare year token once to avoid duplicates
-                name_work = re.sub(re.escape(existing_year), "", name_work, count=1)  # Remove first occurrence of year
-            
+            if append_lang:  # Remove language token when present (we'll append it later)
+                name_work = re.sub(rf"\b{re.escape(append_lang)}\b", "", name_work, flags=re.IGNORECASE)
+            if res_match:  # Remove resolution token when present for lookup
+                name_work = re.sub(re.escape(res_match.group(0)), "", name_work, flags=re.IGNORECASE)
+
+            name_work = re.sub(r"\((\d{4})\)", r"\1", name_work)
             name_work = re.sub(r"[._]+", " ", name_work)  # Replace dots/underscores with space
-            movie_title = " ".join(name_work.split()).strip()  # Normalize whitespace and trim edges
-            if not movie_title:  # If title becomes empty after cleaning
-                verbose_output(f"{BackgroundColors.YELLOW}Skipping (empty title after cleanup): {entry.name}{Style.RESET_ALL}")  # Inform skip case
-                continue  # Continue to next entry when title can't be derived
+            name_work = " ".join(name_work.split()).strip()  # Normalize whitespace and trim edges
+            if not name_work:  # If title becomes empty after cleaning
+                verbose_output(f"{BackgroundColors.YELLOW}Skipping (empty title after cleanup): {entry.name}{Style.RESET_ALL}")
+                continue
 
-            # Step 5: Verify/fetch correct year via TMDb (non-blocking)
-            tmdb_year = None  # Default when lookup fails
-            try:  # Protect API call with try/except to avoid crash
-                tmdb_year = get_movie_year(api_key, movie_title, existing_year)  # Query TMDb for movie year using filename year when present
-            except Exception as e:  # Any unexpected exception from helper
-                print(f"{BackgroundColors.RED}TMDb lookup error for '{movie_title}': {e}{Style.RESET_ALL}")  # Log error but continue processing
-                tmdb_year = None  # Ensure non-blocking behavior
+            # Step 4: Ask TMDb for the authoritative release year (do NOT restrict by filename year here)
+            tmdb_year = None  # Default to None when TMDb lookup fails or returns no year
+            try:  # Guard TMDb lookup to prevent any network or parsing errors from crashing the program
+                tmdb_year = get_movie_year(api_key, name_work, None)  # Do not pass filename year to allow TMDb to disambiguate sequels properly
+            except Exception as e:  # Catch any unexpected error during TMDb lookup
+                print(f"{BackgroundColors.RED}TMDb lookup error for '{name_work}': {e}{Style.RESET_ALL}")
+                tmdb_year = None  # Treat as not found and continue processing with existing data
 
-            # Decide which year to use following rules: prefer TMDb when available, else keep existing year
-            final_year = None  # Final year to insert into name
-            if tmdb_year:  # If TMDb returned a year
-                final_year = tmdb_year  # Prefer the TMDb value
-            elif existing_year:  # Else fall back to folder-provided year when present
-                final_year = existing_year  # Use existing year
+            # Step 5: Decide final_year following strict rules to avoid swapping sequel numbers
+            final_year = None  # Initialize final_year to None, will determine based on TMDb and existing years in name
 
-            # Step 6: If resolution missing, attempt to probe first video file (non-blocking)
+            if not years_in_name:  # No existing year in name: use TMDb year when available, else keep as None
+                final_year = tmdb_year  # Use TMDb year when no existing year to avoid unnecessary changes
+            elif len(years_in_name) == 1:  # Single existing year in name: only correct if TMDb provides a different year to avoid unnecessary changes
+                existing_year = years_in_name[0]  # The single existing year found in the name
+                if tmdb_year and existing_year != tmdb_year:  # Only correct single-year mismatch when TMDb indicates a different year to avoid unnecessary changes and potential sequel number swapping
+                    final_year = tmdb_year  # Use TMDb year as the authoritative source
+                    name_work = re.sub(rf"\b{re.escape(existing_year)}\b", "", name_work, count=1)  # Remove the existing year from the lookup title to avoid duplication
+                else:  # Either TMDb year matches existing year or TMDb year not available: do not change the existing year to avoid unnecessary changes and potential sequel number swapping
+                    final_year = existing_year  # Keep the existing year when TMDb does not provide a different year to avoid unnecessary changes and potential sequel number swapping
+            else:  # Multiple existing years in name: only add TMDb year if it is definitive and not already present to avoid unnecessary changes and potential sequel number swapping
+                if not tmdb_year:  # TMDb did not provide a year to disambiguate multiple years in the name: do not add TMDb year to avoid unnecessary changes and potential sequel number swapping
+                    verbose_output(f"{BackgroundColors.YELLOW}Skipping (ambiguous multiple years, TMDb not definitive): {entry.name}{Style.RESET_ALL}")
+                    continue
+
+                tokens_before = re.sub(r"[._]+", " ", entry.name).split()  # Tokenize original name for positional analysis (same as earlier cleanup for consistency)
+                year_positions = [i for i, t in enumerate(tokens_before) if re.fullmatch(r"(?:19|20)\d{2}", t)]  # Positions of all year tokens in the original name
+                tmdb_pos = next((i for i, t in enumerate(tokens_before) if t == str(tmdb_year)), None)  # Position of TMDb year token if it exists among the tokens
+
+                if tmdb_pos is None:  # TMDb year not already present in the name: safe to add it at the end of the title to avoid swapping existing years
+                    final_year = tmdb_year  # Add TMDb year at the end when it is not already present to avoid unnecessary changes and potential sequel number swapping
+                else:  # TMDb year is already present in the name: only move it to canonical position if it is currently after any resolution token to avoid swapping existing years
+                    res_pos = next((i for i, t in enumerate(tokens_before) if re.fullmatch(r"(?i)(\d{3,4}p|4k)", t)), None)  # Position of resolution token if it exists
+                    years_before_res = [p for p in year_positions if res_pos is None or p < res_pos]  # Positions of years that are before the resolution token (or all years if no resolution) to determine where TMDb year should be placed
+                    last_year_before_res = years_before_res[-1] if years_before_res else year_positions[-1]  # The last year token that appears before the resolution token (or the last year if no resolution) is the canonical position for the TMDb year to avoid swapping existing years
+
+                    if tmdb_pos == last_year_before_res:  # TMDb year is already in the correct canonical position among multiple years: keep it there to avoid unnecessary changes and potential sequel number swapping
+                        final_year = tmdb_year  # Keep TMDb year in its existing position when it is already in the correct canonical position to avoid unnecessary changes and potential sequel number swapping
+                    else:  # TMDb year is present but not in the correct canonical position: move it to the end of the title to avoid swapping existing years since we cannot reliably determine which existing year is the correct one to swap with
+                        final_year = tmdb_year  # Use TMDb year as authoritative but place it at the end to avoid swapping existing years when we cannot reliably determine the correct one to swap with
+                        name_work = re.sub(rf"\b{re.escape(str(tmdb_year))}\b", "", name_work, count=1)  # Remove the TMDb year from its existing position in the lookup title to avoid duplication, we will append it at the end of the title later to avoid swapping existing years when we cannot reliably determine the correct one to swap with
+
+                # Ensure the `movie_title` token list does not contain the final_year (avoid duplication)
+                # (also covers single-year and no-year branches below)
+                if final_year:
+                    try:
+                        name_work = re.sub(rf"\b{re.escape(str(final_year))}\b", "", name_work, count=1)
+                    except Exception:
+                        toks_tmp = name_work.split()
+                        for k, t in enumerate(toks_tmp):
+                            if t == str(final_year):
+                                toks_tmp.pop(k)
+                                break
+                        name_work = " ".join(toks_tmp)
+
+            # Ensure `movie_title` defined for all branches and doesn't include the year
+            try:
+                if final_year and (final_year in years_in_name or str(final_year) in name_work):
+                    name_work = re.sub(rf"\b{re.escape(str(final_year))}\b", "", name_work, count=1)
+            except Exception:
+                pass
+
+            movie_title = " ".join(name_work.split()).strip()  # Build final movie title without the year token
+            if not movie_title:  # Defensive: if removing the year left an empty title, skip
+                verbose_output(f"{BackgroundColors.YELLOW}Skipping (empty title after cleanup): {entry.name}{Style.RESET_ALL}")
+                continue
+
+                # Step 6: If resolution missing, attempt to probe first video file (non-blocking)
             if not res_token:  # Only probe when resolution not found in folder name
                 try:  # Protect filesystem/ffprobe calls from bubbling errors
                     probed = get_resolution_from_first_video(entry)  # Probe the first video file for resolution
