@@ -1155,7 +1155,7 @@ def rebuild_final_name(movie_title, final_year, res_token, append_lang):
     return new_name  # Return final normalized name
 
 
-def rename_path_with_subtitle_sync(src, dst, report_data=None, root_key=None):
+def rename_path_with_subtitle_sync(src, dst, report_data=None, root_key=None, change_desc=None):
     """
     Rename a file or directory from src to dst, and if it's a video file with an accompanying .srt subtitle, rename the subtitle in sync.
     
@@ -1163,6 +1163,7 @@ def rename_path_with_subtitle_sync(src, dst, report_data=None, root_key=None):
     :param dst: Destination Path object
     :param report_data: Optional dict for accumulating report data
     :param root_key: Optional key for report_data mapping
+    :param change_desc: Optional human-readable change description to record in report
     :return: None, but performs filesystem rename and updates report_data when applicable
     """
     
@@ -1170,6 +1171,29 @@ def rename_path_with_subtitle_sync(src, dst, report_data=None, root_key=None):
         src.rename(dst)  # Perform filesystem rename operation
     except Exception:  # Propagate exception to caller for consistent handling
         raise  # Re-raise to allow caller to log/handle exactly as existing flow
+
+    if report_data is not None and root_key is not None:  # Ensure report mapping available
+        rk = str(root_key)  # Canonicalize root key for report mapping
+        report_data.setdefault("input_dirs", {})  # Ensure input_dirs mapping exists
+
+        if rk not in report_data["input_dirs"]:  # Lazily initialize per-root structure when missing
+            report_data["input_dirs"][rk] = {"directories_modified": [], "video_files_renamed": []}  # Initialize lists
+
+        if src.is_dir():  # Directory rename
+            report_data["input_dirs"][rk].setdefault("directories_modified", [])  # Ensure list exists
+            report_data["input_dirs"][rk]["directories_modified"].append({  # Append directory rename record
+                "old_name": str(src.name),  # Old directory name
+                "new_name": str(dst.name),  # New directory name
+                "reason": change_desc or "Rename",  # Reason for change
+            })  # End append
+        
+        if src.is_file() and src.suffix.lower() in VIDEO_EXTS:  # Only sync subtitles for recognized video files
+            report_data["input_dirs"][rk].setdefault("video_files_renamed", [])  # Ensure list exists
+            report_data["input_dirs"][rk]["video_files_renamed"].append({  # Append primary video rename record
+                "old_name": str(src.name),  # Old video filename
+                "new_name": str(dst.name),  # New video filename
+                "reason": change_desc or "Rename",  # Reason for change
+            })  # End append
 
     if src.is_file() and src.suffix.lower() in VIDEO_EXTS:  # Only sync subtitles for recognized video files
         orig_sub = src.with_suffix(".srt")  # Detect subtitle file based on original video stem
