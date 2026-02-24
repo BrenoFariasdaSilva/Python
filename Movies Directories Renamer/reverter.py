@@ -214,10 +214,22 @@ def perform_rename(src_path, dst_path, counters):
     :return: True if handled, False otherwise
     """
     
-    os.rename(src_path, dst_path)  # Perform filesystem rename
-    increment_counter(counters, "reverted_now")  # Increment reverted counter
+    try:  # Attempt filesystem rename and handle common errors gracefully
+        os.rename(src_path, dst_path)  # Perform filesystem rename
+    except FileNotFoundError:  # Source or destination path not found
+        increment_counter(counters, "missing")  # Increment missing counter
+        print_skip_not_found(src_path)  # Inform user about missing source
+        return False  # Signal not handled (missing)
+    except PermissionError:  # Permission denied or destination locked
+        increment_counter(counters, "conflicts")  # Increment conflict counter
+        print_skip_conflict(dst_path)  # Inform user about conflict
+        return False  # Signal not handled (conflict)
+    except Exception as e:  # Any other unexpected error
+        print(f"[ERROR] Failed to rename '{src_path}' -> '{dst_path}': {e}")  # Log unexpected error
+        return False  # Signal not handled
+
+    increment_counter(counters, "reverted_now")  # Increment reverted counter on success
     print_reverted(src_path, dst_path)  # Print success message
-    
     return True  # Signal handled
 
 
@@ -323,8 +335,8 @@ def resolve_video_file_entry(base_dir, file_entry, dir_logs, counters):
     :return: None
     """
     
-    old_name = file_entry.get("old_name")  # Extract old name
-    new_name = file_entry.get("new_name")  # Extract new name
+    old_name = (file_entry.get("old_name") or "").strip()  # Extract old name and strip whitespace/newlines
+    new_name = (file_entry.get("new_name") or "").strip()  # Extract new name and strip whitespace/newlines
 
     if not old_name or not new_name:  # Validate names
         return  # Skip invalid entries
@@ -336,22 +348,22 @@ def resolve_video_file_entry(base_dir, file_entry, dir_logs, counters):
         if not old_dir or not new_dir:  # Validate directory names
             continue  # Skip invalid
 
-        src_path = os.path.join(base_dir, new_dir, new_name)  # Case 1 source
-        dst_path = os.path.join(base_dir, old_dir, old_name)  # Case 1 destination
+        src_path = os.path.normpath(os.path.join(base_dir, new_dir, new_name))  # Case 1 source (normalized)
+        dst_path = os.path.normpath(os.path.join(base_dir, old_dir, old_name))  # Case 1 destination (normalized)
 
         if os.path.exists(src_path) or os.path.exists(dst_path):  # Check case 1
             safe_rename(src_path, dst_path, counters)  # Attempt revert
             return  # Stop after handled
 
-        src_path = os.path.join(base_dir, old_dir, new_name)  # Case 2 source
-        dst_path = os.path.join(base_dir, old_dir, old_name)  # Case 2 destination
+        src_path = os.path.normpath(os.path.join(base_dir, old_dir, new_name))  # Case 2 source (normalized)
+        dst_path = os.path.normpath(os.path.join(base_dir, old_dir, old_name))  # Case 2 destination (normalized)
 
         if os.path.exists(src_path) or os.path.exists(dst_path):  # Check case 2
             safe_rename(src_path, dst_path, counters)  # Attempt revert
             return  # Stop after handled
 
-    src_path = os.path.join(base_dir, new_name)  # Fallback source
-    dst_path = os.path.join(base_dir, old_name)  # Fallback destination
+    src_path = os.path.normpath(os.path.join(base_dir, new_name))  # Fallback source (normalized)
+    dst_path = os.path.normpath(os.path.join(base_dir, old_name))  # Fallback destination (normalized)
 
     if os.path.exists(src_path) or os.path.exists(dst_path):  # Check fallback
         safe_rename(src_path, dst_path, counters)  # Attempt revert
@@ -371,14 +383,14 @@ def revert_directory_entry(base_dir, dir_entry, counters):
     :return: None
     """
     
-    old_name = dir_entry.get("old_name")  # Extract old name
-    new_name = dir_entry.get("new_name")  # Extract new name
+    old_name = (dir_entry.get("old_name") or "").strip()  # Extract old name and strip
+    new_name = (dir_entry.get("new_name") or "").strip()  # Extract new name and strip
 
     if not old_name or not new_name:  # Validate names
         return  # Skip invalid entries
 
-    src_path = os.path.join(base_dir, new_name)  # Build source path
-    dst_path = os.path.join(base_dir, old_name)  # Build destination path
+    src_path = os.path.normpath(os.path.join(base_dir, new_name))  # Build normalized source path
+    dst_path = os.path.normpath(os.path.join(base_dir, old_name))  # Build normalized destination path
 
     safe_rename(src_path, dst_path, counters)  # Attempt revert
 
