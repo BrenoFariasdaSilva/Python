@@ -25,6 +25,10 @@ run: $(VENV)
 	$(CLEAR_CMD)
 	$(TIME_CMD) $(PYTHON) ./main.py
 
+reverter:
+	$(CLEAR_CMD)
+	$(TIME_CMD) $(PYTHON) ./reverter.py
+
 # Setup Virtual Environment and Install Dependencies
 $(VENV):
 	$(PYTHON_CMD) -m venv $(VENV)
@@ -43,4 +47,4 @@ clean:
 	find . -type f -name '*.pyc' -delete || del /S /Q *.pyc 2>nul
 	find . -type d -name '__pycache__' -delete || rmdir /S /Q __pycache__ 2>nul
 
-.PHONY: run clean dependencies generate_requirements
+.PHONY: run clean dependencies generate_requirements reverter
