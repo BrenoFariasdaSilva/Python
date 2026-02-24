@@ -1361,13 +1361,21 @@ def rename_dirs():
 
                 if new_name == entry.name:  # Skip when name unchanged
                     verbose_output(f"{BackgroundColors.YELLOW}Skipping (already named): {entry.name}{Style.RESET_ALL}")  # Verbose already-named message
-                    pbar.update(1)
+                    try:  # Attempt to synchronize contained media files even when directory unchanged
+                        rename_videos_and_subtitles(entry, entry.name, report_data, root_key)  # Sync videos/subtitles to match directory basename
+                    except Exception as e:  # Handle sync errors without breaking existing flow
+                        print(f"{BackgroundColors.RED}Failed to sync media for '{entry}': {e}{Style.RESET_ALL}")  # Report sync failure
+                    pbar.update(1)  # Update progress bar after processing this entry
                     continue  # Continue to next entry when no rename required
 
                 change_desc = detect_changes(entry.name, new_name)  # Determine change description tags
                 if not change_desc:  # Skip when no meaningful change detected
                     verbose_output(f"{BackgroundColors.YELLOW}Skipping (no detected meaningful change): {entry.name}{Style.RESET_ALL}")  # Verbose no-change message
-                    pbar.update(1)
+                    try:  # Attempt to synchronize contained media files when no rename applied
+                        rename_videos_and_subtitles(entry, entry.name, report_data, root_key)  # Sync videos/subtitles to match directory basename
+                    except Exception as e:  # Handle sync errors gracefully to preserve existing behavior
+                        print(f"{BackgroundColors.RED}Failed to sync media for '{entry}': {e}{Style.RESET_ALL}")  # Report sync failure
+                    pbar.update(1)  # Update progress bar after processing this entry
                     continue  # Continue to next entry
 
                 print(f"{BackgroundColors.YELLOW}Renaming ({change_desc}): '{BackgroundColors.CYAN}{entry.name}{BackgroundColors.GREEN}' → '{BackgroundColors.CYAN}{new_name}{BackgroundColors.GREEN}'{Style.RESET_ALL}")  # Announce rename
@@ -1376,7 +1384,11 @@ def rename_dirs():
                     rename_path_with_subtitle_sync(entry, entry.parent / new_name, report_data, root_key)  # Perform filesystem rename and subtitle sync
                 except Exception as e:  # Handle rename or subtitle exceptions with same pattern
                     print(f"{BackgroundColors.RED}Failed to rename '{entry.name}' → '{new_name}': {e}{Style.RESET_ALL}")  # Print rename failure
-                    pbar.update(1)
+                    try:  # Attempt to synchronize media inside original directory when rename fails
+                        rename_videos_and_subtitles(entry, entry.name, report_data, root_key)  # Best-effort sync using existing directory name
+                    except Exception as e2:  # If sync also fails, report but preserve original rename error handling
+                        print(f"{BackgroundColors.RED}Also failed to sync media for '{entry}': {e2}{Style.RESET_ALL}")  # Report secondary sync failure
+                    pbar.update(1)  # Update progress bar after processing this entry
                     continue  # Continue processing next entries after failure
 
                 pbar.update(1)  # Update progress bar after each processed entry
