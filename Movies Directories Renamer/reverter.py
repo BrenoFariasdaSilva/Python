@@ -124,6 +124,25 @@ def verify_filepath_exists(filepath):
     return os.path.exists(filepath)  # Return True if the file or folder exists, False otherwise
 
 
+def safe_rename(src_path, dst_path, counters):
+    """
+    Safely Rename A File Or Directory From Source To Destination.
+
+    :param src_path: Full Path Of The Current (Wrong) Name
+    :param dst_path: Full Path Of The Original (Old) Name
+    :param counters: Dictionary Tracking Stats
+    :return: True if the rename was handled (either performed or skipped), False otherwise
+    """
+    
+    if not os.path.exists(src_path):  # Check if source exists
+        return handle_missing_source(src_path, dst_path, counters)  # Delegate missing handling
+
+    if os.path.exists(dst_path):  # Prevent overwrite
+        return handle_destination_conflict(dst_path, counters)  # Delegate conflict handling
+
+    return perform_rename(src_path, dst_path, counters)  # Perform actual rename
+
+
 def report_exists():
     """
     Verify Report File Exists.
