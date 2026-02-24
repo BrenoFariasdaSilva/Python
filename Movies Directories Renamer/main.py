@@ -830,6 +830,124 @@ def detect_changes(old_name, new_name):
     return " + ".join(tags)  # Return combined tags
 
 
+def build_initial_report_data():
+    """
+    Initialize the base report_data structure.
+
+    :return: Initialized report_data dict
+    """
+    
+    report_data = {  # Initialize report structure
+        "generated_at": None,  # Placeholder timestamp filled later
+        "input_dirs": {},  # Container for per-root modifications
+    }  # End initialization
+    
+    return report_data  # Return initialized structure
+
+
+def get_root_directories(root):
+    """
+    Safely retrieve sorted directory entries from a root path.
+
+    :param root: Root path string
+    :return: (root_path, entries) or (None, None) on failure
+    """
+    
+    root_path = Path(root)  # Convert to Path object
+    if not root_path.exists():  # Skip non-existing roots
+        verbose_output(f"{BackgroundColors.YELLOW}Input path not found, skipping: {BackgroundColors.CYAN}{root_path}{Style.RESET_ALL}")  # Notify skip
+        return None, None  # Signal skip
+
+    try:  # Guard directory listing
+        entries = [p for p in sorted(root_path.iterdir()) if p.is_dir()]  # Deterministic directories only
+    except Exception:  # If listing fails
+        verbose_output(f"{BackgroundColors.YELLOW}Cannot read input path, skipping: {BackgroundColors.CYAN}{root_path}{Style.RESET_ALL}")  # Notify skip
+        return None, None  # Signal skip
+
+    return root_path, entries  # Return valid root and entries
+
+
+def extract_language_token(dir_name):
+    """
+    Extract canonical language token from directory name.
+
+    :param dir_name: Directory name
+    :return: Canonical language token or None
+    """
+    
+    for s in LANGUAGE_OPTIONS:  # Iterate canonical options
+        if re.search(rf"\b{s}\b", dir_name, re.IGNORECASE):  # Detect case-insensitive match
+            return s  # Return canonical form
+        
+    return None  # No language found
+
+
+def extract_resolution_token(dir_name):
+    """
+    Extract and normalize resolution token.
+
+    :param dir_name: Directory name
+    :return: Resolution token or None
+    """
+    
+    res_match = re.search(r"\b(\d{3,4}p|4k)\b", dir_name, re.IGNORECASE)  # Search resolution
+    res_token = res_match.group(0) if res_match else None  # Extract token
+    
+    if res_token and res_token.lower() == "4k":  # Normalize 4K
+        res_token = "2160p"  # Convert to canonical 2160p
+    
+    return res_token  # Return token
+
+
+def clean_title_for_lookup(original_name, append_lang, res_token):
+    """
+    Prepare cleaned title for TMDb lookup.
+
+    :param original_name: Original directory name
+    :param append_lang: Extracted language token
+    :param res_token: Extracted resolution token
+    :return: (cleaned_title, years_in_name)
+    """
+    
+    years_in_name = re.findall(r"\b((?:19|20)\d{2})\b", original_name)  # Extract all 4-digit years
+    name_work = original_name  # Work copy
+
+    if append_lang:  # Remove language token
+        name_work = re.sub(rf"\b{re.escape(append_lang)}\b", "", name_work, flags=re.IGNORECASE)  # Remove language token
+
+    if res_token:  # Remove resolution token
+        name_work = re.sub(rf"\b{re.escape(res_token)}\b", "", name_work, flags=re.IGNORECASE)  # Remove resolution token
+
+    name_work = re.sub(r"\((\d{4})\)", r"\1", name_work)  # Remove parentheses around years
+    name_work = re.sub(r"[._]+", " ", name_work)  # Replace dots/underscores
+    name_work = " ".join(name_work.split()).strip()  # Normalize whitespace
+
+    return name_work, years_in_name  # Return cleaned title and detected years
+
+
+def rebuild_final_name(movie_title, final_year, res_token, append_lang):
+    """
+    Rebuild canonical directory name.
+
+    :return: Final normalized name
+    """
+    parts = [movie_title]  # Start with title
+    if final_year:  # Append year if present
+        parts.append(str(final_year))
+    if res_token:  # Append resolution if present
+        parts.append(res_token)
+    if append_lang:  # Append language if present
+        parts.append(append_lang)
+
+    new_name = " ".join(parts).strip()  # Join parts
+    new_name = " ".join(new_name.split())  # Normalize whitespace
+    new_name = standardize_final_name(new_name)  # Apply canonical normalization
+    new_name = " ".join(new_name.split())  # Normalize again
+    new_name = normalize_special_tokens_position(new_name)  # Reposition IMAX/HDR tokens
+
+    return new_name  # Return final name
+
+
 def rename_dirs():
     """
     Iterates through the INPUT_DIRS, extracts metadata, fetches the release year from TMDb,
@@ -837,306 +955,74 @@ def rename_dirs():
 
     :return: None
     """
-    
-    api_key = load_api_key()  # Load TMDb API key from environment before processing directories
 
-    report_data = {  # Initialize report_data structure before processing
-        "generated_at": None,  # Placeholder timestamp to be filled by generate_report
-        "input_dirs": {},  # Container for per-input-directory modifications
-    }  # End report_data initialization
+    api_key = load_api_key()  # Load TMDb API key into `api_key`
+    report_data = build_initial_report_data()  # Initialize report structure into `report_data`
 
-    for root in INPUT_DIRS:  # Process each input root independently per requirements
-        root_path = Path(root)  # Convert root to Path object for consistent handling
-        if not root_path.exists():  # If the configured root does not exist
-            verbose_output(f"{BackgroundColors.YELLOW}Input path not found, skipping: {BackgroundColors.CYAN}{root_path}{Style.RESET_ALL}")  # Verbose notification when skipping
-            continue  # Continue to next root when this one is missing
+    for root in INPUT_DIRS:  # Iterate configured roots list
+        root_path, entries = get_root_directories(root)  # Safely fetch directories for this root
+        if not root_path or entries is None:  # Skip root when retrieval failed or entries is None
+            continue  # Continue to next root if current root invalid
 
-        try:  # Attempt to list directories inside the current root safely
-            entries = [p for p in sorted(root_path.iterdir()) if p.is_dir()]  # Deterministic, directories only
-        except Exception:  # If listing fails for this root
-            verbose_output(f"{BackgroundColors.YELLOW}Cannot read input path, skipping: {BackgroundColors.CYAN}{root_path}{Style.RESET_ALL}")  # Verbose notification when skip
-            continue  # Continue to next root on error
+        total = len(entries)  # Count directories in `entries` (now non-None)
 
-        total = len(entries)  # Compute number of movie directories in this root
+        for idx, entry in enumerate(entries, start=1):  # Iterate entries with index starting at 1
+            print(f"{BackgroundColors.GREEN}Processing {BackgroundColors.CYAN}{idx}{BackgroundColors.GREEN}/{BackgroundColors.CYAN}{total}{BackgroundColors.GREEN}: {BackgroundColors.CYAN}{entry.name}{Style.RESET_ALL}")  # Progress output
 
-        for idx, entry in enumerate(entries, start=1):  # Iterate directories inside this root with index
-            print(f"{BackgroundColors.GREEN}Processing {BackgroundColors.CYAN}{idx}{BackgroundColors.GREEN}/{BackgroundColors.CYAN}{total}{BackgroundColors.GREEN}: {BackgroundColors.CYAN}{entry.name}{Style.RESET_ALL}")  # Print progress line
-            if not entry.is_dir():  # Skip non-directories defensively
-                continue  # Continue to next entry when current one is not a directory
+            if re.match(IGNORE_DIR_REGEX, entry.name.strip()):  # Skip ignored directories by regex
+                verbose_output(f"{BackgroundColors.YELLOW}Ignoring top-level directory: {entry.name}{Style.RESET_ALL}")  # Verbose message for ignored directory
+                continue  # Continue loop when directory is ignored
 
-            if re.match(IGNORE_DIR_REGEX, entry.name.strip()):  # Skip known ignore directories
-                verbose_output(f"{BackgroundColors.YELLOW}Ignoring top-level directory: {entry.name}{Style.RESET_ALL}")  # Verbose notification when skipping
-                continue  # Continue to next entry when current one is ignored
+            append_lang = extract_language_token(entry.name)  # Extract language suffix token if present
+            res_token = extract_resolution_token(entry.name)  # Extract resolution token if present
+            name_work, years_in_name = clean_title_for_lookup(entry.name, append_lang, res_token)  # Clean title for lookup and capture years
 
-            # Step 1: Extract language token if present (must be last token) without inventing one
-            append_lang = None  # Default to None when absent
-            for s in LANGUAGE_OPTIONS:  # Iterate canonical language options
-                if re.search(rf"\b{s}\b", entry.name, re.IGNORECASE):  # Detect whole-word match case-insensitively
-                    append_lang = s  # Use canonical form
-                    break  # Stop after first match
-
-            # Step 2: Extract resolution token from name (including 4K conversion)
-            res_match = re.search(r"\b(\d{3,4}p|4k)\b", entry.name, re.IGNORECASE)  # Search for resolution token
-            res_token = res_match.group(0) if res_match else None  # Preserve matched token or None
-            if res_token and res_token.lower() == "4k":  # Convert 4K to 2160p per rules
-                res_token = "2160p"  # Use canonical 2160p
-
-            # Step 3: Gather all 4-digit numbers and prepare a cleaned title for TMDb lookup
-            years_in_name = re.findall(r"\b((?:19|20)\d{2})\b", entry.name)  # All 4-digit tokens found in the original name
-
-            name_work = entry.name  # Work on a copy of the original name
-            if append_lang:  # Remove language token when present (we'll append it later)
-                name_work = re.sub(rf"\b{re.escape(append_lang)}\b", "", name_work, flags=re.IGNORECASE)
-            if res_match:  # Remove resolution token when present for lookup
-                name_work = re.sub(re.escape(res_match.group(0)), "", name_work, flags=re.IGNORECASE)
-
-            name_work = re.sub(r"\((\d{4})\)", r"\1", name_work)
-            name_work = re.sub(r"[._]+", " ", name_work)  # Replace dots/underscores with space
-            name_work = " ".join(name_work.split()).strip()  # Normalize whitespace and trim edges
-            if not name_work:  # If title becomes empty after cleaning
-                verbose_output(f"{BackgroundColors.YELLOW}Skipping (empty title after cleanup): {entry.name}{Style.RESET_ALL}")
-                continue
-
-            # Step 4: Ask TMDb for the authoritative release year (do NOT restrict by filename year here)
-            tmdb_year = None  # Default to None when TMDb lookup fails or returns no year
-            try:  # Guard TMDb lookup to prevent any network or parsing errors from crashing the program
-                tmdb_year = get_movie_year(api_key, name_work, None)  # Do not pass filename year to allow TMDb to disambiguate sequels properly
-            except Exception as e:  # Catch any unexpected error during TMDb lookup
-                print(f"{BackgroundColors.RED}TMDb lookup error for '{name_work}': {e}{Style.RESET_ALL}")
-                tmdb_year = None  # Treat as not found and continue processing with existing data
-
-            # Step 5: Decide final_year following strict rules to avoid swapping sequel numbers
-            final_year = None  # Initialize final_year to None, will determine based on TMDb and existing years in name
-
-            if not years_in_name:  # No existing year in name: use TMDb year when available, else keep as None
-                final_year = tmdb_year  # Use TMDb year when no existing year to avoid unnecessary changes
-            elif len(years_in_name) == 1:  # Single existing year in name: only correct if TMDb provides a different year to avoid unnecessary changes
-                existing_year = years_in_name[0]  # The single existing year found in the name
-                if tmdb_year and existing_year != tmdb_year:  # Only correct single-year mismatch when TMDb indicates a different year to avoid unnecessary changes and potential sequel number swapping
-                    final_year = tmdb_year  # Use TMDb year as the authoritative source
-                    name_work = re.sub(rf"\b{re.escape(existing_year)}\b", "", name_work, count=1)  # Remove the existing year from the lookup title to avoid duplication
-                else:  # Either TMDb year matches existing year or TMDb year not available: do not change the existing year to avoid unnecessary changes and potential sequel number swapping
-                    final_year = existing_year  # Keep the existing year when TMDb does not provide a different year to avoid unnecessary changes and potential sequel number swapping
-            else:  # Multiple existing years in name: only add TMDb year if it is definitive and not already present to avoid unnecessary changes and potential sequel number swapping
-                if not tmdb_year:  # TMDb did not provide a year to disambiguate multiple years in the name: do not add TMDb year to avoid unnecessary changes and potential sequel number swapping
-                    verbose_output(f"{BackgroundColors.YELLOW}Skipping (ambiguous multiple years, TMDb not definitive): {entry.name}{Style.RESET_ALL}")
-                    continue
-
-                tokens_before = re.sub(r"[._]+", " ", entry.name).split()  # Tokenize original name for positional analysis (same as earlier cleanup for consistency)
-                year_positions = [i for i, t in enumerate(tokens_before) if re.fullmatch(r"(?:19|20)\d{2}", t)]  # Positions of all year tokens in the original name
-                tmdb_pos = next((i for i, t in enumerate(tokens_before) if t == str(tmdb_year)), None)  # Position of TMDb year token if it exists among the tokens
-
-                if tmdb_pos is None:  # TMDb year not already present in the name: safe to add it at the end of the title to avoid swapping existing years
-                    final_year = tmdb_year  # Add TMDb year at the end when it is not already present to avoid unnecessary changes and potential sequel number swapping
-                else:  # TMDb year is already present in the name: only move it to canonical position if it is currently after any resolution token to avoid swapping existing years
-                    res_pos = next((i for i, t in enumerate(tokens_before) if re.fullmatch(r"(?i)(\d{3,4}p|4k)", t)), None)  # Position of resolution token if it exists
-                    years_before_res = [p for p in year_positions if res_pos is None or p < res_pos]  # Positions of years that are before the resolution token (or all years if no resolution) to determine where TMDb year should be placed
-                    last_year_before_res = years_before_res[-1] if years_before_res else year_positions[-1]  # The last year token that appears before the resolution token (or the last year if no resolution) is the canonical position for the TMDb year to avoid swapping existing years
-
-                    if tmdb_pos == last_year_before_res:  # TMDb year is already in the correct canonical position among multiple years: keep it there to avoid unnecessary changes and potential sequel number swapping
-                        final_year = tmdb_year  # Keep TMDb year in its existing position when it is already in the correct canonical position to avoid unnecessary changes and potential sequel number swapping
-                    else:  # TMDb year is present but not in the correct canonical position: move it to the end of the title to avoid swapping existing years since we cannot reliably determine which existing year is the correct one to swap with
-                        final_year = tmdb_year  # Use TMDb year as authoritative but place it at the end to avoid swapping existing years when we cannot reliably determine the correct one to swap with
-                        name_work = re.sub(rf"\b{re.escape(str(tmdb_year))}\b", "", name_work, count=1)  # Remove the TMDb year from its existing position in the lookup title to avoid duplication, we will append it at the end of the title later to avoid swapping existing years when we cannot reliably determine the correct one to swap with
-
-                # Ensure the `movie_title` token list does not contain the final_year (avoid duplication)
-                # (also covers single-year and no-year branches below)
-                if final_year:
-                    try:
-                        name_work = re.sub(rf"\b{re.escape(str(final_year))}\b", "", name_work, count=1)
-                    except Exception:
-                        toks_tmp = name_work.split()
-                        for k, t in enumerate(toks_tmp):
-                            if t == str(final_year):
-                                toks_tmp.pop(k)
-                                break
-                        name_work = " ".join(toks_tmp)
-
-            # Ensure `movie_title` defined for all branches and doesn't include the year
-            try:
-                if final_year and (final_year in years_in_name or str(final_year) in name_work):
-                    name_work = re.sub(rf"\b{re.escape(str(final_year))}\b", "", name_work, count=1)
-            except Exception:
-                pass
-
-            movie_title = " ".join(name_work.split()).strip()  # Build final movie title without the year token
-            if not movie_title:  # Defensive: if removing the year left an empty title, skip
-                verbose_output(f"{BackgroundColors.YELLOW}Skipping (empty title after cleanup): {entry.name}{Style.RESET_ALL}")
-                continue
-
-                # Step 6: If resolution missing, attempt to probe first video file (non-blocking)
-            if not res_token:  # Only probe when resolution not found in folder name
-                try:  # Protect filesystem/ffprobe calls from bubbling errors
-                    probed = get_resolution_from_first_video(entry)  # Probe the first video file for resolution
-                except Exception:  # Any probing error should not abort processing
-                    probed = None  # Treat as unavailable
-                if probed and probed.lower() == "4k":  # Convert probed 4K token to 2160p
-                    probed = "2160p"  # Normalize 4K to 2160p
-                res_token = probed or res_token  # Use probed value when present, else keep previous
-
-            # Step 7: Rebuild the final name strictly as 'MovieName Year Resolution Language' (omit missing tokens)
-            parts = [movie_title]  # Start with cleaned movie title
-            if final_year:  # Append year when available
-                parts.append(str(final_year))  # Year must be 4 digits when present
-            if res_token:  # Append resolution when available
-                parts.append(res_token)  # Resolution token (e.g., 1080p)
-            if append_lang:  # Append language when present
-                parts.append(append_lang)  # Language must always be last token
-
-            new_name = " ".join(parts).strip()  # Join parts and trim edges
-            new_name = " ".join(new_name.split())  # Normalize internal whitespace
-            new_name = standardize_final_name(new_name)  # Apply canonical normalization rules
-            new_name = " ".join(new_name.split())  # Normalize whitespace again after standardization
-            new_name = normalize_special_tokens_position(new_name)  # Reposition IMAX after resolution when present
-
-            # Step 8: Detect differences and decide renaming action
-            if new_name == entry.name:  # If nothing changed compared to original name
-                verbose_output(f"{BackgroundColors.YELLOW}Skipping (already named): {entry.name}{Style.RESET_ALL}")  # Inform skip case
+            if not name_work:  # Skip entries that become empty after cleanup
+                verbose_output(f"{BackgroundColors.YELLOW}Skipping (empty title after cleanup): {entry.name}{Style.RESET_ALL}")  # Verbose skip message
                 continue  # Continue to next entry
 
-            change_desc = detect_changes(entry.name, new_name)  # Compute a human-readable list of changes
-            if not change_desc:  # If no meaningful changes detected
-                verbose_output(f"{BackgroundColors.YELLOW}Skipping (no detected meaningful change): {entry.name}{Style.RESET_ALL}")  # Inform skip case
+            try:  # Guard TMDb lookup network call
+                tmdb_year = get_movie_year(api_key, name_work, None)  # Query TMDb for release year
+            except Exception as e:  # Handle lookup errors gracefully
+                print(f"{BackgroundColors.RED}TMDb lookup error for '{name_work}': {e}{Style.RESET_ALL}")  # Print TMDb error
+                tmdb_year = None  # Fallback when lookup fails
+
+            final_year = tmdb_year or (years_in_name[0] if years_in_name else None)  # Choose TMDb year or fallback to filename year
+
+            movie_title = " ".join(name_work.split()).strip()  # Normalize whitespace in movie title
+
+            if not res_token:  # Probe resolution from media files when resolution missing
+                try:
+                    probed = get_resolution_from_first_video(entry)  # Probe first video file for resolution
+                except Exception:
+                    probed = None  # Fall back to None on probe failure
+                if probed and probed.lower() == "4k":  # Normalize textual 4K to canonical token
+                    probed = "2160p"  # Map 4K to 2160p canonical token
+                res_token = probed or res_token  # Use probed resolution if available
+
+            new_name = rebuild_final_name(movie_title, final_year, res_token, append_lang)  # Build final normalized directory name
+
+            if new_name == entry.name:  # Skip when name unchanged
+                verbose_output(f"{BackgroundColors.YELLOW}Skipping (already named): {entry.name}{Style.RESET_ALL}")  # Verbose already-named message
+                continue  # Continue to next entry when no rename required
+
+            change_desc = detect_changes(entry.name, new_name)  # Determine change description tags
+            if not change_desc:  # Skip when no meaningful change detected
+                verbose_output(f"{BackgroundColors.YELLOW}Skipping (no detected meaningful change): {entry.name}{Style.RESET_ALL}")  # Verbose no-change message
                 continue  # Continue to next entry
 
-            print(
-                f"{BackgroundColors.GREEN}Renaming "  # Start message
-                f"({change_desc}): "  # Show change tags
-                f"'{BackgroundColors.CYAN}{entry.name}{BackgroundColors.GREEN}' → "  # Old name
-                f"'{BackgroundColors.CYAN}{new_name}{BackgroundColors.GREEN}'"  # New name
-                f"{Style.RESET_ALL}"
-            )  # Formatted rename output
-            dir_renamed = False  # Flag to indicate whether directory rename succeeded
-            try:  # Attempt filesystem rename operation under try/except
-                entry.rename(entry.parent / new_name)  # Perform the filesystem rename operation for the movie folder
-                dir_renamed = True  # Mark rename as successful when no exception is raised
-            except Exception as e:  # If rename fails, log error but continue processing
-                print(f"{BackgroundColors.RED}Failed to rename '{entry.name}' → '{new_name}': {e}{Style.RESET_ALL}")  # Inform about failure
+            print(f"{BackgroundColors.GREEN}Renaming ({change_desc}): '{BackgroundColors.CYAN}{entry.name}{BackgroundColors.GREEN}' → '{BackgroundColors.CYAN}{new_name}{BackgroundColors.GREEN}'{Style.RESET_ALL}")  # Announce rename
 
-            target_dir = entry.parent / new_name  # Compute the expected directory path after rename
-            if not target_dir.exists():  # If the target directory isn't present after attempted rename
-                verbose_output(f"{BackgroundColors.YELLOW}Skipping video sync (dir missing): {target_dir}{Style.RESET_ALL}")  # Inform skip and continue
-                continue  # Continue to next entry when directory is absent
+            try:  # Attempt to rename directory on filesystem
+                entry.rename(entry.parent / new_name)  # Perform filesystem rename operation
+            except Exception as e:  # Handle rename exceptions
+                print(f"{BackgroundColors.RED}Failed to rename '{entry.name}' → '{new_name}': {e}{Style.RESET_ALL}")  # Print rename failure
+                continue  # Continue processing next entries after failure
 
-            if dir_renamed and entry.name != new_name:  # Verifies that rename happened and names are different
-                root_key = str(root_path)  # Use string form of input root as dictionary key
-                if root_key not in report_data["input_dirs"]:  # Lazily create per-root entry when first change occurs
-                    report_data["input_dirs"][root_key] = {  # Initialize per-root structure
-                        "directories_modified": [],  # List to hold directory modifications
-                        "video_files_renamed": [],  # List to hold video rename records
-                    }  # End initialization
+        print()  # Spacing between roots for readability
 
-                labels = []  # Collect report labels for this rename
-                tags = [t.strip() for t in change_desc.split("+")] if change_desc else []  # Split the detect_changes tags
-
-                if any("Add Year" in t for t in tags):  # Map to Year Added
-                    labels.append("Year Added")  # Append label
-                if any("Correct Year" in t for t in tags):  # Map to Year Corrected
-                    labels.append("Year Corrected")  # Append label
-                if any("Add Resolution" in t for t in tags):  # Map to Resolution Added
-                    labels.append("Resolution Added")  # Append label
-                if any("Correct Resolution" in t for t in tags):  # Map to Resolution Corrected
-                    labels.append("Resolution Corrected")  # Append label
-                if any("Remove Duplicate Tokens" in t for t in tags):  # Map to Duplicate Tokens Removed
-                    labels.append("Duplicate Tokens Removed")  # Append label
-                if any("Reorder Tokens" in t for t in tags):  # Map to Format Reordered
-                    labels.append("Format Reordered")  # Append label
-                if any("Normalize Format" in t for t in tags):  # Map to Whitespace Normalized
-                    labels.append("Whitespace Normalized")  # Append label
-
-                try:  # Detect parentheses removal (guard regex)
-                    if re.search(r"\(\d{4}\)", entry.name) and not re.search(r"\(\d{4}\)", new_name):  # Parentheses removed
-                        labels.append("Parentheses Removed")  # Append label
-                except Exception:  # If regex fails
-                    pass  # Ignore detection errors
-
-                try:  # Detect 4K -> 2160p conversion (guard regex)
-                    if re.search(r"\b4k\b", entry.name, re.IGNORECASE) and "2160p" in new_name.lower():  # 4K converted
-                        labels.append("4K Converted to 2160p")  # Append label
-                except Exception:  # If detection fails
-                    pass  # Ignore detection errors
-
-                try:  # Detect language normalization differences (guard regex)
-                    old_lang_match = re.search(r"\b(Dual|Dublado|English|Legendado|Nacional)\b", entry.name, re.IGNORECASE)  # Find old lang token
-                    if old_lang_match:  # If an old language token existed
-                        old_lang_raw = old_lang_match.group(0)  # Extract raw matched token
-                        if append_lang and old_lang_raw != append_lang:  # If canonical differs from raw
-                            labels.append("Language Normalized")  # Append label
-                except Exception:  # On detection errors
-                    pass  # Ignore
-
-                seen = set()  # Deduplicate labels while preserving order
-                final_labels = []  # Ordered unique labels
-                for L in labels:  # Iterate computed labels
-                    if L not in seen:  # If label not yet recorded
-                        seen.add(L)  # Mark seen
-                        final_labels.append(L)  # Append to final list
-
-                report_data["input_dirs"][root_key]["directories_modified"].append({  # Append directory modification record
-                    "old_name": entry.name,  # Record old directory name
-                    "new_name": new_name,  # Record new directory name
-                    "changes": final_labels,  # Record detected change labels
-                })  # End append directory record
-
-            main_video = None  # Placeholder for chosen main video file
-            max_size = -1  # Track largest size seen so far
-            try:  # Guard filesystem iteration for files
-                for candidate in sorted(target_dir.iterdir()):  # Deterministic ordering of files
-                    if not candidate.is_file():  # Skip non-file entries
-                        continue  # Continue to next entry
-                    if candidate.suffix.lower() not in {ext.lower() for ext in VIDEO_EXTS}:  # Skip non-video extensions
-                        continue  # Continue to next candidate
-                    if "sample" in candidate.name.lower():  # Skip obvious sample files by name
-                        continue  # Continue to next candidate
-                    try:  # Attempt to stat the candidate to get file size
-                        size = candidate.stat().st_size  # Get file size in bytes
-                    except Exception:  # If stat fails for any reason
-                        continue  # Skip this candidate on error
-                    if size > max_size:  # If this candidate is larger than previous ones
-                        main_video = candidate  # Select this as the current main video
-                        max_size = size  # Update the largest size seen
-            except Exception:  # Protect against directory iteration errors
-                main_video = None  # Ensure safe fallback when errors occur
-
-            if main_video is None:  # If no video file was found inside the directory
-                verbose_output(f"{BackgroundColors.YELLOW}No main video found to sync in: {target_dir}{Style.RESET_ALL}")  # Inform skip case
-                continue  # Continue processing next directory
-
-            expected_path = target_dir / (new_name + main_video.suffix)  # Construct path with original suffix preserved
-            if main_video.name == expected_path.name:  # If the video file already matches the expected filename
-                verbose_output(f"{BackgroundColors.YELLOW}Video already synced: {main_video.name}{Style.RESET_ALL}")  # Inform no-op
-                continue  # Continue to next entry when no rename is required
-
-            print(
-                f"{BackgroundColors.GREEN}Renaming video file (Sync With Dir): "  # Start message
-                f"'{BackgroundColors.CYAN}{main_video.name}{BackgroundColors.GREEN}' → "  # Old video filename
-                f"'{BackgroundColors.CYAN}{expected_path.name}{BackgroundColors.GREEN}'"  # New video filename
-                f"{Style.RESET_ALL}"
-            )  # Formatted video rename output
-            video_renamed = False  # Flag whether video rename succeeded
-            try:  # Protect the video rename operation from raising
-                main_video.rename(expected_path)  # Perform the filesystem rename for the primary video file
-                video_renamed = True  # Mark success when no exception is raised
-            except Exception as e:  # If video rename fails, log and continue processing other entries
-                print(f"{BackgroundColors.RED}Failed to rename video '{main_video.name}' → '{expected_path.name}': {e}{Style.RESET_ALL}")  # Log error and continue
-
-            if video_renamed:  # Only record successful renames in the report per requirements
-                root_key = str(root_path)  # Use string form of input root as dictionary key
-                if root_key not in report_data["input_dirs"]:  # Ensure per-root entry exists before appending
-                    report_data["input_dirs"][root_key] = {  # Initialize when missing
-                        "directories_modified": [],  # Directory mods list
-                        "video_files_renamed": [],  # Video rename list
-                    }  # End initialization
-                report_data["input_dirs"][root_key]["video_files_renamed"].append({  # Append video rename record
-                    "old_name": main_video.name,  # Old filename including extension
-                    "new_name": expected_path.name,  # New filename including extension
-                    "reason": "Sync With Dir",  # Constant reason per spec
-                })  # End append video rename record
-
-        print()  # Add single spacing after processing this input root
-
-    generate_report(report_data)  # Call report writer with the built report_data
-    generate_duplicate_movies_report(report_data)  # Call duplicate report writer with the built report_data
+    generate_report(report_data)  # Generate summary report JSON file
+    generate_duplicate_movies_report(report_data)  # Generate duplicate movies report JSON file
 
 
 def to_seconds(obj):
