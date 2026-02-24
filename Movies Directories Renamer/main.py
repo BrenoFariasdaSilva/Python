@@ -1078,46 +1078,15 @@ def normalize_title_years(title, validated_year, res_token, append_lang):
     toks = title.split()  # Tokenize title on whitespace
     year_re = re.compile(r"^(?:19|20)\d{2}$")  # Year-only token regex
 
-    res_idx = find_resolution_index(toks)  # Get resolution token index or None
-
-    lang_idx = None  # Default no language index
-    if append_lang:  # If append_lang provided prefer exact match
-        for i, t in enumerate(toks):  # Iterate tokens to find append_lang
-            if t.lower() == str(append_lang).lower():  # Case-insensitive match
-                lang_idx = i  # Record language index
-                break  # Stop search when found
-    else:  # Fallback: scan for known language tokens in the token list
-        for i, t in enumerate(toks):  # Iterate tokens
-            for s in LANGUAGE_OPTIONS:  # Iterate canonical language options
-                if t.lower() == s.lower():  # Case-insensitive match for language token
-                    lang_idx = i  # Record language index
-                    break  # Break inner loop
-            if lang_idx is not None:  # If language found, break outer loop
-                break  # Stop scanning tokens
-
-    candidate_indices = set()  # Indices marked for potential removal
-
-    if res_idx is not None and res_idx - 1 >= 0:  # If resolution exists in tokens
-        candidate_indices |= mark_backwards_indices(toks, year_re, res_idx - 1)  # Mark contiguous years before resolution
-
-    if lang_idx is not None and lang_idx - 1 >= 0:  # If language exists in tokens
-        candidate_indices |= mark_backwards_indices(toks, year_re, lang_idx - 1)  # Mark contiguous years before language
-
-    if res_idx is None and lang_idx is None:  # No resolution or language found
-        if toks and year_re.match(toks[-1]):  # If last token is a year
-            candidate_indices |= mark_backwards_indices(toks, year_re, len(toks) - 1)  # Mark trailing year tokens
-
     validated_str = str(validated_year) if validated_year is not None else None  # Normalize validated year
+    if validated_str is None:  # If there's no validated year provided
+        return " ".join(toks).strip()  # Return the title unchanged
+
     out = []  # Output tokens accumulator
-    
-    for idx, tok in enumerate(toks):  # Iterate original tokens with indices
-        if validated_str is not None and tok == validated_str:  # Remove any existing validated-year tokens to dedupe
-            continue  # Skip token equal to validated year
-        
-        if idx in candidate_indices:  # Remove candidate year tokens (likely old/incorrect)
-            continue  # Skip candidate token
-        
-        out.append(tok)  # Preserve token
+    for tok in toks:  # Iterate tokens preserving original order
+        if tok == validated_str:  # Skip tokens equal to the validated year (dedupe)
+            continue  # Remove validated year from title so it can be added later
+        out.append(tok)  # Preserve all other tokens including numeric title tokens
 
     return " ".join(out).strip()  # Reconstruct and return normalized title
 
