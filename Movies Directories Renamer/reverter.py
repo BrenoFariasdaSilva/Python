@@ -166,7 +166,11 @@ def print_reverted(src_path, dst_path):
     :return: None
     """
     
-    print(f"{BackgroundColors.GREEN}[OK] Reverted: {BackgroundColors.CYAN}{src_path}{BackgroundColors.GREEN} -> {BackgroundColors.CYAN}{dst_path}{Style.RESET_ALL}")  # Print success message
+    is_dir = os.path.isdir(dst_path)  # Check filesystem to determine type after rename
+    if is_dir:  # Directory case
+        print(f"{BackgroundColors.GREEN}[OK] Reverted Directory: {BackgroundColors.CYAN}{src_path}{BackgroundColors.GREEN} -> {BackgroundColors.CYAN}{dst_path}{Style.RESET_ALL}")  # Print directory success message
+    else:  # File case
+        print(f"{BackgroundColors.GREEN}[OK] Reverted File: {BackgroundColors.CYAN}{src_path}{BackgroundColors.GREEN} -> {BackgroundColors.CYAN}{dst_path}{Style.RESET_ALL}")  # Print file success message
 
 
 def handle_missing_source(src_path, dst_path, counters):
@@ -215,6 +219,7 @@ def perform_rename(src_path, dst_path, counters):
     """
     
     try:  # Attempt filesystem rename and handle common errors gracefully
+        is_dir_before = os.path.isdir(src_path)  # Determine type from source before rename for messaging
         os.rename(src_path, dst_path)  # Perform filesystem rename
     except FileNotFoundError:  # Source or destination path not found
         increment_counter(counters, "missing")  # Increment missing counter
@@ -229,7 +234,10 @@ def perform_rename(src_path, dst_path, counters):
         return False  # Signal not handled
 
     increment_counter(counters, "reverted_now")  # Increment reverted counter on success
-    # print_reverted(src_path, dst_path)  # Print success message
+    try:  # Print success message with differentiation
+        print_reverted(src_path, dst_path)  # Print success message using helper
+    except Exception:  # Ensure printing never breaks flow
+        pass  # Silently ignore any print errors
     return True  # Signal handled
 
 
