@@ -931,6 +931,7 @@ def rebuild_final_name(movie_title, final_year, res_token, append_lang):
 
     :return: Final normalized name
     """
+    
     parts = [movie_title]  # Start with title
     if final_year:  # Append year if present
         parts.append(str(final_year))
