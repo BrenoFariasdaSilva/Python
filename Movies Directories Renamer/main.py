@@ -166,7 +166,7 @@ def load_api_key():
 
 def is_ffmpeg_installed():
     """
-    Checks if FFmpeg is installed by running 'ffmpeg -version'.
+    Verifies if FFmpeg is installed by running 'ffmpeg -version'.
 
     :return: bool - True if FFmpeg is installed, False otherwise.
     """
@@ -191,7 +191,7 @@ def install_ffmpeg_windows():
 
     choco_installed = (
         subprocess.run(["choco", "--version"], capture_output=True, text=True).returncode == 0
-    )  # Check if Chocolatey is installed
+    )  # Verifies if Chocolatey is installed
 
     if not choco_installed:  # If Chocolatey is not installed
         verbose_output(f"{BackgroundColors.YELLOW}Chocolatey not found. Installing Chocolatey...{Style.RESET_ALL}")
@@ -260,7 +260,7 @@ def install_ffmpeg_mac():
 
 def verify_ffmpeg_is_installed():
     """
-    Checks if FFmpeg is installed and installs it if missing.
+    Verifies if FFmpeg is installed and installs it if missing.
 
     :return: None
     """
@@ -356,7 +356,7 @@ def standardize_final_name(name):
     out_tokens = []  # Container for transformed tokens
     
     for tok in tokens:  # Iterate each token for classification
-        if tok.isdigit():  # Numeric token check (keeps leading zeros)
+        if tok.isdigit():  # Numeric token verification (keeps leading zeros)
             out_tokens.append(tok)  # Append numeric token unchanged
             continue  # Proceed to next token
 
@@ -370,7 +370,7 @@ def standardize_final_name(name):
 
         matched_suffix = None  # Default no match
         for s in LANGUAGE_OPTIONS:  # Iterate configured canonical suffixes
-            if tok.lower() == s.lower():  # Case-insensitive equality check
+            if tok.lower() == s.lower():  # Case-insensitive equality verification for language suffixes
                 matched_suffix = s  # Use canonical form from configuration
                 break  # Stop searching when found
         if matched_suffix:  # If suffix matched any canonical value
@@ -457,6 +457,7 @@ def normalize_imax_position(filename):
     result = new_name + ext  # Reattach the original extension to the reconstructed name
     
     return result  # Return the normalized filename with tokens repositioned
+
 
 def get_resolution_from_first_video(dir_path):
     """
@@ -632,7 +633,7 @@ def determine_resolution(dir_path, name_hint):
     """
     Unified resolution detection for a given movie folder.
 
-    1) Check for resolution token in `name_hint` using the project's regex.
+    1) Verifies for resolution token in `name_hint` using the project's regex.
     2) If not found, probe the first video file inside `dir_path` (non-recursive)
         using `get_resolution_from_first_video()`.
     Preserves casing from filename results and returns None when absent.
@@ -791,7 +792,7 @@ def rename_dirs():
                 verbose_output(f"{BackgroundColors.YELLOW}Skipping video sync (dir missing): {target_dir}{Style.RESET_ALL}")  # Inform skip and continue
                 continue  # Continue to next entry when directory is absent
 
-            if dir_renamed and entry.name != new_name:  # Check that rename happened and names are different
+            if dir_renamed and entry.name != new_name:  # Verifies that rename happened and names are different
                 root_key = str(root_path)  # Use string form of input root as dictionary key
                 if root_key not in report_data["input_dirs"]:  # Lazily create per-root entry when first change occurs
                     report_data["input_dirs"][root_key] = {  # Initialize per-root structure
