@@ -696,6 +696,75 @@ def get_resolution_from_first_video(dir_path):
     return None  # Return None when no video files found
 
 
+def strip_prefix(name):
+    """
+    Remove leading 'X - ' prefix if present.
+
+    :param name: Filename string
+    :return: Filename without prefix
+    """
+    
+    m = re.match(r"^(?P<prefix>[^-]+)\s-\s(?P<rest>.+)$", name)  # Match prefix pattern
+    return m.group("rest") if m else name  # Return remainder or original
+
+
+def has_duplicate_tokens(tokens):
+    """
+    Determine whether a token list contains case-insensitive duplicates.
+
+    :param tokens: List of tokens
+    :return: True if duplicates exist, otherwise False
+    """
+    
+    seen = set()  # Track seen lowercase tokens
+    
+    for t in tokens:  # Iterate tokens
+        key = t.lower()  # Normalize token case
+        
+        if key in seen:  # Duplicate found
+            return True  # Return immediately
+        
+        seen.add(key)  # Record token
+        
+    return False  # No duplicates found
+
+
+def tokens_reordered(toks_old, toks_new):
+    """
+    Determine if tokens were reordered but content is identical.
+
+    :param toks_old: Old token list
+    :param toks_new: New token list
+    :return: True if reordered only
+    """
+    
+    lower_old = [t.lower() for t in toks_old]  # Lowercase old tokens
+    lower_new = [t.lower() for t in toks_new]  # Lowercase new tokens
+    
+    if lower_old != lower_new and sorted(lower_old) == sorted(lower_new):  # Same tokens different order
+        return True  # Reordered
+    
+    return False  # Not reordered-only
+
+
+def tokens_casing_changed(toks_old, toks_new):
+    """
+    Determine if only casing changed.
+
+    :param toks_old: Old token list
+    :param toks_new: New token list
+    :return: True if casing differs only
+    """
+    
+    lower_old = [t.lower() for t in toks_old]  # Lowercase old tokens
+    lower_new = [t.lower() for t in toks_new]  # Lowercase new tokens
+    
+    if lower_old == lower_new and toks_old != toks_new:  # Same words different casing
+        return True  # Casing standardized
+    
+    return False  # Not casing-only change
+
+
 def detect_changes(old_name, new_name):
     """
     Detect a list of change tags between old_name and new_name.
@@ -710,77 +779,52 @@ def detect_changes(old_name, new_name):
         return ""  # Empty means skip rename
 
     if old_norm == new_norm and old_name != new_name:  # Only spacing differs
-        return "Normalize Format"  # Single tag for spacing-only changes
+        return "Normalize Format"  # Spacing-only change
 
     tags = []  # Collect change tags
 
     if re.match(r"^[^-]+\s-\s", new_name) and not re.match(r"^[^-]+\s-\s", old_name):  # Added series prefix
-        tags.append("Add Prefix")  # Add tag for added prefix
+        tags.append("Add Prefix")  # Tag prefix addition
 
     year_re = re.compile(r"\b(19|20)\d{2}\b")  # Year regex
-    old_year = year_re.search(old_name)  # Find year in old name
-    new_year = year_re.search(new_name)  # Find year in new name
+    old_year = year_re.search(old_name)  # Extract old year
+    new_year = year_re.search(new_name)  # Extract new year
 
     if new_year and not old_year:  # Year added
-        tags.append("Add Year")  # Tag for adding year
-    elif new_year and old_year and new_year.group(0) != old_year.group(0):  # Year changed
-        tags.append("Correct Year")  # Tag for corrected year
+        tags.append("Add Year")  # Tag year addition
+    elif new_year and old_year and new_year.group(0) != old_year.group(0):  # Year corrected
+        tags.append("Correct Year")  # Tag corrected year
 
     res_re = re.compile(r"\b(\d{3,4}p|4k)\b", re.IGNORECASE)  # Resolution regex
-    old_res = res_re.search(old_name)  # Find resolution in old name
-    new_res = res_re.search(new_name)  # Find resolution in new name
-    
-    if new_res and not old_res:  # Resolution added
-        tags.append("Add Resolution")  # Tag for added resolution
-    elif new_res and old_res and new_res.group(0).lower() != old_res.group(0).lower():  # Resolution changed
-        tags.append("Correct Resolution")  # Tag for changed resolution
+    old_res = res_re.search(old_name)  # Extract old resolution
+    new_res = res_re.search(new_name)  # Extract new resolution
 
-    def strip_prefix(s):  # Helper to remove leading 'X - ' if present
-        m = re.match(r"^(?P<prefix>[^-]+)\s-\s(?P<rest>.+)$", s)  # Match prefix pattern
-        return m.group("rest") if m else s  # Return remainder or original
+    if new_res and not old_res:  # Resolution added
+        tags.append("Add Resolution")  # Tag resolution addition
+    elif new_res and old_res and new_res.group(0).lower() != old_res.group(0).lower():  # Resolution corrected
+        tags.append("Correct Resolution")  # Tag corrected resolution
 
     base_old = strip_prefix(old_name)  # Remove prefix from old
     base_new = strip_prefix(new_name)  # Remove prefix from new
     toks_old = base_old.split()  # Tokenize old base
     toks_new = base_new.split()  # Tokenize new base
 
-    seen = set()  # Track seen tokens
-    dup_old = False  # Assume no duplicates
-    for t in toks_old:  # Iterate tokens in old
-        key = t.lower()  # Case-insensitive key
+    dup_old = has_duplicate_tokens(toks_old)  # Check duplicates in old
+    dup_new = has_duplicate_tokens(toks_new)  # Check duplicates in new
 
-        if key in seen:  # Duplicate found
-            dup_old = True  # Mark duplicate
-            break  # Stop early
-        
-        seen.add(key)  # Add token
+    if dup_old and not dup_new:  # Duplicates removed
+        tags.append("Remove Duplicate Tokens")  # Tag duplicate removal
 
-    if dup_old:  # If old had duplicates
-        seen_new = set()  # Track new tokens
-        dup_new = False  # Default
+    if tokens_reordered(toks_old, toks_new):  # Tokens reordered
+        tags.append("Reorder Tokens")  # Tag reorder
 
-        for t in toks_new:  # Iterate new tokens
-            key = t.lower()  # Case-insensitive key
+    if tokens_casing_changed(toks_old, toks_new):  # Casing standardized
+        tags.append("Standardize Casing")  # Tag casing normalization
 
-            if key in seen_new:  # Duplicate in new
-                dup_new = True  # Mark
-                break  # Stop early
-
-            seen_new.add(key)  # Add
-            
-        if not dup_new:  # If new has no duplicates but old did
-            tags.append("Remove Duplicate Tokens")  # Tag for duplicate removal
-
-    if [t.lower() for t in toks_old] != [t.lower() for t in toks_new] and sorted([t.lower() for t in toks_old]) == sorted([t.lower() for t in toks_new]):  # Same tokens different order
-        tags.append("Reorder Tokens")  # Tag for reordering
-
-    if [t.lower() for t in toks_old] == [t.lower() for t in toks_new] and toks_old != toks_new:  # Same tokens different casing
-        tags.append("Standardize Casing")  # Tag for casing normalization
-
-    if not tags:  # No specific tags found
-        if old_norm != new_norm:  # If normalized forms differ
-            tags.append("Normalize Format")  # Use Normalize Format as fallback
-        else:  # Otherwise nothing meaningful changed
+    if not tags:  # No specific tags detected
+        if old_norm != new_norm:  # Normalized forms differ
+            tags.append("Normalize Format")  # Fallback normalization tag
+        else:  # No meaningful change
             return ""  # Signal skip
 
     return " + ".join(tags)  # Return combined tags
