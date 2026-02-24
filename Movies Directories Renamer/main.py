@@ -409,22 +409,13 @@ def find_resolution_index(tokens):
     return None  # Return None if resolution not found
 
 
-def normalize_special_tokens_position(filename):
+def extract_special_tokens(tokens):
     """
-    Reposition IMAX and AI Upscaled 60FPS tokens immediately after the resolution token in a filename.
+    Extract IMAX, HDR and AI Upscaled 60FPS tokens with original casing.
 
-    :param filename: The filename (with or without extension) to normalize
-    :return: The filename with tokens positioned after the resolution token or the original filename when unchanged
+    :param tokens: List of filename tokens
+    :return: Tuple containing indices and raw tokens
     """
-
-    p = Path(filename)  # Create Path object from filename
-    ext = p.suffix  # Extract file extension
-    name = p.stem  # Extract filename without extension
-    tokens = name.split()  # Split filename into tokens
-
-    res_index = find_resolution_index(tokens)  # Locate resolution token
-    if res_index is None:  # If resolution missing, nothing to do
-        return filename  # Return original filename unchanged
 
     imax_idx = None  # Index of IMAX when found
     hdr_idx = None  # Index of HDR when found
@@ -433,7 +424,6 @@ def normalize_special_tokens_position(filename):
     imax_raw = None  # Original IMAX token casing
     hdr_raw = None  # Original HDR token casing
     i = 0  # Iterator index
-
     while i < len(tokens):  # Scan tokens for special markers
         if imax_idx is None and re.fullmatch(r"(?i)IMAX", tokens[i]):  # Check IMAX token
             imax_idx = i  # Record IMAX index
@@ -451,7 +441,63 @@ def normalize_special_tokens_position(filename):
             i += 3  # Advance past AI group
             continue  # Continue scanning
         i += 1  # Advance index when no special token matched
+    return imax_idx, hdr_idx, ai_idx, imax_raw, hdr_raw, ai_raw  # Return extracted markers
 
+
+def remove_special_tokens(tokens):
+    """
+    Remove first occurrence of IMAX, HDR and AI Upscaled 60FPS tokens.
+
+    :param tokens: List of filename tokens
+    :return: Cleaned tokens list
+    """
+
+    cleaned = []  # Tokens after removal of first occurrences
+    removed_imax = False  # Track IMAX removal
+    removed_hdr = False  # Track HDR removal
+    removed_ai = False  # Track AI removal
+    j = 0  # Index for removal pass
+    
+    while j < len(tokens):  # Iterate original tokens
+        if not removed_ai and j + 2 < len(tokens) and tokens[j].lower() == "ai" and tokens[j + 1].lower() == "upscaled" and tokens[j + 2].lower() == "60fps":  # Remove AI group once
+            removed_ai = True  # Mark AI removed
+            j += 3  # Skip AI tokens
+            continue  # Continue after skipping
+        
+        if not removed_imax and re.fullmatch(r"(?i)IMAX", tokens[j]):  # Remove IMAX once
+            removed_imax = True  # Mark IMAX removed
+            j += 1  # Skip IMAX token
+            continue  # Continue after skipping
+        
+        if not removed_hdr and re.fullmatch(r"(?i)HDR", tokens[j]):  # Remove HDR once
+            removed_hdr = True  # Mark HDR removed
+            j += 1  # Skip HDR token
+            continue  # Continue after skipping
+        
+        cleaned.append(tokens[j])  # Keep non-removed token
+        j += 1  # Advance index
+        
+    return cleaned  # Return cleaned tokens
+
+
+def normalize_special_tokens_position(filename):
+    """
+    Reposition IMAX, HDR and AI Upscaled 60FPS tokens immediately after the resolution token in a filename.
+
+    :param filename: The filename (with or without extension) to normalize
+    :return: The filename with tokens positioned after the resolution token or the original filename when unchanged
+    """
+
+    p = Path(filename)  # Create Path object from filename
+    ext = p.suffix  # Extract file extension
+    name = p.stem  # Extract filename without extension
+    tokens = name.split()  # Split filename into tokens
+
+    res_index = find_resolution_index(tokens)  # Locate resolution token
+    if res_index is None:  # If resolution missing, nothing to do
+        return filename  # Return original filename unchanged
+
+    imax_idx, hdr_idx, ai_idx, imax_raw, hdr_raw, ai_raw = extract_special_tokens(tokens)  # Extract special tokens
     if imax_idx is None and hdr_idx is None and not ai_raw:  # If no special markers found
         return filename  # Return original filename unchanged
 
@@ -465,31 +511,14 @@ def normalize_special_tokens_position(filename):
 
     check_slice = tokens[res_index + 1 : res_index + 1 + len(expected)]  # Slice tokens after resolution for comparison
     match_ok = False  # Flag for match status
+    
     if len(check_slice) == len(expected) and all(a.lower() == b.lower() for a, b in zip(check_slice, expected)):  # Case-insensitive compare for exact sequence
         match_ok = True  # Sequence already correct
+    
     if match_ok:  # If ordering already correct
         return filename  # Return original filename unchanged
 
-    cleaned = []  # Tokens after removal of first occurrences
-    removed_imax = False  # Track removal
-    removed_hdr = False  # Track removal
-    removed_ai = False  # Track removal
-    j = 0  # Index for removal pass
-    while j < len(tokens):  # Iterate original tokens
-        if not removed_ai and j + 2 < len(tokens) and tokens[j].lower() == "ai" and tokens[j + 1].lower() == "upscaled" and tokens[j + 2].lower() == "60fps":  # Remove AI group once
-            removed_ai = True  # Mark AI removed
-            j += 3  # Skip AI tokens
-            continue  # Continue after skipping
-        if not removed_imax and re.fullmatch(r"(?i)IMAX", tokens[j]):  # Remove IMAX once
-            removed_imax = True  # Mark IMAX removed
-            j += 1  # Skip IMAX token
-            continue  # Continue after skipping
-        if not removed_hdr and re.fullmatch(r"(?i)HDR", tokens[j]):  # Remove HDR once
-            removed_hdr = True  # Mark HDR removed
-            j += 1  # Skip HDR token
-            continue  # Continue after skipping
-        cleaned.append(tokens[j])  # Keep non-removed token
-        j += 1  # Advance index
+    cleaned = remove_special_tokens(tokens)  # Remove first occurrence of special tokens
 
     res_index_new = find_resolution_index(cleaned)  # Recompute resolution index in cleaned list
     if res_index_new is None:  # Defensive: if resolution lost, abort
