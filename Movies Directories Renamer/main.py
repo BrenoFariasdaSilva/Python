@@ -285,34 +285,6 @@ def verify_ffmpeg_is_installed():
             )  # Inform the user
 
 
-def parse_dir_name(dir_name):
-    """
-    Parses folder name like 'The Matrix 1999 1080p Dual'.
-
-    :param dir_name: Directory name string to parse
-    :return: Tuple (movie_name, year, resolution, language) or None when parsing fails
-    """
-    
-    match = re.match(
-        r"^(?P<movie>.+?)\s*(?P<year>\(\d{4}\)|\d{4})?\s*(?P<res>\d{3,4}p|4k)?\s*(?P<lang>Dual|Dublado|English|Legendado|Nacional)?$",
-        dir_name,
-        re.IGNORECASE,
-    )  # Regex to parse movie name, optional year, optional resolution, and optional language suffix
-    
-    if match:  # If the regex matched successfully
-        movie = match.group("movie").strip()  # Extract and clean movie name
-        year = match.group("year")  # Extract year string (may be None)
-        resolution = match.group("res")  # Extract resolution string (may be None)
-        language = match.group("lang")  # Extract language suffix (may be None)
-
-        if year:  # If a year was found, clean it by removing parentheses if present
-            year = year.strip("()")  # Remove parentheses from year if they exist
-
-        return movie, year, resolution, language  # Return the parsed components as a tuple
-    
-    return None  # Return None when parsing fails (no match)
-
-
 def find_exact_year_match(results, filename_year):
     """
     Iterate TMDb results and return exact matching release year.
