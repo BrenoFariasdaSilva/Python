@@ -1121,6 +1121,24 @@ def rebuild_final_name(movie_title, final_year, res_token, append_lang):
     return new_name  # Return final normalized name
 
 
+def colored_tqdm_bar_format():
+    """
+    Return a `tqdm` `bar_format` string that applies terminal color codes
+    to the full progress bar for improved visibility.
+
+    :param: None
+    :return: A `bar_format` string with embedded color codes
+    """
+
+    bar_color = BackgroundColors.CYAN  # Use cyan for the filled bar
+    percent_color = BackgroundColors.GREEN  # Use green for the percentage
+    reset = Style.RESET_ALL  # Reset sequence from colorama
+
+    return (
+        f"{bar_color}{{l_bar}}{{bar}}{reset}{percent_color}{{r_bar}}{reset}"
+    )  # Embed color codes in the bar format
+
+
 def rename_videos_and_subtitles(directory_path, new_dir_name, report_data=None, root_key=None):
     """
     Rename all video files and their corresponding subtitle files inside a directory so
@@ -1288,7 +1306,7 @@ def rename_dirs():
                 "video_files_renamed": [],  # List to hold video rename records
             }  # End initialization
 
-        with tqdm(total=total, desc=f"Processing root: {root_path}", unit="dir") as pbar:  # Initialize tqdm progress bar
+        with tqdm(total=total, desc=f"Processing root: {root_path}", unit="dir", bar_format=colored_tqdm_bar_format()) as pbar:  # Initialize tqdm progress bar with colored format
             for entry in entries:  # Iterate entries
                 if re.match(IGNORE_DIR_REGEX, entry.name.strip()):  # Skip ignored directories by regex
                     verbose_output(f"{BackgroundColors.YELLOW}Ignoring top-level directory: {entry.name}{Style.RESET_ALL}")  # Verbose message for ignored directory
