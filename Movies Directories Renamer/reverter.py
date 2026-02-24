@@ -124,6 +124,31 @@ def verify_filepath_exists(filepath):
     return os.path.exists(filepath)  # Return True if the file or folder exists, False otherwise
 
 
+def print_summary(counters):
+    """
+    Print Final Summary Report.
+    
+    :param counters: Counters Dictionary
+    :return: None
+    """
+    
+    print("\n========== SUMMARY ==========")  # Print header
+    print(f"Expected Operations : {counters['expected']}")  # Print expected
+    print(f"Reverted Now        : {counters['reverted_now']}")  # Print reverted now
+    print(f"Already Reverted    : {counters['already_reverted']}")  # Print already reverted
+    print(f"Missing             : {counters['missing']}")  # Print missing
+    print(f"Conflicts           : {counters['conflicts']}")  # Print conflicts
+
+    verified_total = counters["reverted_now"] + counters["already_reverted"]  # Compute verified total
+
+    print(f"\nVerified Total      : {verified_total}")  # Print verified total
+
+    if verified_total == counters["expected"]:  # Compare totals
+        print("Status              : OK — Nothing Missing")  # Print OK status
+    else:
+        print("Status              : WARNING — Mismatch Detected")  # Print warning status
+
+
 def revert_changes():
     """
     Revert All Renames Based On The Report File.
