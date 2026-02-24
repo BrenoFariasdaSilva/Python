@@ -124,6 +124,38 @@ def verify_filepath_exists(filepath):
     return os.path.exists(filepath)  # Return True if the file or folder exists, False otherwise
 
 
+def revert_changes():
+    """
+    Revert All Renames Based On The Report File.
+    
+    :param: None
+    :return: None
+    """
+    
+    if not report_exists():  # Validate report file
+        return  # Abort if missing
+
+    report = load_report_file()  # Load report JSON
+    input_dirs = report.get("input_dirs", {})  # Extract input dirs
+    counters = initialize_counters()  # Initialize counters
+
+    for base_dir, data in input_dirs.items():  # Iterate base directories
+        base_dir = normalize_base_dir(base_dir)  # Normalize path
+
+        video_logs = data.get("video_files_renamed", [])  # Extract video logs
+        dir_logs = data.get("directories_modified", [])  # Extract directory logs
+
+        update_expected_counter(counters, video_logs, dir_logs)  # Update expected counter
+
+        for file_entry in video_logs:  # Process video entries
+            resolve_video_file_entry(base_dir, file_entry, dir_logs, counters)  # Resolve file revert
+
+        for dir_entry in dir_logs:  # Process directory entries
+            revert_directory_entry(base_dir, dir_entry, counters)  # Revert directory
+
+    print_summary(counters)  # Print final summary
+
+
 def to_seconds(obj):
     """
     Converts various time-like objects to seconds.
