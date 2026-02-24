@@ -124,6 +124,17 @@ def verify_filepath_exists(filepath):
     return os.path.exists(filepath)  # Return True if the file or folder exists, False otherwise
 
 
+def normalize_base_dir(base_dir):
+    """
+    Normalize Base Directory Path.
+    
+    :param base_dir: Base Directory Path
+    :return: Normalized Base Directory Path
+    """
+    
+    return base_dir.replace("\\", "/")  # Normalize slashes
+
+
 def update_expected_counter(counters, video_logs, dir_logs):
     """
     Update Expected Counter Based On Logs.
