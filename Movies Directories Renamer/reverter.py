@@ -124,6 +124,23 @@ def verify_filepath_exists(filepath):
     return os.path.exists(filepath)  # Return True if the file or folder exists, False otherwise
 
 
+def perform_rename(src_path, dst_path, counters):
+    """
+    Execute Rename Operation.
+
+    :param src_path: Source Path
+    :param dst_path: Destination Path
+    :param counters: Counters Dictionary
+    :return: True if handled, False otherwise
+    """
+    
+    os.rename(src_path, dst_path)  # Perform filesystem rename
+    increment_counter(counters, "reverted_now")  # Increment reverted counter
+    print_reverted(src_path, dst_path)  # Print success message
+    
+    return True  # Signal handled
+
+
 def safe_rename(src_path, dst_path, counters):
     """
     Safely Rename A File Or Directory From Source To Destination.
