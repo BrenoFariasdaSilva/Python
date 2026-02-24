@@ -325,9 +325,23 @@ def find_exact_year_match(results, filename_year):
     target_year = str(filename_year)  # Normalize filename_year to string for comparison
     for r in results:  # Iterate TMDb results in ranking order
         release_date = r.get("release_date", "")  # Extract release_date if present
-        if release_date and len(release_date) >= 4 and release_date.split("-")[0] == target_year:  # Require exact numeric year equality
+        extracted_year = extract_year_from_release_date(release_date)  # Extract year safely from release_date
+        if extracted_year and extracted_year == target_year:  # Require exact numeric year equality
             return target_year  # Return matched year when exact-year match found
     return None  # Return None when no exact-year match found
+
+
+def extract_year_from_release_date(release_date):
+    """
+    Extract year portion from a TMDb release_date string.
+
+    :param release_date: TMDb release_date string
+    :return: Year string when valid, otherwise None
+    """
+
+    if release_date and len(release_date) >= 4:  # Ensure release_date contains at least year portion
+        return release_date.split("-")[0]  # Return first 4-digit year portion
+    return None  # Return None when release_date is invalid
 
 
 def get_movie_year(api_key, movie_name, filename_year=None):
@@ -359,9 +373,7 @@ def get_movie_year(api_key, movie_name, filename_year=None):
 
         first = results[0]  # Use first (best) search result when no filename_year provided
         release_date = first.get("release_date", "")  # Extract release_date if present
-        if release_date and len(release_date) >= 4:  # Ensure a year portion exists
-            return release_date.split("-")[0]  # Return year portion only
-        return None  # No usable release_date available
+        return extract_year_from_release_date(release_date)  # Return extracted year or None
     except Exception:  # Any network or parsing error must not crash the program
         return None  # Fail silently and allow caller to continue
 
