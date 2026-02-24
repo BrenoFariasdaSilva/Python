@@ -382,6 +382,65 @@ def standardize_final_name(name):
     return " ".join(out_tokens)  # Reconstruct normalized name and return
 
 
+def normalize_imax_position(filename):
+    """
+    Reposition IMAX token immediately after resolution token in a filename.
+
+    :param filename: The filename (with or without extension) to normalize
+    :return: The filename with IMAX positioned after the resolution token or the original filename when unchanged
+    """
+
+    p = Path(filename)  # Create a Path object from the provided filename
+    ext = p.suffix  # Extract the file extension (including dot) to preserve it
+    name = p.stem  # Extract the filename without extension to operate on
+    res_m = re.search(r"\b(\d{3,4}p|4k)\b", name, re.IGNORECASE)  # Search for a resolution token in the name
+    
+    if not res_m:  # If no resolution token was found then nothing to do
+        return filename  # Return the original filename unchanged
+    
+    imax_m = re.search(r"\bIMAX\b", name, re.IGNORECASE)  # Search for an IMAX token in the name
+    if not imax_m:  # If IMAX is not present then nothing to do
+        return filename  # Return the original filename unchanged
+    
+    tokens = name.split()  # Split the name into whitespace-separated tokens for positional checks
+    res_index = None  # Initialize variable to hold the index of the resolution token
+    
+    for idx, tok in enumerate(tokens):  # Iterate tokens to locate the first resolution token
+        if re.fullmatch(r"(?i)(\d{3,4}p|4k)", tok):  # If the token matches a resolution pattern
+            res_index = idx  # Store the index of the resolution token
+            break  # Stop after finding the first resolution token
+    
+    if res_index is None:  # Defensive: if resolution not found after splitting tokens
+        return filename  # Return the original filename unchanged
+    
+    if res_index + 1 < len(tokens) and re.fullmatch(r"(?i)IMAX", tokens[res_index + 1]):  # If IMAX already immediately follows resolution
+        return filename  # Return the original filename unchanged
+    
+    removed = False  # Flag to indicate whether IMAX was removed from its original position
+    new_tokens = []  # Container for tokens after removing the first IMAX occurrence
+    
+    for tok in tokens:  # Iterate original tokens to remove IMAX once while preserving others
+        if not removed and re.fullmatch(r"(?i)IMAX", tok):  # If token matches IMAX and hasn't been removed yet
+            removed = True  # Mark IMAX as removed and skip appending it
+            continue  # Skip adding this IMAX token to new_tokens
+        new_tokens.append(tok)  # Append non-IMAX tokens to the new token list
+        
+    res_index_new = None  # Variable to hold the resolution index in the cleaned token list
+    for idx, tok in enumerate(new_tokens):  # Iterate cleaned tokens to find resolution position
+        if re.fullmatch(r"(?i)(\d{3,4}p|4k)", tok):  # If token matches resolution pattern
+            res_index_new = idx  # Store the new index of resolution token
+            break  # Stop after finding the first resolution token
+    
+    if res_index_new is None:  # If resolution cannot be located after IMAX removal
+        return filename  # Return the original filename unchanged
+    
+    imax_raw = imax_m.group(0)  # Capture the original IMAX token text preserving original casing
+    new_tokens.insert(res_index_new + 1, imax_raw)  # Insert IMAX immediately after the resolution token
+    new_name = " ".join(new_tokens)  # Reconstruct the filename body using single-space separators
+    result = new_name + ext  # Reattach the original extension to the reconstructed name
+    
+    return result  # Return the normalized filename with IMAX repositioned
+
 def get_resolution_from_first_video(dir_path):
     """
     Attempt to derive resolution from the first valid video file in `dir_path`.
@@ -684,6 +743,7 @@ def rename_dirs():
             new_name = " ".join(new_name.split())  # Normalize internal whitespace
             new_name = standardize_final_name(new_name)  # Apply canonical normalization rules
             new_name = " ".join(new_name.split())  # Normalize whitespace again after standardization
+            new_name = normalize_imax_position(new_name)  # Reposition IMAX after resolution when present
 
             # Step 8: Detect differences and decide renaming action
             if new_name == entry.name:  # If nothing changed compared to original name
