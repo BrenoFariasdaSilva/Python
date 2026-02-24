@@ -433,42 +433,6 @@ def find_resolution_index(tokens):
     return None  # Return None if resolution not found
 
 
-def extract_special_tokens(tokens):
-    """
-    Remove and capture IMAX and AI Upscaled 60FPS tokens.
-
-    :param tokens: List of filename tokens
-    :return: Tuple (imax_token, ai_tokens, cleaned_tokens)
-    """
-
-    imax_token = None  # Store IMAX token if found
-    ai_tokens = []  # Store AI group tokens if found
-    cleaned_tokens = []  # Store tokens without special markers
-    i = 0  # Initialize index
-
-    while i < len(tokens):  # Iterate through tokens
-        if imax_token is None and re.fullmatch(r"(?i)IMAX", tokens[i]):  # Verifies for IMAX token
-            imax_token = tokens[i]  # Capture IMAX preserving casing
-            i += 1  # Skip IMAX token
-            continue  # Continue iteration
-
-        if (
-            not ai_tokens
-            and i + 2 < len(tokens)
-            and tokens[i].lower() == "ai"
-            and tokens[i + 1].lower() == "upscaled"
-            and tokens[i + 2].lower() == "60fps"
-        ):  # Verifies for AI Upscaled 60FPS group
-            ai_tokens = [tokens[i], tokens[i + 1], tokens[i + 2]]  # Capture AI group preserving casing
-            i += 3  # Skip AI group tokens
-            continue  # Continue iteration
-
-        cleaned_tokens.append(tokens[i])  # Append normal token
-        i += 1  # Advance index
-
-    return imax_token, ai_tokens, cleaned_tokens  # Return extracted tokens
-
-
 def insert_special_tokens(tokens, imax_token, ai_tokens):
     """
     Insert IMAX and AI Upscaled 60FPS tokens immediately after resolution.
