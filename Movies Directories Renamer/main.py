@@ -1008,6 +1008,95 @@ def remove_release_year_tokens(title, release_year):
     return " ".join(filtered).strip()  # Reconstruct and return
 
 
+def mark_backwards_indices(toks, year_re, start_idx):
+    """
+    Return a set of indices for contiguous year tokens going backwards from start_idx.
+
+    :param toks: Token list
+    :param year_re: Compiled regex matching a year token
+    :param start_idx: Index to start scanning backwards from
+    :return: Set of integer indices to remove
+    """
+    
+    indices = set()  # Indices to remove
+    i = start_idx  # Start from provided index
+    
+    while i >= 0 and year_re.match(toks[i]):  # While token at i is a year token
+        indices.add(i)  # Mark index for removal
+        i -= 1  # Move backwards
+    
+    return indices  # Return collected indices
+
+
+def normalize_title_years(title, validated_year, res_token, append_lang):
+    """
+    Normalize year tokens in the title so only the validated release year
+    will be kept in the final rebuilt name.
+
+    Rules implemented:
+    - Remove any occurrences of the validated year from the title (dedupe).
+    - Remove contiguous year tokens that immediately precede the resolution
+      token or the language token (they are likely year placeholders).
+    - Preserve numeric tokens that are part of the movie title (e.g. 2049)
+      when they are not in the candidate positions described above.
+
+    :param title: The cleaned movie title string
+    :param validated_year: The validated release year (string or int)
+    :param res_token: Resolution token if known (e.g., '1080p')
+    :param append_lang: Language suffix if known
+    :return: Title with non-validated year tokens removed
+    """
+    
+    if not title:  # Guard empty title
+        return title  # Return unchanged when empty
+
+    toks = title.split()  # Tokenize title on whitespace
+    year_re = re.compile(r"^(?:19|20)\d{2}$")  # Year-only token regex
+
+    res_idx = find_resolution_index(toks)  # Get resolution token index or None
+
+    lang_idx = None  # Default no language index
+    if append_lang:  # If append_lang provided prefer exact match
+        for i, t in enumerate(toks):  # Iterate tokens to find append_lang
+            if t.lower() == str(append_lang).lower():  # Case-insensitive match
+                lang_idx = i  # Record language index
+                break  # Stop search when found
+    else:  # Fallback: scan for known language tokens in the token list
+        for i, t in enumerate(toks):  # Iterate tokens
+            for s in LANGUAGE_OPTIONS:  # Iterate canonical language options
+                if t.lower() == s.lower():  # Case-insensitive match for language token
+                    lang_idx = i  # Record language index
+                    break  # Break inner loop
+            if lang_idx is not None:  # If language found, break outer loop
+                break  # Stop scanning tokens
+
+    candidate_indices = set()  # Indices marked for potential removal
+
+    if res_idx is not None and res_idx - 1 >= 0:  # If resolution exists in tokens
+        candidate_indices |= mark_backwards_indices(toks, year_re, res_idx - 1)  # Mark contiguous years before resolution
+
+    if lang_idx is not None and lang_idx - 1 >= 0:  # If language exists in tokens
+        candidate_indices |= mark_backwards_indices(toks, year_re, lang_idx - 1)  # Mark contiguous years before language
+
+    if res_idx is None and lang_idx is None:  # No resolution or language found
+        if toks and year_re.match(toks[-1]):  # If last token is a year
+            candidate_indices |= mark_backwards_indices(toks, year_re, len(toks) - 1)  # Mark trailing year tokens
+
+    validated_str = str(validated_year) if validated_year is not None else None  # Normalize validated year
+    out = []  # Output tokens accumulator
+    
+    for idx, tok in enumerate(toks):  # Iterate original tokens with indices
+        if validated_str is not None and tok == validated_str:  # Remove any existing validated-year tokens to dedupe
+            continue  # Skip token equal to validated year
+        
+        if idx in candidate_indices:  # Remove candidate year tokens (likely old/incorrect)
+            continue  # Skip candidate token
+        
+        out.append(tok)  # Preserve token
+
+    return " ".join(out).strip()  # Reconstruct and return normalized title
+
+
 def rebuild_final_name(movie_title, final_year, res_token, append_lang):
     """
     Rebuild canonical directory name.
