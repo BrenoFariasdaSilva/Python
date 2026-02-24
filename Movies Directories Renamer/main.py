@@ -59,6 +59,7 @@ import subprocess  # For probing video metadata with ffprobe
 from colorama import Style  # For coloring the terminal
 from dotenv import load_dotenv  # For loading environment variables
 from pathlib import Path  # For path handling
+from tqdm import tqdm  # For progress bars
 
 
 # Macros:
@@ -1171,8 +1172,9 @@ def rename_path_with_subtitle_sync(src, dst, report_data=None, root_key=None):
 def rename_dirs():
     """
     Iterates through the INPUT_DIRS, extracts metadata, fetches the release year from TMDb,
-    and renames each directory according to the defined pattern.
-
+    and renames each directory according to the defined pattern, using a tqdm progress bar
+    for tracking.
+    
     :return: None
     """
 
@@ -1192,58 +1194,64 @@ def rename_dirs():
                 "video_files_renamed": [],  # List to hold video rename records
             }  # End initialization
 
-        for idx, entry in enumerate(entries, start=1):  # Iterate entries with index starting at 1
-            print(f"{BackgroundColors.GREEN}Processing {BackgroundColors.CYAN}{idx}{BackgroundColors.GREEN}/{BackgroundColors.CYAN}{total}{BackgroundColors.GREEN}: {BackgroundColors.CYAN}{entry.name}{Style.RESET_ALL}")  # Progress output
+        with tqdm(total=total, desc=f"Processing root: {root_path}", unit="dir") as pbar:  # Initialize tqdm progress bar
+            for entry in entries:  # Iterate entries
+                if re.match(IGNORE_DIR_REGEX, entry.name.strip()):  # Skip ignored directories by regex
+                    verbose_output(f"{BackgroundColors.YELLOW}Ignoring top-level directory: {entry.name}{Style.RESET_ALL}")  # Verbose message for ignored directory
+                    pbar.update(1)
+                    continue  # Continue loop when directory is ignored
 
-            if re.match(IGNORE_DIR_REGEX, entry.name.strip()):  # Skip ignored directories by regex
-                verbose_output(f"{BackgroundColors.YELLOW}Ignoring top-level directory: {entry.name}{Style.RESET_ALL}")  # Verbose message for ignored directory
-                continue  # Continue loop when directory is ignored
+                append_lang = extract_language_token(entry.name)  # Extract language suffix token if present
+                res_token = extract_resolution_token(entry.name)  # Extract resolution token if present
+                name_work, years_in_name = clean_title_for_lookup(entry.name, append_lang, res_token)  # Clean title for lookup and capture years
 
-            append_lang = extract_language_token(entry.name)  # Extract language suffix token if present
-            res_token = extract_resolution_token(entry.name)  # Extract resolution token if present
-            name_work, years_in_name = clean_title_for_lookup(entry.name, append_lang, res_token)  # Clean title for lookup and capture years
+                if not name_work:  # Skip entries that become empty after cleanup
+                    verbose_output(f"{BackgroundColors.YELLOW}Skipping (empty title after cleanup): {entry.name}{Style.RESET_ALL}")  # Verbose skip message
+                    pbar.update(1)
+                    continue  # Continue to next entry
 
-            if not name_work:  # Skip entries that become empty after cleanup
-                verbose_output(f"{BackgroundColors.YELLOW}Skipping (empty title after cleanup): {entry.name}{Style.RESET_ALL}")  # Verbose skip message
-                continue  # Continue to next entry
+                try:  # Guard TMDb lookup network call
+                    tmdb_year = get_movie_year(api_key, name_work, None)  # Query TMDb for release year
+                except Exception as e:  # Handle lookup errors gracefully
+                    print(f"{BackgroundColors.RED}TMDb lookup error for '{name_work}': {e}{Style.RESET_ALL}")  # Print TMDb error
+                    tmdb_year = None  # Fallback when lookup fails
 
-            try:  # Guard TMDb lookup network call
-                tmdb_year = get_movie_year(api_key, name_work, None)  # Query TMDb for release year
-            except Exception as e:  # Handle lookup errors gracefully
-                print(f"{BackgroundColors.RED}TMDb lookup error for '{name_work}': {e}{Style.RESET_ALL}")  # Print TMDb error
-                tmdb_year = None  # Fallback when lookup fails
+                final_year = tmdb_year or (years_in_name[0] if years_in_name else None)  # Choose TMDb year or fallback to filename year
 
-            final_year = tmdb_year or (years_in_name[0] if years_in_name else None)  # Choose TMDb year or fallback to filename year
+                movie_title = " ".join(name_work.split()).strip()  # Normalize whitespace in movie title
 
-            movie_title = " ".join(name_work.split()).strip()  # Normalize whitespace in movie title
+                if not res_token:  # Probe resolution from media files when resolution missing
+                    try:
+                        probed = get_resolution_from_first_video(entry)  # Probe first video file for resolution
+                    except Exception:
+                        probed = None  # Fall back to None on probe failure
+                    if probed and probed.lower() == "4k":  # Normalize textual 4K to canonical token
+                        probed = "2160p"  # Map 4K to 2160p canonical token
+                    res_token = probed or res_token  # Use probed resolution if available
 
-            if not res_token:  # Probe resolution from media files when resolution missing
-                try:
-                    probed = get_resolution_from_first_video(entry)  # Probe first video file for resolution
-                except Exception:
-                    probed = None  # Fall back to None on probe failure
-                if probed and probed.lower() == "4k":  # Normalize textual 4K to canonical token
-                    probed = "2160p"  # Map 4K to 2160p canonical token
-                res_token = probed or res_token  # Use probed resolution if available
+                new_name = rebuild_final_name(movie_title, final_year, res_token, append_lang)  # Build final normalized directory name
 
-            new_name = rebuild_final_name(movie_title, final_year, res_token, append_lang)  # Build final normalized directory name
+                if new_name == entry.name:  # Skip when name unchanged
+                    verbose_output(f"{BackgroundColors.YELLOW}Skipping (already named): {entry.name}{Style.RESET_ALL}")  # Verbose already-named message
+                    pbar.update(1)
+                    continue  # Continue to next entry when no rename required
 
-            if new_name == entry.name:  # Skip when name unchanged
-                verbose_output(f"{BackgroundColors.YELLOW}Skipping (already named): {entry.name}{Style.RESET_ALL}")  # Verbose already-named message
-                continue  # Continue to next entry when no rename required
+                change_desc = detect_changes(entry.name, new_name)  # Determine change description tags
+                if not change_desc:  # Skip when no meaningful change detected
+                    verbose_output(f"{BackgroundColors.YELLOW}Skipping (no detected meaningful change): {entry.name}{Style.RESET_ALL}")  # Verbose no-change message
+                    pbar.update(1)
+                    continue  # Continue to next entry
 
-            change_desc = detect_changes(entry.name, new_name)  # Determine change description tags
-            if not change_desc:  # Skip when no meaningful change detected
-                verbose_output(f"{BackgroundColors.YELLOW}Skipping (no detected meaningful change): {entry.name}{Style.RESET_ALL}")  # Verbose no-change message
-                continue  # Continue to next entry
+                print(f"{BackgroundColors.YELLOW}Renaming ({change_desc}): '{BackgroundColors.CYAN}{entry.name}{BackgroundColors.GREEN}' → '{BackgroundColors.CYAN}{new_name}{BackgroundColors.GREEN}'{Style.RESET_ALL}")  # Announce rename
 
-            print(f"{BackgroundColors.YELLOW}Renaming ({change_desc}): '{BackgroundColors.CYAN}{entry.name}{BackgroundColors.GREEN}' → '{BackgroundColors.CYAN}{new_name}{BackgroundColors.GREEN}'{Style.RESET_ALL}")  # Announce rename
+                try:  # Attempt to rename directory on filesystem (and sync subtitles when applicable)
+                    rename_path_with_subtitle_sync(entry, entry.parent / new_name, report_data, root_key)  # Perform filesystem rename and subtitle sync
+                except Exception as e:  # Handle rename or subtitle exceptions with same pattern
+                    print(f"{BackgroundColors.RED}Failed to rename '{entry.name}' → '{new_name}': {e}{Style.RESET_ALL}")  # Print rename failure
+                    pbar.update(1)
+                    continue  # Continue processing next entries after failure
 
-            try:  # Attempt to rename directory on filesystem (and sync subtitles when applicable)
-                rename_path_with_subtitle_sync(entry, entry.parent / new_name, report_data, root_key)  # Perform filesystem rename and subtitle sync
-            except Exception as e:  # Handle rename or subtitle exceptions with same pattern
-                print(f"{BackgroundColors.RED}Failed to rename '{entry.name}' → '{new_name}': {e}{Style.RESET_ALL}")  # Print rename failure
-                continue  # Continue processing next entries after failure
+                pbar.update(1)  # Update progress bar after each processed entry
 
         print()  # Spacing between roots for readability
 
