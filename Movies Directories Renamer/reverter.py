@@ -143,7 +143,7 @@ def print_skip_not_found(path):
     :return: None
     """
     
-    print(f"[SKIP] Not Found: {path}")  # Print missing message
+    print(f"{BackgroundColors.YELLOW}[SKIP] Not Found: {BackgroundColors.CYAN}{path}{Style.RESET_ALL}")  # Print missing message
 
 
 def print_skip_conflict(path):
@@ -154,7 +154,7 @@ def print_skip_conflict(path):
     :return: None
     """
     
-    print(f"[SKIP] Destination Already Exists: {path}")  # Print conflict message
+    print(f"{BackgroundColors.YELLOW}[SKIP] Destination Already Exists: {BackgroundColors.CYAN}{path}{Style.RESET_ALL}")  # Print conflict message
 
 
 def print_reverted(src_path, dst_path):
@@ -166,7 +166,7 @@ def print_reverted(src_path, dst_path):
     :return: None
     """
     
-    print(f"[OK] Reverted: {src_path} -> {dst_path}")  # Print success message
+    print(f"{BackgroundColors.GREEN}[OK] Reverted: {BackgroundColors.CYAN}{src_path}{BackgroundColors.GREEN} -> {BackgroundColors.CYAN}{dst_path}{Style.RESET_ALL}")  # Print success message
 
 
 def handle_missing_source(src_path, dst_path, counters):
@@ -199,7 +199,7 @@ def handle_destination_conflict(dst_path, counters):
     """
     
     increment_counter(counters, "conflicts")  # Increment conflicts
-    print_skip_conflict(dst_path)  # Print conflict message
+    # print_skip_conflict(dst_path)  # Print conflict message
     
     return True  # Signal handled
 
@@ -222,14 +222,14 @@ def perform_rename(src_path, dst_path, counters):
         return False  # Signal not handled (missing)
     except PermissionError:  # Permission denied or destination locked
         increment_counter(counters, "conflicts")  # Increment conflict counter
-        print_skip_conflict(dst_path)  # Inform user about conflict
+        # print_skip_conflict(dst_path)  # Inform user about conflict
         return False  # Signal not handled (conflict)
     except Exception as e:  # Any other unexpected error
-        print(f"[ERROR] Failed to rename '{src_path}' -> '{dst_path}': {e}")  # Log unexpected error
+        print(f"{BackgroundColors.RED}[ERROR] Failed to rename '{BackgroundColors.CYAN}{src_path}{BackgroundColors.RED}' -> '{BackgroundColors.CYAN}{dst_path}{BackgroundColors.RED}': {e}{Style.RESET_ALL}")  # Log unexpected error
         return False  # Signal not handled
 
     increment_counter(counters, "reverted_now")  # Increment reverted counter on success
-    print_reverted(src_path, dst_path)  # Print success message
+    # print_reverted(src_path, dst_path)  # Print success message
     return True  # Signal handled
 
 
@@ -263,7 +263,7 @@ def report_exists():
     exists = os.path.exists(REPORT_PATH)  # Check report file existence
     
     if not exists:  # If missing
-        print(f"[ERROR] Report Not Found: {REPORT_PATH}")  # Print error
+        print(f"{BackgroundColors.RED}[ERROR] Report Not Found: {BackgroundColors.CYAN}{REPORT_PATH}{Style.RESET_ALL}")  # Print error
         
     return exists  # Return existence flag
 
@@ -370,7 +370,7 @@ def resolve_video_file_entry(base_dir, file_entry, dir_logs, counters):
         return  # Stop after handled
 
     increment_counter(counters, "missing")  # Increment missing
-    print(f"[SKIP] Unresolved Entry: {new_name}")  # Print unresolved
+    print(f"{BackgroundColors.YELLOW}[SKIP] Unresolved Entry: {BackgroundColors.CYAN}{new_name}{Style.RESET_ALL}")  # Print unresolved
 
 
 def revert_directory_entry(base_dir, dir_entry, counters):
@@ -403,21 +403,21 @@ def print_summary(counters):
     :return: None
     """
     
-    print("\n========== SUMMARY ==========")  # Print header
-    print(f"Expected Operations : {counters['expected']}")  # Print expected
-    print(f"Reverted Now        : {counters['reverted_now']}")  # Print reverted now
-    print(f"Already Reverted    : {counters['already_reverted']}")  # Print already reverted
-    print(f"Missing             : {counters['missing']}")  # Print missing
-    print(f"Conflicts           : {counters['conflicts']}")  # Print conflicts
+    print(f"\n{BackgroundColors.BOLD}{BackgroundColors.GREEN}========== SUMMARY =========={Style.RESET_ALL}")  # Print header
+    print(f"{BackgroundColors.GREEN}Expected Operations : {BackgroundColors.CYAN}{counters['expected']}{Style.RESET_ALL}")  # Print expected
+    print(f"{BackgroundColors.GREEN}Reverted Now        : {BackgroundColors.CYAN}{counters['reverted_now']}{Style.RESET_ALL}")  # Print reverted now
+    print(f"{BackgroundColors.GREEN}Already Reverted    : {BackgroundColors.CYAN}{counters['already_reverted']}{Style.RESET_ALL}")  # Print already reverted
+    print(f"{BackgroundColors.GREEN}Missing             : {BackgroundColors.CYAN}{counters['missing']}{Style.RESET_ALL}")  # Print missing
+    print(f"{BackgroundColors.GREEN}Conflicts           : {BackgroundColors.CYAN}{counters['conflicts']}{Style.RESET_ALL}")  # Print conflicts
 
     verified_total = counters["reverted_now"] + counters["already_reverted"]  # Compute verified total
 
-    print(f"\nVerified Total      : {verified_total}")  # Print verified total
+    print(f"\n{BackgroundColors.GREEN}Verified Total      : {BackgroundColors.CYAN}{verified_total}{Style.RESET_ALL}")  # Print verified total
 
     if verified_total == counters["expected"]:  # Compare totals
-        print("Status              : OK — Nothing Missing")  # Print OK status
+        print(f"{BackgroundColors.GREEN}Status              : {BackgroundColors.CYAN}OK — Nothing Missing{Style.RESET_ALL}")  # Print OK status
     else:
-        print("Status              : WARNING — Mismatch Detected")  # Print warning status
+        print(f"{BackgroundColors.RED}Status              : {BackgroundColors.CYAN}WARNING — Mismatch Detected{Style.RESET_ALL}")  # Print warning status
 
 
 def revert_changes():
