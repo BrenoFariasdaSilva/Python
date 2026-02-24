@@ -83,6 +83,56 @@ sys.stderr = logger  # Redirect stderr to the logger
 # Functions Definitions:
 
 
+def find_year_in_text(text: str) -> bool:
+    """
+    Returns True if a 4-digit year in the range 1900-2099 is present in `text`.
+    
+    :param text: The text to search for a year
+    :return: True if a year is found, False otherwise
+    """
+
+    return re.search(r"(?<!\d)(19|20)\d{2}(?!\d)", text) is not None  # Regular expression to find a 4-digit year between 1900 and 2099
+
+
+def scan_movies_for_missing_years(input_dir: str, report_path: str) -> dict:
+    """
+    Scan subdirectories of `input_dir` and verify movie files for a year (YYYY) in the filename.
+
+    :param input_dir: Root folder that contains movie-type subfolders
+    :param report_path: Path where the JSON report will be saved
+    :return: A dictionary with report information
+    """
+
+    report = {"missing_years": [], "summary": {"scanned": 0, "missing": 0}}  # Initialize the report structure
+
+    root = Path(input_dir)  # Create a Path object for the input directory
+    if not root.exists() or not root.is_dir():  # Verifies if the input directory exists and is a directory
+        print(f"{BackgroundColors.RED}Input directory not found: {BackgroundColors.CYAN}{input_dir}{Style.RESET_ALL}")
+        return report  # Return an empty report if the input directory is invalid
+
+    movie_type_dirs = [p for p in root.iterdir() if p.is_dir()]  # Discover movie-type subdirectories (only immediate children)
+
+    for movie_dir in movie_type_dirs:  # Iterate through each movie-type subdirectory
+        movie_type = movie_dir.name  # Get the name of the movie type (subdirectory name)
+        for path in movie_dir.iterdir():  # Iterate through each file in the movie-type subdirectory
+            if path.is_file():  # Verifies if the path is a file (not a directory)
+                report["summary"]["scanned"] += 1  # Increment the count of scanned files
+                if not find_year_in_text(path.name):  # Verifies if the filename does not contain a year
+                    report_entry = {
+                        "movie_type": movie_type,
+                        "file_name": path.name,
+                        "relative_path": str(path.as_posix()),
+                    }  # Create a report entry for the file missing a year
+                    report["missing_years"].append(report_entry)  # Add the report entry to the list of missing years
+                    report["summary"]["missing"] += 1  # Increment the count of files missing a year
+
+    Path(report_path).parent.mkdir(parents=True, exist_ok=True)  # Ensure the directory for the report exists
+    
+    with open(report_path, "w", encoding="utf-8") as fh:  # Open the report file for writing
+        json.dump(report, fh, indent=2, ensure_ascii=False)  # Write the report as a JSON file with indentation for readability
+
+    return report  # Return the report dictionary
+
 
 def calculate_execution_time(start_time, finish_time):
     """
@@ -99,57 +149,6 @@ def calculate_execution_time(start_time, finish_time):
     return f"{hours:02d}:{minutes:02d}:{seconds:02d}"  # Format the execution time
 
 
-def find_year_in_text(text: str) -> bool:
-    """
-    Returns True if a 4-digit year in the range 1900-2099 is present in `text`.
-    """
-
-    return re.search(r"(?<!\d)(19|20)\d{2}(?!\d)", text) is not None
-
-
-
-def scan_movies_for_missing_years(input_dir: str, report_path: str) -> dict:
-    """
-    Scan subdirectories of `input_dir` and check movie files for a year (YYYY) in the filename.
-
-    :param input_dir: Root folder that contains movie-type subfolders
-    :param report_path: Path where the JSON report will be saved
-    :return: A dictionary with report information
-    """
-
-    report = {"missing_years": [], "summary": {"scanned": 0, "missing": 0}}
-
-    root = Path(input_dir)
-    if not root.exists() or not root.is_dir():
-        print(f"{BackgroundColors.RED}Input directory not found: {BackgroundColors.CYAN}{input_dir}{Style.RESET_ALL}")
-        return report
-
-    # Discover movie-type subdirectories (only immediate children)
-    movie_type_dirs = [p for p in root.iterdir() if p.is_dir()]
-
-    for movie_dir in movie_type_dirs:
-        movie_type = movie_dir.name
-        for path in movie_dir.iterdir():
-            if path.is_file():
-                report["summary"]["scanned"] += 1
-                # Check filename (including extension) for a year token
-                if not find_year_in_text(path.name):
-                    report_entry = {
-                        "movie_type": movie_type,
-                        "file_name": path.name,
-                        "relative_path": str(path.as_posix()),
-                    }
-                    report["missing_years"].append(report_entry)
-                    report["summary"]["missing"] += 1
-
-    # Ensure output folder exists
-    Path(report_path).parent.mkdir(parents=True, exist_ok=True)
-    with open(report_path, "w", encoding="utf-8") as fh:
-        json.dump(report, fh, indent=2, ensure_ascii=False)
-
-    return report
-
-
 def main():
     """
     Main function.
@@ -164,16 +163,13 @@ def main():
     )  # Output the welcome message
     start_time = datetime.datetime.now()  # Get the start time of the program
 
-    # Ensure logs directory exists
-    Path(LOGS_DIR).mkdir(parents=True, exist_ok=True)
+    Path(LOGS_DIR).mkdir(parents=True, exist_ok=True)  # Ensure logs directory exists
 
-    # Scan movies and create report for files missing a 4-digit year (YYYY)
-    report = scan_movies_for_missing_years(INPUT_DIR, REPORT_FILE)
+    report = scan_movies_for_missing_years(INPUT_DIR, REPORT_FILE)  # Scan movies and create report for files missing a 4-digit year (YYYY)
 
-    # Print a concise summary
-    scanned = report.get("summary", {}).get("scanned", 0)
-    missing = report.get("summary", {}).get("missing", 0)
-    print(f"\nScanned files: {scanned} — Missing year: {missing}")
+    scanned = report.get("summary", {}).get("scanned", 0)  # Get the total number of scanned files from the report summary
+    missing = report.get("summary", {}).get("missing", 0)  # Get the total number of files missing a year from the report summary
+    print(f"\nScanned files: {scanned} — Missing year: {missing}")  # Output the summary of scanned files and missing years
 
     finish_time = datetime.datetime.now()  # Get the finish time of the program
     print(
@@ -182,8 +178,6 @@ def main():
     print(
         f"\n{BackgroundColors.BOLD}{BackgroundColors.GREEN}Program finished.{Style.RESET_ALL}"
     )  # Output the end of the program message
-
-    # No auto-fix action: report created at Logs folder
 
 
 if __name__ == "__main__":
