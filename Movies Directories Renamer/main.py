@@ -295,6 +295,7 @@ def find_exact_year_match(results, filename_year):
     """
 
     target_year = str(filename_year)  # Normalize filename_year to string for comparison
+    
     for r in results:  # Iterate TMDb results in ranking order
         release_date = r.get("release_date", "")  # Extract release_date if present
         extracted_year = extract_year_from_release_date(release_date)  # Extract year safely from release_date
