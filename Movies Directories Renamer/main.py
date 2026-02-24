@@ -1148,7 +1148,7 @@ def rename_dirs():
                 verbose_output(f"{BackgroundColors.YELLOW}Skipping (no detected meaningful change): {entry.name}{Style.RESET_ALL}")  # Verbose no-change message
                 continue  # Continue to next entry
 
-            print(f"{BackgroundColors.GREEN}Renaming ({change_desc}): '{BackgroundColors.CYAN}{entry.name}{BackgroundColors.GREEN}' → '{BackgroundColors.CYAN}{new_name}{BackgroundColors.GREEN}'{Style.RESET_ALL}")  # Announce rename
+            print(f"{BackgroundColors.YELLOW}Renaming ({change_desc}): '{BackgroundColors.CYAN}{entry.name}{BackgroundColors.GREEN}' → '{BackgroundColors.CYAN}{new_name}{BackgroundColors.GREEN}'{Style.RESET_ALL}")  # Announce rename
 
             try:  # Attempt to rename directory on filesystem (and sync subtitles when applicable)
                 rename_path_with_subtitle_sync(entry, entry.parent / new_name, report_data, root_key)  # Perform filesystem rename and subtitle sync
