@@ -954,6 +954,41 @@ def clean_title_for_lookup(original_name, append_lang, res_token):
     return name_work, years_in_name  # Return cleaned title and detected years
 
 
+def remove_bluray_tokens(title):
+    """
+    Remove any standalone "BluRay" tokens (case-insensitive) from the title.
+
+    This handles variants like "bluray", "BLURAY" and "blu-ray" and
+    preserves spacing and other tokens.
+    :param title: Input title string
+    :return: Title with BluRay tokens removed
+    """
+    
+    if not title:  # Guard empty input
+        return title  # Return unchanged when empty
+    
+    cleaned = re.sub(r"\bblu-?ray\b", "", title, flags=re.IGNORECASE)  # Remove blu(r)-ray tokens
+    
+    return " ".join(cleaned.split()).strip()  # Normalize whitespace and return
+
+
+def remove_audio_quality_tokens(title):
+    """
+    Remove standalone audio-quality tokens such as '5.1', '2.1', '7.1', '6.1', '4.1'.
+
+    Detection is precise: tokens must match exactly (word boundaries).
+    :param title: Input title string
+    :return: Title with audio-quality tokens removed
+    """
+    
+    if not title:  # Guard empty input
+        return title  # Return unchanged when empty
+    
+    cleaned = re.sub(r"\b(?:2|4|5|6|7)\.1\b", "", title)  # Remove audio tokens
+
+    return " ".join(cleaned.split()).strip()  # Normalize whitespace and return
+
+
 def remove_release_year_tokens(title, release_year):
     """
     Remove all tokens equal to `release_year` from `title`.
@@ -980,7 +1015,9 @@ def rebuild_final_name(movie_title, final_year, res_token, append_lang):
     :return: Final normalized name
     """
 
-    title_without_year = remove_release_year_tokens(movie_title, final_year)  # Remove any exact-release-year tokens
+    title_cleaned = remove_bluray_tokens(movie_title)  # Remove BluRay tokens case-insensitively
+    title_cleaned = remove_audio_quality_tokens(title_cleaned)  # Remove audio quality tokens like 5.1
+    title_without_year = remove_release_year_tokens(title_cleaned, final_year)  # Remove any exact-release-year tokens
 
     parts = []  # Build parts list in desired order
     if title_without_year:  # Only add title when non-empty
