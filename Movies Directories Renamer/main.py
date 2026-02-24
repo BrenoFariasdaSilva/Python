@@ -949,6 +949,47 @@ def rebuild_final_name(movie_title, final_year, res_token, append_lang):
     return new_name  # Return final name
 
 
+def rename_path_with_subtitle_sync(src, dst, report_data=None, root_key=None):
+    """
+    Rename a file or directory from src to dst, and if it's a video file with an accompanying .srt subtitle, rename the subtitle in sync.
+    
+    :param src: Source Path object
+    :param dst: Destination Path object
+    :param report_data: Optional dict for accumulating report data
+    :param root_key: Optional key for report_data mapping
+    :return: None, but performs filesystem rename and updates report_data when applicable
+    """
+    
+    try:  # Attempt the primary filesystem rename operation
+        src.rename(dst)  # Perform filesystem rename operation
+    except Exception:  # Propagate exception to caller for consistent handling
+        raise  # Re-raise to allow caller to log/handle exactly as existing flow
+
+    if src.is_file() and src.suffix.lower() in VIDEO_EXTS:  # Only sync subtitles for recognized video files
+        orig_sub = src.with_suffix(".srt")  # Detect subtitle file based on original video stem
+        if orig_sub.exists():  # The .srt rename must happen ONLY if the subtitle file exists
+            dst_sub = dst.with_suffix(".srt")  # Build destination subtitle path preserving .srt extension
+            if dst_sub.exists():  # Prevent unsafe overwrite consistent with project safety checks
+                raise FileExistsError(f"Destination subtitle exists: {dst_sub}")  # Signal collision to caller
+            try:  # Attempt to rename the subtitle file
+                orig_sub.rename(dst_sub)  # Perform subtitle rename operation
+            except Exception:  # Follow same error handling pattern on failure
+                raise  # Re-raise to let caller handle logging and continuation
+
+            if report_data is not None and root_key is not None:  # Update JSON report structure when present
+                rk = str(root_key)  # Canonicalize root key for report mapping
+                if rk not in report_data.get("input_dirs", {}):  # Lazily create per-root entry when missing
+                    report_data.setdefault("input_dirs", {})  # Ensure input_dirs mapping exists
+                    report_data["input_dirs"][rk] = {"directories_modified": [], "video_files_renamed": []}  # Initialize per-root structure
+                if "video_files_renamed" not in report_data["input_dirs"][rk]:  # Ensure list exists for consistency
+                    report_data["input_dirs"][rk]["video_files_renamed"] = []  # Initialize list
+                report_data["input_dirs"][rk]["video_files_renamed"].append({  # Append subtitle rename using same record shape
+                    "old_name": str(orig_sub.name),  # Old subtitle filename
+                    "new_name": str(dst_sub.name),  # New subtitle filename
+                    "reason": "Sync Subtitle With Video",  # Reason matching existing report style
+                })  # End append
+
+
 def rename_dirs():
     """
     Iterates through the INPUT_DIRS, extracts metadata, fetches the release year from TMDb,
@@ -966,6 +1007,12 @@ def rename_dirs():
             continue  # Continue to next root if current root invalid
 
         total = len(entries)  # Count directories in `entries` (now non-None)
+        root_key = str(root_path)  # Use string form of input root as dictionary key
+        if root_key not in report_data["input_dirs"]:  # Lazily create per-root entry when first change occurs
+            report_data["input_dirs"][root_key] = {  # Initialize per-root structure
+                "directories_modified": [],  # List to hold directory modifications
+                "video_files_renamed": [],  # List to hold video rename records
+            }  # End initialization
 
         for idx, entry in enumerate(entries, start=1):  # Iterate entries with index starting at 1
             print(f"{BackgroundColors.GREEN}Processing {BackgroundColors.CYAN}{idx}{BackgroundColors.GREEN}/{BackgroundColors.CYAN}{total}{BackgroundColors.GREEN}: {BackgroundColors.CYAN}{entry.name}{Style.RESET_ALL}")  # Progress output
@@ -1014,9 +1061,9 @@ def rename_dirs():
 
             print(f"{BackgroundColors.GREEN}Renaming ({change_desc}): '{BackgroundColors.CYAN}{entry.name}{BackgroundColors.GREEN}' → '{BackgroundColors.CYAN}{new_name}{BackgroundColors.GREEN}'{Style.RESET_ALL}")  # Announce rename
 
-            try:  # Attempt to rename directory on filesystem
-                entry.rename(entry.parent / new_name)  # Perform filesystem rename operation
-            except Exception as e:  # Handle rename exceptions
+            try:  # Attempt to rename directory on filesystem (and sync subtitles when applicable)
+                rename_path_with_subtitle_sync(entry, entry.parent / new_name, report_data, root_key)  # Perform filesystem rename and subtitle sync
+            except Exception as e:  # Handle rename or subtitle exceptions with same pattern
                 print(f"{BackgroundColors.RED}Failed to rename '{entry.name}' → '{new_name}': {e}{Style.RESET_ALL}")  # Print rename failure
                 continue  # Continue processing next entries after failure
 
