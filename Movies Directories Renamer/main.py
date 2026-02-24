@@ -469,31 +469,6 @@ def extract_special_tokens(tokens):
     return imax_token, ai_tokens, cleaned_tokens  # Return extracted tokens
 
 
-def is_already_ordered(tokens, res_index):
-    """
-    Verifies if IMAX and AI Upscaled 60FPS already follow resolution in correct order.
-
-    :param tokens: Original token list
-    :param res_index: Resolution token index
-    :return: True if already ordered correctly, otherwise False
-    """
-
-    idx = res_index + 1  # Start verifying after resolution
-
-    if idx < len(tokens) and re.fullmatch(r"(?i)IMAX", tokens[idx]):  # Verifies IMAX position
-        idx += 1  # Advance index past IMAX
-
-    if (
-        idx + 2 < len(tokens)
-        and tokens[idx].lower() == "ai"
-        and tokens[idx + 1].lower() == "upscaled"
-        and tokens[idx + 2].lower() == "60fps"
-    ):  # Verifies AI group position
-        return True  # Return True if correct order
-
-    return False  # Return False if order incorrect
-
-
 def insert_special_tokens(tokens, imax_token, ai_tokens):
     """
     Insert IMAX and AI Upscaled 60FPS tokens immediately after resolution.
