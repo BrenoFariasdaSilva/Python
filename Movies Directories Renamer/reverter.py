@@ -124,6 +124,55 @@ def verify_filepath_exists(filepath):
     return os.path.exists(filepath)  # Return True if the file or folder exists, False otherwise
 
 
+def resolve_video_file_entry(base_dir, file_entry, dir_logs, counters):
+    """
+    Resolve And Revert A Single Video File Entry.
+    
+    :param base_dir: Base Directory Path
+    :param file_entry: Video File Log Entry
+    :param dir_logs: List Of Directory Log Entries
+    :param counters: Counters Dictionary
+    :return: None
+    """
+    
+    old_name = file_entry.get("old_name")  # Extract old name
+    new_name = file_entry.get("new_name")  # Extract new name
+
+    if not old_name or not new_name:  # Validate names
+        return  # Skip invalid entries
+
+    for dir_entry in dir_logs:  # Iterate directory logs
+        old_dir = dir_entry.get("old_name")  # Extract old directory
+        new_dir = dir_entry.get("new_name")  # Extract new directory
+
+        if not old_dir or not new_dir:  # Validate directory names
+            continue  # Skip invalid
+
+        src_path = os.path.join(base_dir, new_dir, new_name)  # Case 1 source
+        dst_path = os.path.join(base_dir, old_dir, old_name)  # Case 1 destination
+
+        if os.path.exists(src_path) or os.path.exists(dst_path):  # Check case 1
+            safe_rename(src_path, dst_path, counters)  # Attempt revert
+            return  # Stop after handled
+
+        src_path = os.path.join(base_dir, old_dir, new_name)  # Case 2 source
+        dst_path = os.path.join(base_dir, old_dir, old_name)  # Case 2 destination
+
+        if os.path.exists(src_path) or os.path.exists(dst_path):  # Check case 2
+            safe_rename(src_path, dst_path, counters)  # Attempt revert
+            return  # Stop after handled
+
+    src_path = os.path.join(base_dir, new_name)  # Fallback source
+    dst_path = os.path.join(base_dir, old_name)  # Fallback destination
+
+    if os.path.exists(src_path) or os.path.exists(dst_path):  # Check fallback
+        safe_rename(src_path, dst_path, counters)  # Attempt revert
+        return  # Stop after handled
+
+    increment_counter(counters, "missing")  # Increment missing
+    print(f"[SKIP] Unresolved Entry: {new_name}")  # Print unresolved
+
+
 def revert_directory_entry(base_dir, dir_entry, counters):
     """
     Revert A Single Directory Entry.
