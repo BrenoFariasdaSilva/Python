@@ -313,8 +313,24 @@ def parse_dir_name(dir_name):
     return None  # Return None when parsing fails (no match)
 
 
-def get_movie_year(api_key, movie_name, filename_year=None):
+def find_exact_year_match(results, filename_year):
+    """
+    Iterate TMDb results and return exact matching release year.
 
+    :param results: TMDb results list
+    :param filename_year: Existing year from filename
+    :return: Year string when exact match found, otherwise None
+    """
+
+    target_year = str(filename_year)  # Normalize filename_year to string for comparison
+    for r in results:  # Iterate TMDb results in ranking order
+        release_date = r.get("release_date", "")  # Extract release_date if present
+        if release_date and len(release_date) >= 4 and release_date.split("-")[0] == target_year:  # Require exact numeric year equality
+            return target_year  # Return matched year when exact-year match found
+    return None  # Return None when no exact-year match found
+
+
+def get_movie_year(api_key, movie_name, filename_year=None):
     """
     Query TMDb movie search endpoint to find a movie and return its release year.
 
@@ -339,12 +355,7 @@ def get_movie_year(api_key, movie_name, filename_year=None):
             return None  # Return None when not found
 
         if filename_year and re.fullmatch(r"(19|20)\d{2}", str(filename_year)):  # If caller supplied an existing year
-            target_year = str(filename_year)  # Normalize filename_year to string for comparison
-            for r in results:  # Iterate TMDb results in ranking order
-                release_date = r.get("release_date", "")  # Extract release_date if present
-                if release_date and len(release_date) >= 4 and release_date.split("-")[0] == target_year:  # Require exact numeric year equality
-                    return target_year  # Return the matched year when exact-year match found
-            return None  # No exact-year match found — do not modify existing year
+            return find_exact_year_match(results, filename_year)  # Delegate exact-year validation to helper
 
         first = results[0]  # Use first (best) search result when no filename_year provided
         release_date = first.get("release_date", "")  # Extract release_date if present
