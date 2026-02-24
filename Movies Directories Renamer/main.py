@@ -954,28 +954,51 @@ def clean_title_for_lookup(original_name, append_lang, res_token):
     return name_work, years_in_name  # Return cleaned title and detected years
 
 
+def remove_release_year_tokens(title, release_year):
+    """
+    Remove all tokens equal to `release_year` from `title`.
+    
+    :param title: Movie title string
+    :param release_year: Release year string to remove
+    :return: Title with release year tokens removed
+    """
+    
+    if not release_year:  # Nothing to remove when no release year is provided
+        return title  # Return original title unchanged
+    
+    ry = str(release_year)  # Normalize release year to string for comparison
+    toks = title.split()  # Tokenize title on whitespace
+    filtered = [t for t in toks if t != ry]  # Keep tokens not equal to release year
+    
+    return " ".join(filtered).strip()  # Reconstruct and return
+
+
 def rebuild_final_name(movie_title, final_year, res_token, append_lang):
     """
     Rebuild canonical directory name.
 
     :return: Final normalized name
     """
-    
-    parts = [movie_title]  # Start with title
-    if final_year:  # Append year if present
-        parts.append(str(final_year))
-    if res_token:  # Append resolution if present
-        parts.append(res_token)
-    if append_lang:  # Append language if present
-        parts.append(append_lang)
 
-    new_name = " ".join(parts).strip()  # Join parts
+    title_without_year = remove_release_year_tokens(movie_title, final_year)  # Remove any exact-release-year tokens
+
+    parts = []  # Build parts list in desired order
+    if title_without_year:  # Only add title when non-empty
+        parts.append(title_without_year)  # Append cleaned title
+    if final_year:  # Append year exactly once when provided
+        parts.append(str(final_year))  # Append canonical release year
+    if res_token:  # Append resolution if present
+        parts.append(res_token)  # Append resolution
+    if append_lang:  # Append language if present
+        parts.append(append_lang)  # Append language suffix
+
+    new_name = " ".join(parts).strip()  # Join parts into final name
     new_name = " ".join(new_name.split())  # Normalize whitespace
     new_name = standardize_final_name(new_name)  # Apply canonical normalization
     new_name = " ".join(new_name.split())  # Normalize again
     new_name = normalize_special_tokens_position(new_name)  # Reposition IMAX/HDR tokens
 
-    return new_name  # Return final name
+    return new_name  # Return final normalized name
 
 
 def rename_path_with_subtitle_sync(src, dst, report_data=None, root_key=None):
