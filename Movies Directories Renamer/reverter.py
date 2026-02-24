@@ -241,7 +241,13 @@ def main():
     )  # Output the welcome message
     start_time = datetime.datetime.now()  # Get the start time of the program
     
-    # Implement logic here
+    if not verify_filepath_exists(REPORT_PATH):  # Check if the report file exists
+        print(
+            f"{BackgroundColors.RED}Report file {BackgroundColors.CYAN}{REPORT_PATH}{BackgroundColors.RED} not found. Make sure the file exists and try again.{Style.RESET_ALL}"
+        )
+        return  # Exit the program if the report file is not found
+    
+    revert_changes()  # Call the function to revert the changes based on the report file
 
     finish_time = datetime.datetime.now()  # Get the finish time of the program
     print(
