@@ -485,6 +485,69 @@ def remove_special_tokens(tokens):
     return cleaned  # Return cleaned tokens
 
 
+def build_expected_sequence(imax_raw, hdr_raw, ai_raw):
+    """
+    Build expected special token sequence.
+
+    :param imax_raw: Original IMAX token or None
+    :param hdr_raw: Original HDR token or None
+    :param ai_raw: Original AI token list
+    :return: Ordered list of tokens
+    """
+
+    expected = []  # Expected tokens sequence after resolution
+    
+    if imax_raw is not None:  # If IMAX present it precedes HDR and AI
+        expected.append(imax_raw)  # Add IMAX preserving casing
+    
+    if hdr_raw is not None:  # If HDR present it follows IMAX when IMAX exists
+        expected.append(hdr_raw)  # Add HDR preserving casing
+    
+    if ai_raw:  # If AI present it follows IMAX or HDR or resolution
+        expected.extend(ai_raw)  # Add AI group preserving original order and casing
+    
+    return expected  # Return expected ordered tokens
+
+
+def is_sequence_correct(tokens, res_index, expected):
+    """
+    Validate whether expected tokens already follow resolution.
+
+    :param tokens: Token list
+    :param res_index: Resolution index
+    :param expected: Expected ordered tokens
+    :return: Boolean indicating correctness
+    """
+
+    check_slice = tokens[res_index + 1 : res_index + 1 + len(expected)]  # Slice tokens after resolution for comparison
+    
+    if len(check_slice) == len(expected) and all(a.lower() == b.lower() for a, b in zip(check_slice, expected)):  # Case-insensitive compare for exact sequence
+        return True  # Sequence already correct
+    
+    return False  # Sequence not correct
+
+
+def insert_special_tokens(cleaned, res_index_new, imax_raw, hdr_raw, ai_raw):
+    """
+    Insert special tokens immediately after resolution.
+
+    :param cleaned: Cleaned token list
+    :param res_index_new: Resolution index in cleaned list
+    :param imax_raw: Original IMAX token
+    :param hdr_raw: Original HDR token
+    :param ai_raw: Original AI tokens
+    :return: Modified token list
+    """
+
+    insert_index = res_index_new + 1  # Insert immediately after resolution
+    insertion = build_expected_sequence(imax_raw, hdr_raw, ai_raw)  # Build insertion sequence
+    
+    for tok in reversed(insertion):  # Insert in reverse to maintain final order
+        cleaned.insert(insert_index, tok)  # Insert token at calculated position
+    
+    return cleaned  # Return updated tokens
+
+
 def normalize_special_tokens_position(filename):
     """
     Reposition IMAX, HDR and AI Upscaled 60FPS tokens immediately after the resolution token in a filename.
@@ -497,52 +560,30 @@ def normalize_special_tokens_position(filename):
     ext = p.suffix  # Extract file extension
     name = p.stem  # Extract filename without extension
     tokens = name.split()  # Split filename into tokens
-
     res_index = find_resolution_index(tokens)  # Locate resolution token
+    
     if res_index is None:  # If resolution missing, nothing to do
         return filename  # Return original filename unchanged
-
+    
     imax_idx, hdr_idx, ai_idx, imax_raw, hdr_raw, ai_raw = extract_special_tokens(tokens)  # Extract special tokens
+    
     if imax_idx is None and hdr_idx is None and not ai_raw:  # If no special markers found
         return filename  # Return original filename unchanged
-
-    expected = []  # Expected tokens sequence after resolution
-    if imax_raw is not None:  # If IMAX present it precedes HDR and AI
-        expected.append(imax_raw)  # Add IMAX preserving casing
-    if hdr_raw is not None:  # If HDR present it follows IMAX when IMAX exists
-        expected.append(hdr_raw)  # Add HDR preserving casing
-    if ai_raw:  # If AI present it follows IMAX or HDR or resolution
-        expected.extend(ai_raw)  # Add AI group preserving original order and casing
-
-    check_slice = tokens[res_index + 1 : res_index + 1 + len(expected)]  # Slice tokens after resolution for comparison
-    match_ok = False  # Flag for match status
     
-    if len(check_slice) == len(expected) and all(a.lower() == b.lower() for a, b in zip(check_slice, expected)):  # Case-insensitive compare for exact sequence
-        match_ok = True  # Sequence already correct
+    expected = build_expected_sequence(imax_raw, hdr_raw, ai_raw)  # Build expected ordered sequence
     
-    if match_ok:  # If ordering already correct
+    if is_sequence_correct(tokens, res_index, expected):  # Validate ordering
         return filename  # Return original filename unchanged
-
+    
     cleaned = remove_special_tokens(tokens)  # Remove first occurrence of special tokens
-
     res_index_new = find_resolution_index(cleaned)  # Recompute resolution index in cleaned list
+    
     if res_index_new is None:  # Defensive: if resolution lost, abort
         return filename  # Return original filename unchanged
-
-    insert_index = res_index_new + 1  # Insert immediately after resolution
-
-    insertion = []  # Tokens to insert
-    if imax_raw is not None:  # If IMAX originally present
-        insertion.append(imax_raw)  # Add IMAX preserving casing
-    if hdr_raw is not None:  # If HDR originally present
-        insertion.append(hdr_raw)  # Add HDR preserving casing
-    if ai_raw:  # If AI originally present
-        insertion.extend(ai_raw)  # Add AI tokens preserving original order and casing
-
-    for tok in reversed(insertion):  # Insert in reverse to maintain final order
-        cleaned.insert(insert_index, tok)  # Insert token at calculated position
-
-    new_name = " ".join(cleaned)  # Reconstruct the filename body using single-space separators
+    
+    cleaned = insert_special_tokens(cleaned, res_index_new, imax_raw, hdr_raw, ai_raw)  # Insert tokens correctly
+    new_name = " ".join(cleaned)  # Reconstruct filename body
+    
     return new_name + ext  # Reattach extension and return normalized filename
 
 
