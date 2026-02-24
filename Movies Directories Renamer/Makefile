@@ -21,12 +21,14 @@ endif
 all: run
 
 # Main Scripts:
-run: $(VENV)
+run: dependencies
 	$(CLEAR_CMD)
+	$(PIP) install -r requirements.txt
 	$(TIME_CMD) $(PYTHON) ./main.py
 
-reverter:
+reverter: dependencies
 	$(CLEAR_CMD)
+	$(PIP) install -r requirements.txt
 	$(TIME_CMD) $(PYTHON) ./reverter.py
 
 # Setup Virtual Environment and Install Dependencies
