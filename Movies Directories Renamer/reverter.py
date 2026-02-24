@@ -124,6 +124,18 @@ def verify_filepath_exists(filepath):
     return os.path.exists(filepath)  # Return True if the file or folder exists, False otherwise
 
 
+def increment_counter(counters, key):
+    """
+    Increment A Specific Counter Key.
+
+    :param counters: Counters Dictionary
+    :param key: Counter Key
+    :return: None
+    """
+    
+    counters[key] += 1  # Increment requested counter
+
+
 def print_skip_not_found(path):
     """
     Print Not Found Skip Message.
