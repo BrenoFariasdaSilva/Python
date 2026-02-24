@@ -124,6 +124,28 @@ def verify_filepath_exists(filepath):
     return os.path.exists(filepath)  # Return True if the file or folder exists, False otherwise
 
 
+def revert_directory_entry(base_dir, dir_entry, counters):
+    """
+    Revert A Single Directory Entry.
+    
+    :param base_dir: Base Directory Path
+    :param dir_entry: Directory Log Entry
+    :param counters: Counters Dictionary
+    :return: None
+    """
+    
+    old_name = dir_entry.get("old_name")  # Extract old name
+    new_name = dir_entry.get("new_name")  # Extract new name
+
+    if not old_name or not new_name:  # Validate names
+        return  # Skip invalid entries
+
+    src_path = os.path.join(base_dir, new_name)  # Build source path
+    dst_path = os.path.join(base_dir, old_name)  # Build destination path
+
+    safe_rename(src_path, dst_path, counters)  # Attempt revert
+
+
 def print_summary(counters):
     """
     Print Final Summary Report.
