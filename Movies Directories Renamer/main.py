@@ -706,28 +706,6 @@ def detect_changes(old_name, new_name):
     return " + ".join(tags)  # Return combined tags
 
 
-def determine_resolution(dir_path, name_hint):
-    """
-    Unified resolution detection for a given movie folder.
-
-    1) Verifies for resolution token in `name_hint` using the project's regex.
-    2) If not found, probe the first video file inside `dir_path` (non-recursive)
-        using `get_resolution_from_first_video()`.
-    Preserves casing from filename results and returns None when absent.
-    """
-
-    res_search = re.search(r"\b(\d{3,4}p|4k)\b", name_hint, re.IGNORECASE)  # Search name hint for resolution
-    if res_search:  # If token found in folder name hint
-        return res_search.group(0)  # Preserve original matched casing
-
-    try:  # Guard the probe call which may access filesystem
-        res_from_file = get_resolution_from_first_video(dir_path)  # Probe videos inside dir_path
-    except Exception:  # Any unexpected error while probing
-        res_from_file = None  # Fail silently and return None
-
-    return res_from_file  # May be None when no resolution found
-
-
 def rename_dirs():
     """
     Iterates through the INPUT_DIRS, extracts metadata, fetches the release year from TMDb,
