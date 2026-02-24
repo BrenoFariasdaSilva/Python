@@ -124,6 +124,17 @@ def verify_filepath_exists(filepath):
     return os.path.exists(filepath)  # Return True if the file or folder exists, False otherwise
 
 
+def print_skip_conflict(path):
+    """
+    Print Destination Conflict Message.
+
+    :param path: Destination Path
+    :return: None
+    """
+    
+    print(f"[SKIP] Destination Already Exists: {path}")  # Print conflict message
+
+
 def print_reverted(src_path, dst_path):
     """
     Print Successful Revert Message.
