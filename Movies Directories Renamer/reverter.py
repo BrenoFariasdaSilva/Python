@@ -124,6 +124,24 @@ def verify_filepath_exists(filepath):
     return os.path.exists(filepath)  # Return True if the file or folder exists, False otherwise
 
 
+def initialize_counters():
+    """
+    Initialize Counters Dictionary.
+    
+    :param: None
+    :return: Initialized Counters Dictionary
+    """
+    
+    counters = {  # Initialize counters
+        "expected": 0,  # Total expected operations
+        "reverted_now": 0,  # Successfully reverted now
+        "already_reverted": 0,  # Already reverted previously
+        "missing": 0,  # Missing entries
+        "conflicts": 0,  # Destination conflicts
+    }  # End dictionary
+    return counters  # Return counters
+
+
 def normalize_base_dir(base_dir):
     """
     Normalize Base Directory Path.
