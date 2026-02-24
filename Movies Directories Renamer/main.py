@@ -389,57 +389,74 @@ def normalize_imax_position(filename):
     :param filename: The filename (with or without extension) to normalize
     :return: The filename with IMAX positioned after the resolution token or the original filename when unchanged
     """
-
     p = Path(filename)  # Create a Path object from the provided filename
     ext = p.suffix  # Extract the file extension (including dot) to preserve it
     name = p.stem  # Extract the filename without extension to operate on
     res_m = re.search(r"\b(\d{3,4}p|4k)\b", name, re.IGNORECASE)  # Search for a resolution token in the name
-    
     if not res_m:  # If no resolution token was found then nothing to do
         return filename  # Return the original filename unchanged
-    
     imax_m = re.search(r"\bIMAX\b", name, re.IGNORECASE)  # Search for an IMAX token in the name
-    if not imax_m:  # If IMAX is not present then nothing to do
-        return filename  # Return the original filename unchanged
-    
+    ai_m = re.search(r"\bAI\s+Upscaled\s+60FPS\b", name, re.IGNORECASE)  # Search for AI Upscaled 60FPS group in the name
     tokens = name.split()  # Split the name into whitespace-separated tokens for positional checks
     res_index = None  # Initialize variable to hold the index of the resolution token
-    
     for idx, tok in enumerate(tokens):  # Iterate tokens to locate the first resolution token
         if re.fullmatch(r"(?i)(\d{3,4}p|4k)", tok):  # If the token matches a resolution pattern
             res_index = idx  # Store the index of the resolution token
             break  # Stop after finding the first resolution token
-    
     if res_index is None:  # Defensive: if resolution not found after splitting tokens
         return filename  # Return the original filename unchanged
-    
-    if res_index + 1 < len(tokens) and re.fullmatch(r"(?i)IMAX", tokens[res_index + 1]):  # If IMAX already immediately follows resolution
-        return filename  # Return the original filename unchanged
-    
-    removed = False  # Flag to indicate whether IMAX was removed from its original position
-    new_tokens = []  # Container for tokens after removing the first IMAX occurrence
-    
-    for tok in tokens:  # Iterate original tokens to remove IMAX once while preserving others
-        if not removed and re.fullmatch(r"(?i)IMAX", tok):  # If token matches IMAX and hasn't been removed yet
-            removed = True  # Mark IMAX as removed and skip appending it
-            continue  # Skip adding this IMAX token to new_tokens
-        new_tokens.append(tok)  # Append non-IMAX tokens to the new token list
-        
-    res_index_new = None  # Variable to hold the resolution index in the cleaned token list
+    already_correct = True  # Assume ordering is correct until proven otherwise
+    check_idx = res_index + 1  # Pointer to token expected after resolution
+    if imax_m:  # If IMAX exists in the original name
+        if check_idx < len(tokens) and re.fullmatch(r"(?i)IMAX", tokens[check_idx]):  # If IMAX already immediately follows resolution
+            check_idx += 1  # Advance pointer past IMAX
+        else:  # If IMAX present but not in the correct position
+            already_correct = False  # Mark ordering as incorrect
+    if ai_m:  # If AI Upscaled 60FPS exists in the original name
+        if check_idx + 2 < len(tokens) and tokens[check_idx].lower() == "ai" and tokens[check_idx + 1].lower() == "upscaled" and tokens[check_idx + 2].lower() == "60fps":  # If AI group already immediately follows expected position
+            pass  # Leave already_correct as-is
+        else:  # If AI group present but not in correct position
+            already_correct = False  # Mark ordering as incorrect
+    if already_correct:  # If order is already as desired
+        return filename  # Return original filename unchanged
+    removed_imax = False  # Flag indicating first IMAX occurrence removed
+    removed_ai = False  # Flag indicating first AI group occurrence removed
+    imax_raw = None  # Placeholder for original IMAX token casing
+    ai_raw_tokens = []  # Placeholder for original AI group tokens
+    new_tokens = []  # Container for tokens after removals
+    i = 0  # Index iterator for original tokens
+    while i < len(tokens):  # Iterate original tokens with index
+        if not removed_ai and i + 2 < len(tokens) and tokens[i].lower() == "ai" and tokens[i + 1].lower() == "upscaled" and tokens[i + 2].lower() == "60fps":  # If AI group starts here
+            ai_raw_tokens = [tokens[i], tokens[i + 1], tokens[i + 2]]  # Capture original AI tokens preserving casing
+            removed_ai = True  # Mark AI group as removed
+            i += 3  # Skip the three AI tokens
+            continue  # Continue with next token
+        if not removed_imax and re.fullmatch(r"(?i)IMAX", tokens[i]):  # If token is IMAX and not removed yet
+            imax_raw = tokens[i]  # Capture original IMAX token preserving casing
+            removed_imax = True  # Mark IMAX as removed
+            i += 1  # Skip this IMAX token
+            continue  # Continue with next token
+        new_tokens.append(tokens[i])  # Append non-removed token to new token list
+        i += 1  # Advance index
+    res_index_new = None  # Variable to hold the resolution index in cleaned token list
     for idx, tok in enumerate(new_tokens):  # Iterate cleaned tokens to find resolution position
         if re.fullmatch(r"(?i)(\d{3,4}p|4k)", tok):  # If token matches resolution pattern
             res_index_new = idx  # Store the new index of resolution token
             break  # Stop after finding the first resolution token
-    
-    if res_index_new is None:  # If resolution cannot be located after IMAX removal
+    if res_index_new is None:  # If resolution cannot be located after removals
         return filename  # Return the original filename unchanged
+    insert_tokens = []  # Prepare ordered tokens to insert after resolution
+    if removed_imax and imax_raw is not None:  # If IMAX was removed, prepare to insert it
+        insert_tokens.append(imax_raw)  # Add original IMAX token to insertion list
+    if removed_ai and ai_raw_tokens:  # If AI group was removed, prepare to insert its tokens
+        insert_tokens.extend(ai_raw_tokens)  # Add original AI tokens preserving order and casing
+    for t in reversed(insert_tokens):  # Insert prepared tokens in reverse order to maintain final sequence
+        new_tokens.insert(res_index_new + 1, t)  # Insert token immediately after resolution position
     
-    imax_raw = imax_m.group(0)  # Capture the original IMAX token text preserving original casing
-    new_tokens.insert(res_index_new + 1, imax_raw)  # Insert IMAX immediately after the resolution token
     new_name = " ".join(new_tokens)  # Reconstruct the filename body using single-space separators
     result = new_name + ext  # Reattach the original extension to the reconstructed name
     
-    return result  # Return the normalized filename with IMAX repositioned
+    return result  # Return the normalized filename with tokens repositioned
 
 def get_resolution_from_first_video(dir_path):
     """
