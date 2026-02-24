@@ -124,6 +124,21 @@ def verify_filepath_exists(filepath):
     return os.path.exists(filepath)  # Return True if the file or folder exists, False otherwise
 
 
+def handle_destination_conflict(dst_path, counters):
+    """
+    Handle Destination Already Existing.
+
+    :param dst_path: Destination Path
+    :param counters: Counters Dictionary
+    :return: True if handled, False otherwise
+    """
+    
+    increment_counter(counters, "conflicts")  # Increment conflicts
+    print_skip_conflict(dst_path)  # Print conflict message
+    
+    return True  # Signal handled
+
+
 def perform_rename(src_path, dst_path, counters):
     """
     Execute Rename Operation.
