@@ -313,26 +313,40 @@ def parse_dir_name(dir_name):
     return None  # Return None when parsing fails (no match)
 
 
-def get_movie_year(api_key, movie_name):
+def get_movie_year(api_key, movie_name, filename_year=None):
 
     """
     Query TMDb movie search endpoint to find a movie and return its release year.
 
     :param api_key: TMDb API key string
     :param movie_name: Movie title to search for on TMDb
+    :param filename_year: Existing year from filename or None
     :return: Year string (e.g., '1999') or None when not found
     """
 
     try:  # Wrap network call to prevent propagation
         url = f"{TMDB_BASE_URL}/search/movie"  # Build search URL for TMDb movie search endpoint
         params = {"api_key": api_key, "query": movie_name}  # Prepare query parameters including API key and movie name
+
+        if filename_year and re.fullmatch(r"(19|20)\d{2}", str(filename_year)):  # If filename_year is strict 4-digit pattern
+            params["year"] = str(filename_year)  # Narrow TMDb search by year to prefer exact matches
+
         response = requests.get(url, params=params, timeout=10)  # Perform HTTP GET request to TMDb search endpoint
         response.raise_for_status()  # Raise exception for HTTP error responses
         data = response.json()  # Parse JSON body from response
         results = data.get("results", [])  # Extract results array from TMDb response
         if not results:  # If no results were returned from TMDb
             return None  # Return None when not found
-        first = results[0]  # Use first (best) search result
+
+        if filename_year and re.fullmatch(r"(19|20)\d{2}", str(filename_year)):  # If caller supplied an existing year
+            target_year = str(filename_year)  # Normalize filename_year to string for comparison
+            for r in results:  # Iterate TMDb results in ranking order
+                release_date = r.get("release_date", "")  # Extract release_date if present
+                if release_date and len(release_date) >= 4 and release_date.split("-")[0] == target_year:  # Require exact numeric year equality
+                    return target_year  # Return the matched year when exact-year match found
+            return None  # No exact-year match found — do not modify existing year
+
+        first = results[0]  # Use first (best) search result when no filename_year provided
         release_date = first.get("release_date", "")  # Extract release_date if present
         if release_date and len(release_date) >= 4:  # Ensure a year portion exists
             return release_date.split("-")[0]  # Return year portion only
@@ -781,7 +795,7 @@ def rename_dirs():
             # Step 5: Verify/fetch correct year via TMDb (non-blocking)
             tmdb_year = None  # Default when lookup fails
             try:  # Protect API call with try/except to avoid crash
-                tmdb_year = get_movie_year(api_key, movie_title)  # Query TMDb for movie year
+                tmdb_year = get_movie_year(api_key, movie_title, existing_year)  # Query TMDb for movie year using filename year when present
             except Exception as e:  # Any unexpected exception from helper
                 print(f"{BackgroundColors.RED}TMDb lookup error for '{movie_title}': {e}{Style.RESET_ALL}")  # Log error but continue processing
                 tmdb_year = None  # Ensure non-blocking behavior
