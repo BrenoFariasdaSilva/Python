@@ -124,6 +124,22 @@ def verify_filepath_exists(filepath):
     return os.path.exists(filepath)  # Return True if the file or folder exists, False otherwise
 
 
+def report_exists():
+    """
+    Verify Report File Exists.
+    
+    :param: None
+    :return: True if the report file exists, False otherwise
+    """
+    
+    exists = os.path.exists(REPORT_PATH)  # Check report file existence
+    
+    if not exists:  # If missing
+        print(f"[ERROR] Report Not Found: {REPORT_PATH}")  # Print error
+        
+    return exists  # Return existence flag
+
+
 def load_report_file():
     """
     Load Report JSON File.
