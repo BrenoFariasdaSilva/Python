@@ -899,6 +899,32 @@ def extract_resolution_token(dir_name):
     return res_token  # Return token
 
 
+def replace(match):
+    """
+    Replacement function for regex substitution to protect dots in abbreviations.
+    
+    :param match: Regex match object
+    :return: Replacement string with dots protected
+    """
+    
+    txt = match.group(0)  # Matched abbreviation
+    
+    return txt.replace(".", "<<DOT>>")  # Protect dots inside abbreviation
+
+
+def protect_title_abbreviation_dots(s):
+    """
+    Temporarily replace dots inside abbreviation-like sequences with a placeholder.
+
+    :param s: Input string
+    :return: String with abbreviation dots replaced by '<<DOT>>'
+    """
+
+    abbr_re = re.compile(r"\b(?:[A-Za-z]{1,3}\.){1,}[A-Za-z]{1,3}\.?\b")  # Abbreviation pattern
+
+    return abbr_re.sub(replace, s)  # Return string with protected abbreviations
+
+
 def clean_title_for_lookup(original_name, append_lang, res_token):
     """
     Prepare cleaned title for TMDb lookup.
@@ -919,7 +945,10 @@ def clean_title_for_lookup(original_name, append_lang, res_token):
         name_work = re.sub(rf"\b{re.escape(res_token)}\b", "", name_work, flags=re.IGNORECASE)  # Remove resolution token
 
     name_work = re.sub(r"\((\d{4})\)", r"\1", name_work)  # Remove parentheses around years
-    name_work = re.sub(r"[._]+", " ", name_work)  # Replace dots/underscores
+
+    name_work = protect_title_abbreviation_dots(name_work)  # Protect abbreviation dots before normalization
+    name_work = re.sub(r"[._]+", " ", name_work)  # Replace dots/underscores used as separators
+    name_work = name_work.replace("<<DOT>>", ".")  # Restore protected abbreviation dots
     name_work = " ".join(name_work.split()).strip()  # Normalize whitespace
 
     return name_work, years_in_name  # Return cleaned title and detected years
