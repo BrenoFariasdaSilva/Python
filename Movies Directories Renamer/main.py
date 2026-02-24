@@ -424,23 +424,28 @@ def extract_special_tokens(tokens):
     imax_raw = None  # Original IMAX token casing
     hdr_raw = None  # Original HDR token casing
     i = 0  # Iterator index
+    
     while i < len(tokens):  # Scan tokens for special markers
         if imax_idx is None and re.fullmatch(r"(?i)IMAX", tokens[i]):  # Check IMAX token
             imax_idx = i  # Record IMAX index
             imax_raw = tokens[i]  # Capture original IMAX casing
             i += 1  # Advance after IMAX
             continue  # Continue scanning
+        
         if hdr_idx is None and re.fullmatch(r"(?i)HDR", tokens[i]):  # Check HDR token
             hdr_idx = i  # Record HDR index
             hdr_raw = tokens[i]  # Capture original HDR casing
             i += 1  # Advance after HDR
             continue  # Continue scanning
+        
         if ai_idx is None and i + 2 < len(tokens) and tokens[i].lower() == "ai" and tokens[i + 1].lower() == "upscaled" and tokens[i + 2].lower() == "60fps":  # Check AI group
             ai_idx = i  # Record AI group start index
             ai_raw = [tokens[i], tokens[i + 1], tokens[i + 2]]  # Capture original AI tokens
             i += 3  # Advance past AI group
             continue  # Continue scanning
+        
         i += 1  # Advance index when no special token matched
+        
     return imax_idx, hdr_idx, ai_idx, imax_raw, hdr_raw, ai_raw  # Return extracted markers
 
 
