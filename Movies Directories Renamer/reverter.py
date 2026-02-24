@@ -124,6 +124,18 @@ def verify_filepath_exists(filepath):
     return os.path.exists(filepath)  # Return True if the file or folder exists, False otherwise
 
 
+def print_reverted(src_path, dst_path):
+    """
+    Print Successful Revert Message.
+
+    :param src_path: Source Path
+    :param dst_path: Destination Path
+    :return: None
+    """
+    
+    print(f"[OK] Reverted: {src_path} -> {dst_path}")  # Print success message
+
+
 def handle_missing_source(src_path, dst_path, counters):
     """
     Handle Missing Source Scenario.
