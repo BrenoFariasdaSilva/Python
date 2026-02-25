@@ -1331,7 +1331,8 @@ def rename_videos_and_subtitles(directory_path, new_dir_name, report_data=None, 
                 report_data.setdefault("input_dirs", {})  # ensure top-level mapping exists
                 report_data["input_dirs"].setdefault(rk, {"directories_modified": [], "video_files_renamed": []})  # ensure per-root structure
                 report_data["input_dirs"][rk].setdefault("video_files_renamed", [])  # ensure list exists
-                report_data["input_dirs"][rk]["video_files_renamed"].append({"old_name": str(orig.name), "new_name": str(final.name), "reason": "Sync Video/Subtitle With Directory Name"})  # append record
+                if str(orig.name) != str(final.name):  # Only record when the filename actually changed
+                    report_data["input_dirs"][rk]["video_files_renamed"].append({"old_name": str(orig.name), "new_name": str(final.name), "reason": "Sync Video/Subtitle With Directory Name"})  # append record
 
     for tmp, orig in list(temp_map.items()):  # finalize subtitle renames from tmp to final
         if orig in final_sub_targets:  # if this tmp corresponds to a subtitle file
@@ -1343,7 +1344,9 @@ def rename_videos_and_subtitles(directory_path, new_dir_name, report_data=None, 
                 report_data.setdefault("input_dirs", {})  # ensure top-level mapping exists
                 report_data["input_dirs"].setdefault(rk, {"directories_modified": [], "video_files_renamed": []})  # ensure per-root structure
                 report_data["input_dirs"][rk].setdefault("video_files_renamed", [])  # ensure list exists
-                report_data["input_dirs"][rk]["video_files_renamed"].append({"old_name": str(orig.name), "new_name": str(final.name), "reason": "Sync Video/Subtitle With Directory Name"})  # append record
+                # Only record when the filename actually changed
+                if str(orig.name) != str(final.name):
+                    report_data["input_dirs"][rk]["video_files_renamed"].append({"old_name": str(orig.name), "new_name": str(final.name), "reason": "Sync Video/Subtitle With Directory Name"})  # append record
 
 
 def rename_path_with_subtitle_sync(src, dst, report_data=None, root_key=None, change_desc=None):
