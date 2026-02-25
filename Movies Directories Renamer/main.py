@@ -1163,7 +1163,7 @@ def colored_tqdm_bar_format():
     reset = Style.RESET_ALL  # Reset sequence from colorama
 
     return (
-        f"{bar_color}{{l_bar}}{{bar}}{reset}{percent_color}{{r_bar}}{reset}"
+        f"{bar_color}{{l_bar}}{{bar}}{bar_color}{percent_color}{{r_bar}}{reset}"
     )  # Embed color codes in the bar format
 
 
