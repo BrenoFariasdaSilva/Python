@@ -1440,7 +1440,8 @@ def rename_dirs():
                 "video_files_renamed": [],  # List to hold video rename records
             }  # End initialization
 
-        with tqdm(total=total, desc=f"Processing root: {root_path}", unit="dir", bar_format=colored_tqdm_bar_format()) as pbar:  # Initialize tqdm progress bar with colored format
+        desc = f"{BackgroundColors.GREEN}Processing root: {BackgroundColors.CYAN}{root_path}{Style.RESET_ALL}"  # colored description: label green, path cyan
+        with tqdm(total=total, desc=desc, unit="dir", bar_format=colored_tqdm_bar_format()) as pbar:  # Initialize tqdm progress bar with colored format
             for entry in entries:  # Iterate entries
                 if re.match(IGNORE_DIR_REGEX, entry.name.strip()):  # Skip ignored directories by regex
                     verbose_output(f"{BackgroundColors.YELLOW}Ignoring top-level directory: {entry.name}{Style.RESET_ALL}")  # Verbose message for ignored directory
