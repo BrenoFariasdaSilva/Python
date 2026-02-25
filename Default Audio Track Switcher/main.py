@@ -837,10 +837,10 @@ def main():
         f"{BackgroundColors.CLEAR_TERMINAL}{BackgroundColors.BOLD}{BackgroundColors.GREEN}Welcome to the {BackgroundColors.CYAN}Default Audio Track Switcher{BackgroundColors.GREEN}!{Style.RESET_ALL}\n"
     )
 
-    if REMOVE_OTHER_AUDIO_TRACKS:
-        print(f"{BackgroundColors.YELLOW}Mode: Removing non-desired audio tracks{Style.RESET_ALL}")
-    if REMOVE_SUBTITLE_TRACKS:
-        print(f"{BackgroundColors.YELLOW}Mode: Removing subtitle tracks{Style.RESET_ALL}")
+    if REMOVE_OTHER_AUDIO_TRACKS:  # If audio track removal is enabled, print the mode
+        print(f"{BackgroundColors.GREEN}Mode: {BackgroundColors.CYAN}Removing non-desired audio tracks{Style.RESET_ALL}")
+    if REMOVE_SUBTITLE_TRACKS:  # If subtitle removal is enabled, print the mode
+        print(f"{BackgroundColors.GREEN}Mode: {BackgroundColors.CYAN}Removing subtitle tracks{Style.RESET_ALL}")
     if REMOVE_OTHER_AUDIO_TRACKS or REMOVE_SUBTITLE_TRACKS:
         print()  # Add blank line for spacing
 
