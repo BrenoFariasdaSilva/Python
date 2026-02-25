@@ -75,8 +75,8 @@ INPUT_DIR = "./Input/"  # Root directory to search for videos
 VIDEO_FILE_EXTENSIONS = [".mkv", ".mp4", ".avi"]  # List of video file extensions to process
 
 # These will be set by command-line arguments in main()
-REMOVE_OTHER_AUDIO_TRACKS = False  # Set to True to remove other audio tracks after setting the default
-REMOVE_SUBTITLE_TRACKS = False  # Set to True to remove all subtitle tracks
+REMOVE_OTHER_AUDIO_TRACKS = True  # Set to True to remove other audio tracks after setting the default
+REMOVE_SUBTITLE_TRACKS = True  # Set to True to remove all subtitle tracks
 
 DESIRED_LANGUAGES = {  # Dictionary of desired languages with their corresponding language codes (case-insensitive)
     "English": ["english", "eng", "en"],  # Languages to prioritize when selecting default audio track
@@ -300,30 +300,195 @@ def get_audio_tracks(video_path):
         f"{BackgroundColors.GREEN}Retrieving audio tracks for video: {BackgroundColors.CYAN}{video_path}{Style.RESET_ALL}"
     )  # Output the verbose message
 
-    cmd = [
-        "ffprobe",  # Command to run ffprobe
-        "-v",
-        "error",  # Suppress unnecessary output
-        "-select_streams",
-        "a",  # Select audio streams
-        "-show_entries",
-        "stream=index:stream_tags=language",  # Show stream index and language tags
-        "-of",
-        "json",  # Output format as JSON
-        video_path,  # Video file path
-    ]
+    cmd = ["ffprobe", "-v", "error", "-show_streams", "-of", "json", video_path]  # Build ffprobe command to list all streams
+    result = subprocess.run(cmd, capture_output=True, text=True)  # Run ffprobe and capture JSON output
+    data = json.loads(result.stdout) if result.stdout else {}  # Parse ffprobe JSON output
+    streams = data.get("streams", [])  # Extract streams list from ffprobe output
 
-    result = subprocess.run(cmd, capture_output=True, text=True)  # Run the ffprobe command
-    data = json.loads(result.stdout) if result.stdout else {}  # Parse the JSON output
-    streams = data.get("streams", [])  # Get the list of audio streams
+    tracks = []  # Prepare list to hold audio stream information
+    audio_count = 0  # Counter for audio stream physical positions
+    for stream in streams:  # Iterate over each stream entry
+        if stream.get("codec_type") == "audio":  # Only handle audio streams here
+            index = stream.get("index", None)  # Get global stream index from ffprobe
+            tags = stream.get("tags", {}) or {}  # Get tags dict for language/title metadata
+            language = tags.get("language") or tags.get("lang") or "und"  # Prefer language tag or fallback
+            title = tags.get("title", "")  # Get title tag if present
+            disposition = stream.get("disposition", {}) or {}  # Get disposition dict if present
+            tracks.append({  # Append detailed audio track info for classification
+                "global_index": index,  # Global stream index for ffmpeg mapping
+                "audio_pos": audio_count,  # Physical position among audio streams (0-based)
+                "tags": tags,  # Raw tags mapping
+                "language": language,  # Primary language value discovered
+                "title": title,  # Title metadata if present
+                "disposition": disposition,  # Disposition flags
+            })
+            audio_count += 1  # Increment physical audio position counter
 
-    tracks = []  # List to store audio track information
-    for stream in streams:  # For each audio stream
-        index = stream.get("index", None)  # Get the stream index
-        language = stream.get("tags", {}).get("language", "und")  # Get the language tag, default to "und" (undefined)
-        tracks.append({"index": index, "language": language})  # Add the track information to the list
+    return tracks  # Return the list of detailed audio tracks
 
-    return tracks  # Return the list of audio tracks
+
+def get_subtitle_tracks(video_path):
+    """
+    Retrieve all subtitle streams with metadata for classification.
+
+    :param video_path: Path to the video file
+    :return: List of subtitle stream dicts with global index and sub_pos
+    """
+
+    cmd = ["ffprobe", "-v", "error", "-show_streams", "-of", "json", video_path]  # Build ffprobe command to list all streams
+    result = subprocess.run(cmd, capture_output=True, text=True)  # Run ffprobe and capture JSON output
+    data = json.loads(result.stdout) if result.stdout else {}  # Parse ffprobe JSON output
+    streams = data.get("streams", [])  # Extract streams list from ffprobe output
+
+    subs = []  # Prepare list to hold subtitle stream information
+    sub_count = 0  # Counter for subtitle stream positions
+    for stream in streams:  # Iterate over each stream entry
+        if stream.get("codec_type") == "subtitle":  # Only handle subtitle streams here
+            index = stream.get("index", None)  # Get global stream index from ffprobe
+            tags = stream.get("tags", {}) or {}  # Get tags dict for language/title metadata
+            language = tags.get("language") or tags.get("lang") or "und"  # Prefer language tag or fallback
+            title = tags.get("title", "")  # Get title tag if present
+            disposition = stream.get("disposition", {}) or {}  # Get disposition dict if present
+            subs.append({  # Append detailed subtitle track info for classification
+                "global_index": index,  # Global stream index for ffmpeg mapping
+                "sub_pos": sub_count,  # Physical position among subtitle streams (0-based)
+                "tags": tags,  # Raw tags mapping
+                "language": language,  # Primary language value discovered
+                "title": title,  # Title metadata if present
+                "disposition": disposition,  # Disposition flags
+            })
+            sub_count += 1  # Increment physical subtitle position counter
+
+    return subs  # Return the list of detailed subtitle tracks
+
+
+def classify_streams(video_path):
+    """
+    Classify audio and subtitle streams as DESIRED or UNDESIRED using DESIRED_LANGUAGES and UNDESIRED_LANGUAGES.
+
+    :param video_path: Path to the video file
+    :return: Tuple (audio_streams, subtitle_streams) each being a list of dicts with 'classification'
+    """
+
+    desired_aliases = {alias.lower() for aliases in DESIRED_LANGUAGES.values() for alias in aliases}  # Build set of desired aliases
+    undesired_aliases = {alias.lower() for aliases in UNDESIRED_LANGUAGES.values() for alias in aliases}  # Build set of undesired aliases
+
+    audio_streams = get_audio_tracks(video_path)  # Get detailed audio streams for the file
+    subtitle_streams = get_subtitle_tracks(video_path)  # Get detailed subtitle streams for the file
+
+    for a in audio_streams:  # Classify each audio stream
+        matched_desired = False  # Flag marking desired match
+        matched_undesired = False  # Flag marking undesired match
+        values = []  # List of metadata values to match against aliases
+        values.append(str(a.get("language", "")).lower())  # Add language tag to matching values
+        values.append(str(a.get("title", "")).lower())  # Add title tag to matching values
+        for v in a.get("tags", {}).values():  # Add all tag values to the matching pool
+            try:  # Ensure safe conversion to string
+                values.append(str(v).lower())  # Append tag value lowercased
+            except Exception:  # Ignore any problematic tag values
+                continue  # Continue on tag parsing error
+
+        for v in values:  # Evaluate all collected metadata values
+            if any(alias in v for alias in desired_aliases):  # If any desired alias is found
+                matched_desired = True  # Mark as desired
+                break  # Stop searching for this stream
+            if any(alias in v for alias in undesired_aliases):  # If any undesired alias is found
+                matched_undesired = True  # Mark as undesired
+                break  # Stop searching for this stream
+
+        if matched_desired:  # If desired matched then classify as desired
+            a["classification"] = "desired"  # Label the audio stream as desired
+        else:  # Otherwise classify as undesired per strict mode
+            a["classification"] = "undesired"  # Label the audio stream as undesired
+
+    for s in subtitle_streams:  # Classify each subtitle stream
+        matched_desired = False  # Flag marking desired match
+        matched_undesired = False  # Flag marking undesired match
+        values = []  # List of metadata values to match against aliases
+        values.append(str(s.get("language", "")).lower())  # Add language tag to matching values
+        values.append(str(s.get("title", "")).lower())  # Add title tag to matching values
+        for v in s.get("tags", {}).values():  # Add all tag values to the matching pool
+            try:  # Ensure safe conversion to string
+                values.append(str(v).lower())  # Append tag value lowercased
+            except Exception:  # Ignore any problematic tag values
+                continue  # Continue on tag parsing error
+
+        for v in values:  # Evaluate all collected metadata values
+            if any(alias in v for alias in desired_aliases):  # If any desired alias is found
+                matched_desired = True  # Mark as desired
+                break  # Stop searching for this stream
+            if any(alias in v for alias in undesired_aliases):  # If any undesired alias is found
+                matched_undesired = True  # Mark as undesired
+                break  # Stop searching for this stream
+
+        if matched_desired:  # If desired matched then classify as desired
+            s["classification"] = "desired"  # Label the subtitle stream as desired
+        else:  # Otherwise classify as undesired per strict mode
+            s["classification"] = "undesired"  # Label the subtitle stream as undesired
+
+    return audio_streams, subtitle_streams  # Return classified audio and subtitle stream lists
+
+
+def apply_prune_and_set_defaults(video_path, audio_streams, subtitle_streams):
+    """
+    Build and run ffmpeg command to keep only DESIRED tracks and set defaults accordingly.
+
+    :param video_path: Path to the video file
+    :param audio_streams: Classified audio streams list
+    :param subtitle_streams: Classified subtitle streams list
+    :return: None
+    """
+
+    root, ext = os.path.splitext(video_path)  # Split the file path and extension
+    ext = ext.lower()  # Normalize extension to lowercase
+    temp_file = root + ".tmp" + ext  # Build temporary output path
+
+    kept_audio_positions = [a.get("audio_pos") for a in audio_streams if a.get("classification") == "desired"]  # Compute desired audio positions
+    kept_sub_positions = [s.get("sub_pos") for s in subtitle_streams if s.get("classification") == "desired"]  # Compute desired subtitle positions
+
+    if not kept_audio_positions:  # If no desired audio streams were found then abort per strict rules
+        print(f"{BackgroundColors.YELLOW}No desired audio tracks found for: {BackgroundColors.CYAN}{video_path}{Style.RESET_ALL}")  # Notify user
+        return  # Exit without changes
+
+    default_audio_pos = kept_audio_positions[0]  # Choose first desired audio position as default
+    default_sub_pos = kept_sub_positions[0] if kept_sub_positions else None  # Choose first desired subtitle if present
+
+    cmd = ["ffmpeg", "-y", "-i", video_path, "-map", "0", "-map", "-0:a"]  # Start command by mapping all and dropping audio
+    cmd += ["-map", "-0:s"]  # Drop all subtitle streams to re-add only desired ones
+
+    for pos in kept_audio_positions:  # Re-add each desired audio stream by physical position
+        cmd += ["-map", f"0:a:{pos}"]  # Map desired audio stream
+
+    for pos in kept_sub_positions:  # Re-add each desired subtitle stream by physical position
+        cmd += ["-map", f"0:s:{pos}"]  # Map desired subtitle stream
+
+    cmd += ["-c", "copy"]  # Use stream copy to avoid re-encoding
+
+    for i, pos in enumerate(kept_audio_positions):  # Set dispositions for audio streams in new output order
+        if pos == default_audio_pos:  # If this mapped audio is the chosen default
+            cmd += [f"-disposition:a:{i}", "default"]  # Set default disposition for this audio
+        else:  # Otherwise clear default flag
+            cmd += [f"-disposition:a:{i}", "0"]  # Clear default disposition for this audio
+
+    if default_sub_pos is not None:  # Only set subtitle dispositions if a desired subtitle default exists
+        for i, pos in enumerate(kept_sub_positions):  # Iterate subtitle outputs to set dispositions
+            if pos == default_sub_pos:  # If this mapped subtitle is chosen as default
+                cmd += [f"-disposition:s:{i}", "default"]  # Set default subtitle disposition
+            else:  # Otherwise clear default flag
+                cmd += [f"-disposition:s:{i}", "0"]  # Clear default disposition for this subtitle
+
+    cmd += [temp_file]  # Add temporary output path to command
+
+    verbose_output(f"{BackgroundColors.GREEN}Executing ffmpeg prune command:{BackgroundColors.CYAN} {' '.join(cmd)}{Style.RESET_ALL}")  # Verbose output of ffmpeg command
+
+    subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)  # Execute ffmpeg silently
+
+    if not verify_filepath_exists(temp_file):  # If temporary file creation failed then report and retry with output
+        print(f"{BackgroundColors.RED}Failed to create temporary file for: {BackgroundColors.CYAN}{video_path}{Style.RESET_ALL}")  # Report error
+        subprocess.run(cmd)  # Retry command with visible output for diagnostics
+        return  # Exit to avoid replacing original
+
+    os.replace(temp_file, video_path)  # Replace original with pruned file
 
 
 def select_audio_track(tracks):
@@ -540,6 +705,18 @@ def swap_audio_tracks(video_path):
         f"{BackgroundColors.GREEN}Processing audio tracks for video: {BackgroundColors.CYAN}{video_path}{Style.RESET_ALL}"
     )  # Output the verbose message
 
+    if REMOVE_OTHER_AUDIO_TRACKS:  # If strict removal mode is enabled
+        audio_streams, subtitle_streams = classify_streams(video_path)  # Classify audio and subtitle streams
+        if not audio_streams:  # If no audio streams were found
+            print(
+                f"{BackgroundColors.YELLOW}No audio tracks found for: {BackgroundColors.CYAN}{video_path}{Style.RESET_ALL}"
+            )
+            return  # Skip this file
+
+        apply_prune_and_set_defaults(video_path, audio_streams, subtitle_streams)  # Prune non-desired and set defaults
+        return  # Return after pruning operation
+
+    # Fallback behavior when not removing other audio tracks: preserve original logic
     audio_tracks = get_audio_track_info(video_path)  # Get audio track information using ffprobe
 
     if len(audio_tracks) == 0:  # Check if any audio tracks were found
@@ -550,22 +727,7 @@ def swap_audio_tracks(video_path):
 
     desired_langs = get_desired_languages()  # Get list of desired languages
 
-    if REMOVE_OTHER_AUDIO_TRACKS:  # If we are removing other audio tracks
-        kept_indices = []  # Indices of tracks to keep (desired only)
-        for i, track in enumerate(audio_tracks):  # For each audio track
-            parts = track.split(",")  # Split the track info
-            if len(parts) >= 3:  # If track info has enough parts
-                lang = parts[2].lower().strip()  # Get language
-                if lang in desired_langs:  # If language is desired
-                    kept_indices.append(i)  # Keep this track
-
-        if not kept_indices:  # If no desired tracks found and we're removing others
-            print(
-                f"{BackgroundColors.YELLOW}No desired audio tracks found for: {BackgroundColors.CYAN}{video_path}{Style.RESET_ALL}"
-            )
-            return  # Skip this file
-    else:  # If we are not removing other audio tracks
-        kept_indices = list(range(len(audio_tracks)))  # Keep all track indices
+    kept_indices = list(range(len(audio_tracks)))  # Keep all track indices by default
 
     english_langs = DESIRED_LANGUAGES.get("English", [])  # Get English language codes
     english_index = None  # Index of English track if found
@@ -582,9 +744,9 @@ def swap_audio_tracks(video_path):
             f"{BackgroundColors.GREEN}Automatically selected English audio track for: {BackgroundColors.CYAN}{video_path}{Style.RESET_ALL}"
         )
     else:  # No English, use first track from kept set
-        default_track_index = kept_indices[0]  # Set first desired track as default
+        default_track_index = kept_indices[0]  # Set first track as default
         print(
-            f"{BackgroundColors.GREEN}Selected first {'desired ' if REMOVE_OTHER_AUDIO_TRACKS else ''}audio track as default for: {BackgroundColors.CYAN}{video_path}{Style.RESET_ALL}"
+            f"{BackgroundColors.GREEN}Selected first audio track as default for: {BackgroundColors.CYAN}{video_path}{Style.RESET_ALL}"
         )
 
     apply_audio_track_default(video_path, audio_tracks, default_track_index, kept_indices)  # Apply the changes
