@@ -53,6 +53,7 @@ import json  # For parsing JSON output from ffprobe
 import os  # For running a command in the terminal
 import platform  # For getting the operating system name
 import shutil  # For checking if a command exists
+import signal  # For temporarily ignoring SIGINT during tqdm construction
 import subprocess  # For running terminal commands
 from colorama import Style  # For coloring the terminal
 from tqdm import tqdm  # For displaying a progress bar
@@ -283,6 +284,47 @@ def should_ignore_directory(dirpath):
             )  # Verbose message explaining why the directory is ignored
             return True  # Indicate the directory should be ignored
     return False  # Indicate the directory should not be ignored
+
+
+def create_progress_bar(iterable, **kwargs):
+    """
+    Safely create and return a tqdm progress bar for the given iterable.
+
+    This factory isolates tqdm construction to prevent KeyboardInterrupt from
+    interrupting tqdm.__init__ (which can leave a partially-initialized
+    tqdm instance whose destructor raises AttributeError). The factory:
+       - Temporarily ignores SIGINT while constructing the tqdm instance.
+       - Catches any exception raised during construction and returns None.
+       - Restores the original SIGINT handler in all cases.
+
+    :param iterable: Iterable or sequence to wrap with a progress bar
+    :param kwargs: Keyword arguments forwarded to ``tqdm`` constructor
+    :return: A fully constructed ``tqdm`` instance or ``None`` on failure
+    """
+
+    prev_handler = None  # Save holder for previous SIGINT handler
+    try:
+        prev_handler = signal.getsignal(signal.SIGINT)  # Save previous SIGINT handler
+        signal.signal(signal.SIGINT, signal.SIG_IGN)  # Ignore SIGINT during construction
+    except Exception:  # If signal operations are unsupported, continue without changing handler
+        prev_handler = None  # Ensure prev_handler exists even if saving failed
+
+    try:
+        try:
+            bar = tqdm(iterable, **kwargs)  # Attempt to construct tqdm while SIGINT is ignored
+        except Exception:  # Catch any error during tqdm construction
+            verbose_output(
+                f"{BackgroundColors.YELLOW}tqdm initialization failed, falling back to simple iteration.{Style.RESET_ALL}"
+            )  # Verbose message when tqdm cannot be created
+            return None  # Return None to indicate construction failure
+    finally:
+        if prev_handler is not None:  # Only attempt restore if previous handler was saved
+            try:
+                signal.signal(signal.SIGINT, prev_handler)  # Restore original SIGINT handler
+            except Exception:
+                pass  # Ignore restore errors to avoid masking earlier exceptions
+
+    return bar  # Return the successfully constructed progress bar
 
 
 def find_videos(input_dir, extensions):
@@ -855,15 +897,26 @@ def main():
         print(f"{BackgroundColors.YELLOW}No video files found in {INPUT_DIR}{Style.RESET_ALL}")
         return  # Exit the program
 
-    pbar = tqdm(
-        videos,
-        desc=f"{BackgroundColors.GREEN}Processing Video Files from {BackgroundColors.CYAN}{INPUT_DIR}{BackgroundColors.GREEN}...{Style.RESET_ALL}",
-    )  # Initialize progress bar
-    for video in pbar:  # For each video found
-        pbar.set_description(
-            f"{BackgroundColors.GREEN}Processing: {BackgroundColors.CYAN}{os.path.basename(video)}{Style.RESET_ALL}"
-        )  # Update description with current file name
-        swap_audio_tracks(video)  # Swap the audio tracks
+    pbar = None  # Initialize pbar variable to None
+    iterator = None  # Initialize iterator variable to None
+    try:  # Begin outer try block to ensure cleanup
+        pbar = create_progress_bar(
+            videos,
+            desc=f"{BackgroundColors.GREEN}Processing Video Files from {BackgroundColors.CYAN}{INPUT_DIR}{BackgroundColors.GREEN}...{Style.RESET_ALL}",
+        )  # Create tqdm safely via factory
+
+        iterator = pbar if pbar is not None else videos  # Choose the appropriate iterator for processing
+
+        try:  # Iterate over files and handle user interruptions
+            for video in iterator:  # Iterate over chosen iterator (tqdm or list)
+                if pbar is not None and hasattr(pbar, "set_description"):  # Update tqdm description only if available
+                    pbar.set_description(f"{BackgroundColors.GREEN}Processing: {BackgroundColors.CYAN}{os.path.basename(video)}{Style.RESET_ALL}")  # Update description with current file name
+                swap_audio_tracks(video)  # Process the audio tracks for this video
+        except KeyboardInterrupt:  # Handle user interrupt (Ctrl+C) gracefully
+            print(f"{BackgroundColors.RED}Interrupted by user. Exiting...{Style.RESET_ALL}")  # Notify user of interruption
+    finally:  # Ensure resources are cleaned up regardless of errors
+        if pbar is not None and hasattr(pbar, "close"):  # If a tqdm bar was created, ensure it is closed
+            pbar.close()  # Close tqdm to avoid broken destructor issues
 
     print(f"\n{BackgroundColors.BOLD}{BackgroundColors.GREEN}All videos processed successfully.{Style.RESET_ALL}")
 
