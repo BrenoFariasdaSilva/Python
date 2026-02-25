@@ -1097,10 +1097,33 @@ def rebuild_final_name(movie_title, final_year, res_token, append_lang):
 
     :return: Final normalized name
     """
-
     title_cleaned = remove_bluray_tokens(movie_title)  # Remove BluRay tokens case-insensitively
     title_cleaned = remove_audio_quality_tokens(title_cleaned)  # Remove audio quality tokens like 5.1
-    title_without_year = remove_release_year_tokens(title_cleaned, final_year)  # Remove any exact-release-year tokens
+
+    def _replace_candidate_year(title, validated_year):
+        """Replace or remove the candidate year token in `title` according to rules:
+
+        - If multiple 4-digit year-like tokens exist, treat the second as the year candidate.
+        - If a single 4-digit token exists, treat it as the year candidate.
+        - Remove the candidate token so it can be replaced by `validated_year` later.
+        - Preserve any first-number that is part of the movie title when multiple numbers exist.
+        """
+        year_re = re.compile(r"^(?:19|20)\d{2}$")  # Year-only token regex
+        toks = title.split()  # Tokenize title on whitespace
+        indices = [i for i, t in enumerate(toks) if year_re.match(t)]  # Find all year-like token indices
+        if not indices:  # No year-like tokens found
+            return title  # Return original title unchanged
+        # Candidate index: second token when multiple, otherwise the single token
+        cand_idx = indices[1] if len(indices) > 1 else indices[0]
+        try:
+            toks.pop(cand_idx)  # Remove candidate token to avoid appending duplicate year
+        except Exception:
+            pass  # On any error, fall back to original title
+        return " ".join(toks).strip()  # Reconstruct and return
+
+    # Remove the candidate year token (if any) so we can insert the validated year exactly once
+    title_after_candidate_removal = _replace_candidate_year(title_cleaned, final_year)
+    title_without_year = remove_release_year_tokens(title_after_candidate_removal, final_year)  # Ensure any exact final_year tokens are removed
 
     parts = []  # Build parts list in desired order
     if title_without_year:  # Only add title when non-empty
