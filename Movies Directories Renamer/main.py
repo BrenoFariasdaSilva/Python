@@ -1139,19 +1139,44 @@ def colored_tqdm_bar_format():
     )  # Embed color codes in the bar format
 
 
-def generate_unique_target(directory: Path, base_name: str, ext: str, reserved_targets: set) -> Path:
-    """Generate a unique target Path inside `directory` for `base_name` + `ext`."""
+def generate_unique_target(directory: Path, base_name: str, ext: str, reserved_targets: set, allow_existing_sources: set | None = None) -> Path:
+    """Generate a unique target Path inside `directory` for `base_name` + `ext`.
 
-    candidate = directory / f"{base_name}{ext}"  # candidate path
-    if str(candidate) not in reserved_targets and not candidate.exists():  # available candidate
-        reserved_targets.add(str(candidate))  # reserve candidate
+    allow_existing_sources: optional set of Path objects which, if the candidate
+    already exists but refers to one of these source files, should be considered
+    available (no collision).
+    """
+
+    candidate = directory / f"{base_name}{ext}"  # build the candidate Path
+    cand_str = str(candidate)
+    allow_existing_sources_local = set(allow_existing_sources) if allow_existing_sources is not None else set()  # copy to local set safely
+
+    try:
+        candidate_exists = candidate.exists()
+    except Exception: 
+        candidate_exists = False  # on error, treat as non-existing
+
+    def _is_allowed_existing():
+        if not candidate_exists:  # if candidate doesn't exist, it's not an allowed existing source
+            return False
+        for s in allow_existing_sources_local:
+            try:
+                if Path(s).resolve() == candidate.resolve():
+                    return True
+            except Exception:
+                continue
+        return False
+
+    if cand_str not in reserved_targets and (not candidate_exists or _is_allowed_existing()):  # available candidate
+        reserved_targets.add(cand_str)  # reserve the candidate path string
         return candidate  # return available candidate
 
     n = 1  # numeric suffix start
-    while True:  # loop until unique found
+    while True:  # loop until a unique candidate is found
         cand = directory / f"{base_name} ({n}){ext}"  # candidate with suffix
-        if str(cand) not in reserved_targets and not cand.exists():  # available candidate
-            reserved_targets.add(str(cand))  # reserve candidate
+        cand_str2 = str(cand)
+        if cand_str2 not in reserved_targets and not cand.exists():  # check availability
+            reserved_targets.add(cand_str2)  # reserve candidate
             return cand  # return it
         n += 1  # increment suffix
         if n > 1000:  # safety limit
@@ -1195,9 +1220,12 @@ def rename_videos_and_subtitles(directory_path, new_dir_name, report_data=None, 
         return  # exit early
 
     reserved = set()  # reserved target strings
-    final_video_targets = {}  # map src Path -> final Path
+    reserved = set()  # reserved target strings container
+    final_video_targets = {}  # mapping from source video Path -> final Path
     for vid in videos:  # determine unique targets for each video
-        final_video_targets[vid] = generate_unique_target(directory_path, new_dir_name, vid.suffix, reserved)  # unique video target
+        final_video_targets[vid] = generate_unique_target(
+            directory_path, new_dir_name, vid.suffix, reserved, allow_existing_sources={vid}
+        )  # generate target allowing existing source for collision check
 
     final_sub_targets = {}  # map subtitle src -> final Path
     for vid, target in final_video_targets.items():  # determine subtitle targets matching original video stems
