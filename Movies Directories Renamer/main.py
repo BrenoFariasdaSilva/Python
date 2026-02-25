@@ -85,7 +85,7 @@ INPUT_DIRS = [
 LANGUAGE_OPTIONS = ["Dual", "Dublado", "English", "Legendado", "Nacional"]  # User-defined suffixes for renaming
 TMDB_BASE_URL = "https://api.themoviedb.org/3"  # Base URL for TMDb API
 IGNORE_DIR_REGEX = re.compile(r'^(featurettes|extras|making[-_\s]?of|behind[ _-]?the[ _-]?scenes|specials)$', re.IGNORECASE)  # Regex for ignore dirs
-IGNORE_DIR_NAME = re.compile(r'blade\s*runner', re.IGNORECASE)  # Regex to ignore directories containing 'Blade Runner'
+IGNORE_DIR_NAME = re.compile(r'(?:blade\s*runner|red\s*2010|cubo\s*1997)', re.IGNORECASE)  # Regex to ignore directories containing 'Blade Runner', 'RED 2010', or 'Cubo 1997'
 
 # Sound Constants:
 SOUND_COMMANDS = {
