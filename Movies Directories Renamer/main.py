@@ -578,14 +578,14 @@ def normalize_special_tokens_position(filename):
     res_idx_clean = find_resolution_index(cleaned)  # Find resolution index in cleaned tokens
     if res_idx_clean is not None:  # When resolution exists
         insert_at = res_idx_clean + 1  # Insert HDR right after resolution
-    else:  # When no resolution found fall back to inserting before first year or at end
-        first_year_idx_clean = None  # Initialize first year index in cleaned tokens
-        for i, t in enumerate(cleaned):  # Scan cleaned tokens for a year token
-            if year_re.match(t):  # Found a year token
-                first_year_idx_clean = i  # Record index
-                break  # Stop after first match
-        if first_year_idx_clean is not None:  # If a year was found
-            insert_at = first_year_idx_clean  # Insert before year when resolution missing
+    else:  # When no resolution found fall back to inserting after the release year (last year) or at end
+        last_year_idx_clean = None  # Initialize last year index in cleaned tokens
+        for i in range(len(cleaned) - 1, -1, -1):  # Scan cleaned tokens backwards for the last year token
+            if year_re.match(cleaned[i]):  # Found a year token
+                last_year_idx_clean = i  # Record last occurrence index
+                break  # Stop after finding last match
+        if last_year_idx_clean is not None:  # If a year was found
+            insert_at = last_year_idx_clean + 1  # Insert after the last year when resolution missing
         else:
             insert_at = len(cleaned)  # Append at end when no natural anchor
 
