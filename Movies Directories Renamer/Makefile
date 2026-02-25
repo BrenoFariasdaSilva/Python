@@ -22,13 +22,13 @@ all: run
 
 # Main Scripts:
 run: dependencies
-	$(CLEAR_CMD)
 	$(PIP) install -r requirements.txt
+	$(CLEAR_CMD)
 	$(TIME_CMD) $(PYTHON) ./main.py
 
 reverter: dependencies
-	$(CLEAR_CMD)
 	$(PIP) install -r requirements.txt
+	$(CLEAR_CMD)
 	$(TIME_CMD) $(PYTHON) ./reverter.py
 
 # Setup Virtual Environment and Install Dependencies
