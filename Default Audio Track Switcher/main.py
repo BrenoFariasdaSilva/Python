@@ -83,6 +83,47 @@ DESIRED_LANGUAGES = {  # Dictionary of desired languages with their correspondin
     "Brazilian Portuguese": ["brazilian", "portuguese", "pt-br", "pt"],  # Additional languages can be added here
 }
 
+UNDESIRED_LANGUAGES = {  # Dictionary of undesired languages with their corresponding language codes (case-insensitive)
+    "Arabic": ["arabic", "ara", "ar", "ar-sa", "العربية"],
+    "Bulgarian": ["bulgarian", "bul", "bg", "bg-bg", "български"],
+    "Chinese Simplified": ["chinese", "chi", "zho", "zh", "zh-cn", "chs", "simplified chinese", "中文", "简体中文"],
+    "Chinese Traditional": ["cht", "zh-tw", "traditional chinese", "繁體中文"],
+    "Croatian": ["croatian", "hrv", "hr", "hr-hr", "hrvatski"],
+    "Czech": ["czech", "cze", "ces", "cs", "cs-cz", "čeština"],
+    "Danish": ["danish", "dan", "da", "da-dk", "dansk"],
+    "Dutch": ["dutch", "nld", "nl", "nl-nl", "nederlands"],
+    "Estonian": ["estonian", "est", "et", "et-ee", "eesti"],
+    "Filipino": ["filipino", "fil", "tl", "tagalog", "tl-ph"],
+    "Finnish": ["finnish", "fin", "fi", "fi-fi", "suomi"],
+    "French": ["french", "fre", "fra", "fr", "fr-fr", "français"],
+    "German": ["german", "ger", "deu", "de", "de-de", "deutsch"],
+    "Greek": ["greek", "ell", "gre", "el", "el-gr", "ελληνικά"],
+    "Hebrew": ["hebrew", "heb", "he", "he-il", "עברית"],
+    "Hindi": ["hindi", "hin", "hi", "hi-in", "हिन्दी"],
+    "Hungarian": ["hungarian", "hun", "hu", "hu-hu", "magyar"],
+    "Indonesian": ["indonesian", "ind", "id", "id-id", "bahasa indonesia"],
+    "Italian": ["italian", "ita", "it", "it-it", "italiano"],
+    "Japanese": ["japanese", "jpn", "ja", "ja-jp", "日本語"],
+    "Korean": ["korean", "kor", "ko", "ko-kr", "한국어"],
+    "Latvian": ["latvian", "lav", "lv", "lv-lv", "latviešu"],
+    "Lithuanian": ["lithuanian", "lit", "lt", "lt-lt", "lietuvių"],
+    "Malay": ["malay", "msa", "may", "ms", "ms-my", "bahasa melayu"],
+    "Norwegian": ["norwegian", "nor", "no", "nb", "nn", "no-no", "norsk"],
+    "Persian": ["persian", "farsi", "fas", "per", "fa", "fa-ir", "فارسی"],
+    "Polish": ["polish", "pol", "pl", "pl-pl", "polski"],
+    "Romanian": ["romanian", "rum", "ron", "ro", "ro-ro", "română"],
+    "Russian": ["russian", "rus", "ru", "ru-ru", "русский"],
+    "Serbian": ["serbian", "srp", "sr", "sr-rs", "српски"],
+    "Slovak": ["slovak", "slk", "slo", "sk", "sk-sk", "slovenčina"],
+    "Slovenian": ["slovenian", "slv", "sl", "sl-si", "slovenščina"],
+    "Spanish": ["spanish", "spa", "es", "es-es", "es-la", "latam", "castellano", "español"],
+    "Swedish": ["swedish", "swe", "sv", "sv-se", "svenska"],
+    "Thai": ["thai", "tha", "th", "th-th", "ไทย"],
+    "Turkish": ["turkish", "tur", "tr", "tr-tr", "türkçe"],
+    "Ukrainian": ["ukrainian", "ukraine", "ukr", "ua", "uk", "uk-ua", "українська"],
+    "Vietnamese": ["vietnamese", "vie", "vi", "vi-vn", "tiếng việt"],
+}
+
 # Sound Constants:
 SOUND_COMMANDS = {
     "Darwin": "afplay",
