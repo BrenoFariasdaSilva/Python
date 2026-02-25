@@ -807,6 +807,7 @@ def main():
     :param: None
     :return: None
     """
+    
     global REMOVE_OTHER_AUDIO_TRACKS, REMOVE_SUBTITLE_TRACKS
 
     # Parse command-line arguments
@@ -815,19 +816,22 @@ def main():
     )
     parser.add_argument(
         "--remove-other-audio",
-        action="store_true",
+        action="store_true",  # Use presence to set True when explicitly passed
+        default=None,  # Default to None so absence does not override constants
         help="Remove audio tracks not in the desired languages list"
     )
     parser.add_argument(
         "--remove-subtitles",
-        action="store_true",
+        action="store_true",  # Use presence to set True when explicitly passed
+        default=None,  # Default to None so absence does not override constants
         help="Remove all subtitle tracks from the video files"
     )
     args = parser.parse_args()
 
-    # Update global constants based on arguments
-    REMOVE_OTHER_AUDIO_TRACKS = args.remove_other_audio
-    REMOVE_SUBTITLE_TRACKS = args.remove_subtitles
+    if args.remove_other_audio is not None:  # Only override when flag explicitly present
+        REMOVE_OTHER_AUDIO_TRACKS = args.remove_other_audio  # Override global constant accordingly
+    if args.remove_subtitles is not None:  # Only override when flag explicitly present
+        REMOVE_SUBTITLE_TRACKS = args.remove_subtitles  # Override global constant accordingly
 
     print(
         f"{BackgroundColors.CLEAR_TERMINAL}{BackgroundColors.BOLD}{BackgroundColors.GREEN}Welcome to the {BackgroundColors.CYAN}Default Audio Track Switcher{BackgroundColors.GREEN}!{Style.RESET_ALL}\n"
