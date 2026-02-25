@@ -78,7 +78,7 @@ VIDEO_FILE_EXTENSIONS = [".mkv", ".mp4", ".avi"]  # List of video file extension
 REMOVE_OTHER_AUDIO_TRACKS = False  # Set to True to remove other audio tracks after setting the default
 REMOVE_SUBTITLE_TRACKS = False  # Set to True to remove all subtitle tracks
 
-DESIRED_LANGUAGES = {
+DESIRED_LANGUAGES = {  # Dictionary of desired languages with their corresponding language codes (case-insensitive)
     "English": ["english", "eng", "en"],  # Languages to prioritize when selecting default audio track
     "Brazilian Portuguese": ["brazilian", "portuguese", "pt-br", "pt"],  # Additional languages can be added here
 }
