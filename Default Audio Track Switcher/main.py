@@ -73,6 +73,7 @@ class BackgroundColors:  # Colors for the terminal
 VERBOSE = False  # Set to True to output verbose messages
 INPUT_DIR = "./Input/"  # Root directory to search for videos
 VIDEO_FILE_EXTENSIONS = [".mkv", ".mp4", ".avi"]  # List of video file extensions to process
+IGNORE_DIRS = ["Backup"]  # List of directory name keywords to ignore (case-insensitive)
 
 # These will be set by command-line arguments in main()
 REMOVE_OTHER_AUDIO_TRACKS = True  # Set to True to remove other audio tracks after setting the default
@@ -265,6 +266,25 @@ def verify_filepath_exists(filepath):
     return os.path.exists(filepath)  # Return True if the file or folder exists, False otherwise
 
 
+def should_ignore_directory(dirpath):
+    """
+    Determine whether the directory should be ignored based on IGNORE_DIRS.
+
+    :param dirpath: Path to the directory to evaluate
+    :return: True if the directory name contains any IGNORE_DIRS keyword (case-insensitive), False otherwise
+    """
+
+    dirname = os.path.basename(dirpath)  # Get the directory name from the full path
+    lower_name = dirname.lower()  # Normalize to lowercase for case-insensitive matching
+    for keyword in IGNORE_DIRS:  # Iterate configured ignore keywords
+        if keyword.lower() in lower_name:  # Check for substring-based, case-insensitive match
+            verbose_output(
+                f"{BackgroundColors.YELLOW}Ignoring directory: {BackgroundColors.CYAN}{dirpath}{BackgroundColors.YELLOW} (matches IGNORE_DIRS keyword '{keyword}'){Style.RESET_ALL}"
+            )  # Verbose message explaining why the directory is ignored
+            return True  # Indicate the directory should be ignored
+    return False  # Indicate the directory should not be ignored
+
+
 def find_videos(input_dir, extensions):
     """
     Recursively find all videos in the input directory with specified extensions.
@@ -281,6 +301,9 @@ def find_videos(input_dir, extensions):
     videos = []  # List to store video file paths
 
     for root, dirs, files in os.walk(input_dir):  # Walk through the directory
+        if should_ignore_directory(root):  # Skip entire directory and its subdirectories if it matches IGNORE_DIRS
+            dirs[:] = []  # Prevent descending into subdirectories under the ignored directory
+            continue  # Continue to next iteration so no files in this directory are processed
         for file in files:  # For each file in the directory
             if any(file.lower().endswith(ext) for ext in extensions):  # If the file has a valid video extension
                 videos.append(os.path.join(root, file))  # Add the video file path to the list
