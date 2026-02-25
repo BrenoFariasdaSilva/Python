@@ -75,6 +75,13 @@ VERBOSE = False  # Set to True to output verbose messages
 INPUT_DIR = "./Input/"  # Root directory to search for videos
 VIDEO_FILE_EXTENSIONS = [".mkv", ".mp4", ".avi"]  # List of video file extensions to process
 IGNORE_DIRS = ["Backup"]  # List of directory name keywords to ignore (case-insensitive)
+IGNORE_FILE_PATTERNS = [
+    ".tmp",  # Common temporary file marker
+    ".part",  # Partial download extension
+    ".partial",  # Partial download extension variant
+    ".!ut",  # uTorrent temporary marker
+    ".temp",  # Generic temp substring
+]  # Substring patterns for incomplete/temporary files (case-insensitive)
 
 # These will be set by command-line arguments in main()
 REMOVE_OTHER_AUDIO_TRACKS = True  # Set to True to remove other audio tracks after setting the default
@@ -286,6 +293,25 @@ def should_ignore_directory(dirpath):
     return False  # Indicate the directory should not be ignored
 
 
+def should_ignore_file(filename):
+    """
+    Determine whether the file should be ignored based on IGNORE_FILE_PATTERNS.
+
+    :param filename: Name of the file to evaluate
+    :return: True if the filename contains any IGNORE_FILE_PATTERNS keyword (case-insensitive), False otherwise
+    """
+
+    lower_name = filename.lower()  # Normalize filename to lowercase for case-insensitive matching
+    for pattern in IGNORE_FILE_PATTERNS:  # Iterate configured ignore file patterns
+        if pattern.lower() in lower_name:  # Substring-based, case-insensitive check
+            verbose_output(
+                f"{BackgroundColors.YELLOW}Skipping temporary/incomplete file: {BackgroundColors.CYAN}{filename}{BackgroundColors.YELLOW} (matches pattern '{pattern}'){Style.RESET_ALL}"
+            )  # Verbose message explaining why file is skipped
+            return True  # Indicate the file should be ignored
+
+    return False  # Indicate the file should not be ignored
+
+
 def create_progress_bar(iterable, **kwargs):
     """
     Safely create and return a tqdm progress bar for the given iterable.
@@ -347,6 +373,8 @@ def find_videos(input_dir, extensions):
             dirs[:] = []  # Prevent descending into subdirectories under the ignored directory
             continue  # Continue to next iteration so no files in this directory are processed
         for file in files:  # For each file in the directory
+            if should_ignore_file(file):  # Skip files that match temporary/incomplete patterns
+                continue  # Continue to next file without adding to the list
             if any(file.lower().endswith(ext) for ext in extensions):  # If the file has a valid video extension
                 videos.append(os.path.join(root, file))  # Add the video file path to the list
 
