@@ -1234,109 +1234,116 @@ def rename_videos_and_subtitles(directory_path, new_dir_name, report_data=None, 
         if rk not in report_data["input_dirs"]:  # initialize per-root structure
             report_data["input_dirs"][rk] = {"directories_modified": [], "video_files_renamed": []}  # init lists
 
-    videos = []  # video files list
-    subtitles = {}  # map stem -> subtitle Path
-    for item in sorted(directory_path.iterdir()):  # iterate directory entries
-        if not item.is_file():  # skip non-files
-            continue  # next entry
-        if item.suffix.lower() in VIDEO_EXTS:  # video file detected
-            videos.append(item)  # collect video
-        elif item.suffix.lower() == ".srt":  # subtitle detected
-            subtitles[item.stem] = item  # map by stem
+    videos = []  # collect video files into list
+    subtitles = {}  # map subtitle stem (case-sensitive and lower) to Path
+    for item in sorted(directory_path.iterdir()):  # iterate entries in directory_path
+        if not item.is_file():  # skip non-file entries
+            continue  # continue to next entry
+        suf = item.suffix.lower()  # compute lowercase suffix for matching
+        if suf in VIDEO_EXTS:  # if entry is a video file
+            videos.append(item)  # add video to list
+        elif suf == ".srt":  # if entry is a subtitle file
+            subtitles.setdefault(item.stem, item)  # map exact stem to subtitle Path
+            subtitles.setdefault(item.stem.lower(), item)  # map lowercase stem to subtitle Path
 
-    if not videos:  # nothing to do when no videos
+    if not videos:  # when no videos present nothing to do
         return  # exit early
 
-    reserved = set()  # reserved target strings container
-    final_video_targets = {}  # mapping from source video Path -> final Path
-    for vid in videos:  # iterate over collected video files
-        desired = directory_path / f"{new_dir_name}{vid.suffix}"  # compute desired final Path for this video
+    reserved = set()  # set of reserved target path strings to avoid collisions
+    final_video_targets = {}  # mapping from original video Path -> final desired Path
+
+    for vid in videos:  # determine final target for each video deterministically
+        desired_base = new_dir_name  # desired basename is the new directory name
+        desired = directory_path / f"{desired_base}{vid.suffix}"  # desired full Path including extension
         try:
-            exists = desired.exists()  # check filesystem for desired
+            candidate_exists = desired.exists()  # check if desired path already exists on filesystem
         except Exception:
-            exists = False  # assume missing on error
-        if exists:
+            candidate_exists = False  # on error treat as non-existing
+
+        if candidate_exists:  # if desired exists, check if it is the same file as source
             try:
-                if desired.resolve() == vid.resolve():  # if desired path refers to same file as source
-                    reserved.add(str(desired))  # reserve the desired path
+                if desired.resolve() == vid.resolve():  # same file (no collision)
+                    reserved.add(str(desired))  # reserve desired path string
                     final_video_targets[vid] = desired  # assign desired as final target
-                    continue  # proceed to next video
+                    continue  # continue to next video
             except Exception:
-                pass  # ignore resolution errors
-            final_video_targets[vid] = generate_unique_target(directory_path, new_dir_name, vid.suffix, reserved)  # generate unique suffixed target for collision
-        else:
-            if str(desired) not in reserved:
-                reserved.add(str(desired))  # reserve non-existing desired target
-                final_video_targets[vid] = desired  # assign desired as final
-            else:
-                final_video_targets[vid] = generate_unique_target(directory_path, new_dir_name, vid.suffix, reserved)  # generate unique target when reserved
+                pass  # ignore resolve errors and fall back to unique generation
 
-    final_sub_targets = {}  # initialize subtitle mapping container
-    for vid, target in final_video_targets.items():  # iterate video->target mappings
-        orig_stem = vid.stem  # original video stem for subtitle lookup
-        if orig_stem in subtitles:
-            sub_src = subtitles[orig_stem]  # source subtitle Path for this video
-            desired_sub = target.with_suffix('.srt')  # desired subtitle target path based on video target
+        final_video_targets[vid] = generate_unique_target(directory_path, desired_base, vid.suffix, reserved, allow_existing_sources={vid})  # reserve and generate unique target
+
+    final_sub_targets = {}  # mapping from original subtitle Path -> final desired Path
+    subs_lower_map = {k.lower(): v for k, v in subtitles.items()}  # helper lower->Path map for matching
+
+    for vid, v_target in final_video_targets.items():  # for each video mapping, find matching subtitle
+        orig_stem = vid.stem  # original video stem for lookup
+        sub_src = None  # initialize matched subtitle source
+        if orig_stem in subtitles:  # exact-case match preferred
+            sub_src = subtitles[orig_stem]  # pick exact match
+        elif orig_stem.lower() in subs_lower_map:  # fallback to lowercase match
+            sub_src = subs_lower_map[orig_stem.lower()]  # pick lowercase match
+
+        if sub_src is None:  # if still not found, try loose equality search
+            for s_stem, s_path in subtitles.items():  # iterate subtitle candidates
+                if orig_stem.lower() == s_stem.lower():  # case-insensitive equality
+                    sub_src = s_path  # accept this subtitle
+                    break  # stop searching
+
+        if sub_src is None:  # if no subtitle found for this video
+            continue  # continue to next video mapping
+
+        desired_sub_base = v_target.stem  # determine desired subtitle basename from video target stem
+        desired_sub = directory_path / f"{desired_sub_base}.srt"  # full desired subtitle Path
+        try:
+            sub_exists = desired_sub.exists()  # check if desired subtitle exists
+        except Exception:
+            sub_exists = False  # on error treat as non-existing
+
+        if sub_exists:  # if desired subtitle exists, check if it's the same file
             try:
-                exists_sub = desired_sub.exists()  # check filesystem for desired subtitle
-            except Exception:
-                exists_sub = False  # assume missing on error
-            if exists_sub:
-                try:
-                    if desired_sub.resolve() == sub_src.resolve():  # if desired subtitle is the same file as source subtitle
-                        reserved.add(str(desired_sub))  # reserve desired subtitle
-                        final_sub_targets[sub_src] = desired_sub  # assign desired subtitle as final
-                        continue  # next mapping
-                except Exception:
-                    pass  # ignore resolution errors
-                final = generate_unique_target(directory_path, target.stem, '.srt', reserved)  # generate unique subtitle target on collision
-                final_sub_targets[sub_src] = final  # assign generated subtitle target
-            else:
-                if str(desired_sub) not in reserved:
-                    reserved.add(str(desired_sub))  # reserve desired subtitle target
+                if desired_sub.resolve() == sub_src.resolve():  # same file -> no collision
+                    reserved.add(str(desired_sub))  # reserve desired subtitle path
                     final_sub_targets[sub_src] = desired_sub  # assign desired subtitle as final
-                else:
-                    final = generate_unique_target(directory_path, target.stem, '.srt', reserved)  # generate unique subtitle target when reserved
-                    final_sub_targets[sub_src] = final  # assign generated subtitle target
+                    continue  # next mapping
+            except Exception:
+                pass  # ignore resolve errors and fall back to unique generation
 
-    temp_map = {}  # temporary rename map tmp -> original
-    ts_token = str(int(datetime.datetime.now().timestamp() * 1000))  # timestamp token
-    for src in list(final_video_targets.keys()) + list(final_sub_targets.keys()):  # move sources to temp names
-        tmp = src.with_name(f"{src.name}.renametmp{ts_token}")  # temp name
-        if tmp.exists():  # unlikely collision
-            tmp = src.with_name(f"{src.name}.renametmp{ts_token}_{os.getpid()}")  # fallback temp
-        src.rename(tmp)  # perform temp rename
-        temp_map[tmp] = src  # remember mapping
+        final_sub_targets[sub_src] = generate_unique_target(directory_path, desired_sub_base, '.srt', reserved, allow_existing_sources={sub_src})  # reserve/generate subtitle target
 
-    for tmp, orig in list(temp_map.items()):  # finalize video renames
-        if orig in final_video_targets:  # if this temp corresponds to a video
-            final = final_video_targets[orig]  # final path
-            if final.exists():  # safety check
+    temp_map = {}  # temporary mapping from tmp Path -> original Path
+    ts_token = str(int(datetime.datetime.now().timestamp() * 1000))  # timestamp token for tmp names
+    idx = 0  # index suffix to guarantee unique tmp names in same run
+    for src in list(final_video_targets.keys()) + list(final_sub_targets.keys()):  # move all sources to temp names first
+        tmp_name = f"{src.name}.renametmp{ts_token}_{idx}"  # build tmp filename
+        tmp = src.with_name(tmp_name)  # tmp Path object
+        idx += 1  # increment index for next tmp
+        if tmp.exists():  # collision unlikely, build fallback tmp name
+            tmp = src.with_name(f"{src.name}.renametmp{ts_token}_{os.getpid()}_{idx}")  # fallback tmp with pid
+        src.rename(tmp)  # perform temporary rename on filesystem
+        temp_map[tmp] = src  # remember mapping for finalization
+
+    for tmp, orig in list(temp_map.items()):  # finalize video renames from tmp to final
+        if orig in final_video_targets:  # if this tmp corresponds to a video file
+            final = final_video_targets[orig]  # final Path for this video
+            if final.exists():  # safety: do not overwrite existing file
                 raise FileExistsError(f"Target already exists: {final}")  # abort on collision
-            tmp.rename(final)  # move to final
-            if report_data is not None and rk is not None:  # log rename
-                report_data["input_dirs"].setdefault(rk, {"directories_modified": [], "video_files_renamed": []})  # ensure lists
-                report_data["input_dirs"][rk].setdefault("video_files_renamed", [])  # ensure list
-                report_data["input_dirs"][rk]["video_files_renamed"].append({  # append record
-                    "old_name": str(orig.name),  # old filename
-                    "new_name": str(final.name),  # new filename
-                    "reason": "Sync Video/Subtitle With Directory Name",  # reason
-                })  # end append
+            tmp.rename(final)  # perform final rename
+            if report_data is not None and rk is not None:  # append record to report_data when available
+                report_data.setdefault("input_dirs", {})  # ensure top-level mapping exists
+                report_data["input_dirs"].setdefault(rk, {"directories_modified": [], "video_files_renamed": []})  # ensure per-root structure
+                report_data["input_dirs"][rk].setdefault("video_files_renamed", [])  # ensure list exists
+                report_data["input_dirs"][rk]["video_files_renamed"].append({"old_name": str(orig.name), "new_name": str(final.name), "reason": "Sync Video/Subtitle With Directory Name"})  # append record
 
-    for tmp, orig in list(temp_map.items()):  # finalize subtitle renames
-        if orig in final_sub_targets:  # if this temp corresponds to a subtitle
-            final = final_sub_targets[orig]  # final path
-            if final.exists():  # safety check
+    for tmp, orig in list(temp_map.items()):  # finalize subtitle renames from tmp to final
+        if orig in final_sub_targets:  # if this tmp corresponds to a subtitle file
+            final = final_sub_targets[orig]  # final Path for this subtitle
+            if final.exists():  # safety: do not overwrite existing file
                 raise FileExistsError(f"Target already exists: {final}")  # abort on collision
-            tmp.rename(final)  # move to final
-            if report_data is not None and rk is not None:  # log subtitle rename
-                report_data["input_dirs"].setdefault(rk, {"directories_modified": [], "video_files_renamed": []})  # ensure lists
-                report_data["input_dirs"][rk].setdefault("video_files_renamed", [])  # ensure list
-                report_data["input_dirs"][rk]["video_files_renamed"].append({  # append record
-                    "old_name": str(orig.name),  # old subtitle filename
-                    "new_name": str(final.name),  # new subtitle filename
-                    "reason": "Sync Video/Subtitle With Directory Name",  # reason
-                })  # end append
+            tmp.rename(final)  # perform final rename
+            if report_data is not None and rk is not None:  # append record to report_data when available
+                report_data.setdefault("input_dirs", {})  # ensure top-level mapping exists
+                report_data["input_dirs"].setdefault(rk, {"directories_modified": [], "video_files_renamed": []})  # ensure per-root structure
+                report_data["input_dirs"][rk].setdefault("video_files_renamed", [])  # ensure list exists
+                report_data["input_dirs"][rk]["video_files_renamed"].append({"old_name": str(orig.name), "new_name": str(final.name), "reason": "Sync Video/Subtitle With Directory Name"})  # append record
 
 
 def rename_path_with_subtitle_sync(src, dst, report_data=None, root_key=None, change_desc=None):
