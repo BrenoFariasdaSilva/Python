@@ -85,6 +85,7 @@ INPUT_DIRS = [
 LANGUAGE_OPTIONS = ["Dual", "Dublado", "English", "Legendado", "Nacional"]  # User-defined suffixes for renaming
 TMDB_BASE_URL = "https://api.themoviedb.org/3"  # Base URL for TMDb API
 IGNORE_DIR_REGEX = re.compile(r'^(featurettes|extras|making[-_\s]?of|behind[ _-]?the[ _-]?scenes|specials)$', re.IGNORECASE)  # Regex for ignore dirs
+IGNORE_DIR_NAME = re.compile(r'blade\s*runner', re.IGNORECASE)  # Regex to ignore directories containing 'Blade Runner'
 
 # Sound Constants:
 SOUND_COMMANDS = {
@@ -884,7 +885,11 @@ def get_root_directories(root):
         return None, None  # Signal skip
 
     try:  # Guard directory listing
-        entries = [p for p in sorted(root_path.iterdir()) if p.is_dir()]  # Deterministic directories only
+        entries = [
+            p
+            for p in sorted(root_path.iterdir())
+            if p.is_dir() and not IGNORE_DIR_NAME.search(p.name)
+        ]  # Deterministic directories excluding ignored names
     except Exception:  # If listing fails
         verbose_output(f"{BackgroundColors.YELLOW}Cannot read input path, skipping: {BackgroundColors.CYAN}{root_path}{Style.RESET_ALL}")  # Notify skip
         return None, None  # Signal skip
