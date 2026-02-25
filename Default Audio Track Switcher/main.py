@@ -929,8 +929,9 @@ def main():
     iterator = None  # Initialize iterator variable to None
     try:  # Begin outer try block to ensure cleanup
         pbar = create_progress_bar(
-            videos,
-            desc=f"{BackgroundColors.GREEN}Processing Video Files from {BackgroundColors.CYAN}{INPUT_DIR}{BackgroundColors.GREEN}...{Style.RESET_ALL}",
+            videos,  # Iterable to wrap in progress bar
+            desc=f"{BackgroundColors.GREEN}Processing Video Files from {BackgroundColors.CYAN}{INPUT_DIR}{BackgroundColors.GREEN}...{Style.RESET_ALL}",  # Description shown on the left
+            bar_format=f"{{l_bar}}{BackgroundColors.CYAN}{{bar}}{Style.RESET_ALL}{{r_bar}}",  # Color only the progress bar itself in cyan
         )  # Create tqdm safely via factory
 
         iterator = pbar if pbar is not None else videos  # Choose the appropriate iterator for processing
