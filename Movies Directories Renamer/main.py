@@ -1219,24 +1219,57 @@ def rename_videos_and_subtitles(directory_path, new_dir_name, report_data=None, 
     if not videos:  # nothing to do when no videos
         return  # exit early
 
-    reserved = set()  # reserved target strings
     reserved = set()  # reserved target strings container
     final_video_targets = {}  # mapping from source video Path -> final Path
-    for vid in videos:  # determine unique targets for each video
-        final_video_targets[vid] = generate_unique_target(
-            directory_path, new_dir_name, vid.suffix, reserved, allow_existing_sources={vid}
-        )  # generate target allowing existing source for collision check
-
-    final_sub_targets = {}  # map subtitle src -> final Path
-    for vid, target in final_video_targets.items():  # determine subtitle targets matching original video stems
-        orig_stem = vid.stem  # original video stem
-        if orig_stem in subtitles:  # a subtitle exists for this video
-            sub_target = target.with_suffix('.srt')  # desired subtitle target
-            if str(sub_target) in reserved or (sub_target.exists() and sub_target not in subtitles.values()):  # collision
-                sub_target = generate_unique_target(directory_path, target.stem, '.srt', reserved)  # generate unique subtitle target
+    for vid in videos:  # iterate over collected video files
+        desired = directory_path / f"{new_dir_name}{vid.suffix}"  # compute desired final Path for this video
+        try:
+            exists = desired.exists()  # check filesystem for desired
+        except Exception:
+            exists = False  # assume missing on error
+        if exists:
+            try:
+                if desired.resolve() == vid.resolve():  # if desired path refers to same file as source
+                    reserved.add(str(desired))  # reserve the desired path
+                    final_video_targets[vid] = desired  # assign desired as final target
+                    continue  # proceed to next video
+            except Exception:
+                pass  # ignore resolution errors
+            final_video_targets[vid] = generate_unique_target(directory_path, new_dir_name, vid.suffix, reserved)  # generate unique suffixed target for collision
+        else:
+            if str(desired) not in reserved:
+                reserved.add(str(desired))  # reserve non-existing desired target
+                final_video_targets[vid] = desired  # assign desired as final
             else:
-                reserved.add(str(sub_target))  # reserve chosen subtitle target
-            final_sub_targets[subtitles[orig_stem]] = sub_target  # record mapping
+                final_video_targets[vid] = generate_unique_target(directory_path, new_dir_name, vid.suffix, reserved)  # generate unique target when reserved
+
+    final_sub_targets = {}  # initialize subtitle mapping container
+    for vid, target in final_video_targets.items():  # iterate video->target mappings
+        orig_stem = vid.stem  # original video stem for subtitle lookup
+        if orig_stem in subtitles:
+            sub_src = subtitles[orig_stem]  # source subtitle Path for this video
+            desired_sub = target.with_suffix('.srt')  # desired subtitle target path based on video target
+            try:
+                exists_sub = desired_sub.exists()  # check filesystem for desired subtitle
+            except Exception:
+                exists_sub = False  # assume missing on error
+            if exists_sub:
+                try:
+                    if desired_sub.resolve() == sub_src.resolve():  # if desired subtitle is the same file as source subtitle
+                        reserved.add(str(desired_sub))  # reserve desired subtitle
+                        final_sub_targets[sub_src] = desired_sub  # assign desired subtitle as final
+                        continue  # next mapping
+                except Exception:
+                    pass  # ignore resolution errors
+                final = generate_unique_target(directory_path, target.stem, '.srt', reserved)  # generate unique subtitle target on collision
+                final_sub_targets[sub_src] = final  # assign generated subtitle target
+            else:
+                if str(desired_sub) not in reserved:
+                    reserved.add(str(desired_sub))  # reserve desired subtitle target
+                    final_sub_targets[sub_src] = desired_sub  # assign desired subtitle as final
+                else:
+                    final = generate_unique_target(directory_path, target.stem, '.srt', reserved)  # generate unique subtitle target when reserved
+                    final_sub_targets[sub_src] = final  # assign generated subtitle target
 
     temp_map = {}  # temporary rename map tmp -> original
     ts_token = str(int(datetime.datetime.now().timestamp() * 1000))  # timestamp token
