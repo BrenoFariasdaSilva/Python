@@ -87,6 +87,11 @@ IGNORE_FILE_PATTERNS = [
 REMOVE_OTHER_AUDIO_TRACKS = True  # Set to True to remove other audio tracks after setting the default
 REMOVE_SUBTITLE_TRACKS = True  # Set to True to remove all subtitle tracks
 
+STREAM_TYPE_PRIORITY_ORDER = {
+    "audio": ["English", "Portuguese"],  # Priority for audio tracks (English first)
+    "subtitle": ["Portuguese", "English"],  # Priority for subtitle tracks (Portuguese first, then English)
+}  # Desired languages in order of priority for each stream type
+
 DESIRED_LANGUAGES = {  # Dictionary of desired languages with their corresponding language codes (case-insensitive)
     "English": ["english", "eng", "en"],  # Languages to prioritize when selecting default audio track
     "Brazilian Portuguese": ["brazilian", "portuguese", "pt-br", "pt"],  # Additional languages can be added here
