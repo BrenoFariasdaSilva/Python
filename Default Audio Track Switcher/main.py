@@ -1010,9 +1010,9 @@ def main():
     )
 
     if REMOVE_OTHER_AUDIO_TRACKS:  # If audio track removal is enabled, print the mode
-        print(f"{BackgroundColors.GREEN}Mode: {BackgroundColors.CYAN}Removing non-desired audio tracks{Style.RESET_ALL}")
+        print(f"{BackgroundColors.GREEN}Mode: {BackgroundColors.CYAN}Removing Non-Desired Audio Tracks{Style.RESET_ALL}")
     if REMOVE_OTHER_SUBTITLE_TRACKS:  # If subtitle removal is enabled, print the mode
-        print(f"{BackgroundColors.GREEN}Mode: {BackgroundColors.CYAN}Removing non-desired subtitle tracks{Style.RESET_ALL}")
+        print(f"{BackgroundColors.GREEN}Mode: {BackgroundColors.CYAN}Removing Non-Desired Subtitle Tracks{Style.RESET_ALL}")
     if REMOVE_OTHER_AUDIO_TRACKS or REMOVE_OTHER_SUBTITLE_TRACKS:
         print()  # Add blank line for spacing
 
