@@ -47,6 +47,7 @@ Assumptions & Notes:
    - Original file is replaced by the processed file
 """
 
+
 import argparse  # For parsing command-line arguments
 import atexit  # For playing a sound when the program finishes
 import json  # For parsing JSON output from ffprobe
@@ -57,6 +58,7 @@ import signal  # For temporarily ignoring SIGINT during tqdm construction
 import subprocess  # For running terminal commands
 from colorama import Style  # For coloring the terminal
 from tqdm import tqdm  # For displaying a progress bar
+from typing import Optional, Dict  # For optional typing hints
 
 
 # Macros:
@@ -86,6 +88,7 @@ IGNORE_FILE_PATTERNS = [
 # These will be set by command-line arguments in main()
 REMOVE_OTHER_AUDIO_TRACKS = True  # Set to True to remove other audio tracks after setting the default
 REMOVE_OTHER_SUBTITLE_TRACKS = True  # Set to True to remove other subtitle tracks
+REMOVE_DESCRIPTIVE_STREAMS = True  # If True, remove descriptive/SDH streams (audio and subtitles) before selection
 
 STREAM_TYPE_PRIORITY_ORDER = {
     "audio": ["English", "Portuguese"],  # Priority for audio tracks (English first)
@@ -575,6 +578,82 @@ def stream_matches_candidates(stream, candidates):
     return any(cand in v for cand in candidates for v in values)  # Return True if any candidate appears
 
 
+def is_descriptive_stream(stream):
+    """
+    Detect whether a stream is descriptive (SDH, audio description, commentary).
+
+    :param stream: Stream metadata dict
+    :return: True if descriptive keywords are found, False otherwise
+    """
+
+    keywords = ["sdh", "descriptive", "hearing", "hearing impaired", "commentary", "audio description"]  # Descriptive keywords to match
+    values = [str(stream.get("title", "")).lower(), str(stream.get("language", "")).lower()]  # Collect title and language values
+    
+    for v in stream.get("tags", {}).values():  # Iterate tag values for additional metadata
+        try:  # Guard conversion to string
+            values.append(str(v).lower())  # Append tag value lowercased
+        except Exception:  # Ignore problematic tag values
+            continue  # Continue collecting other tags
+
+    for val in values:  # Evaluate all collected metadata values
+        for kw in keywords:  # Check each descriptive keyword
+            if kw in val:  # If keyword appears in metadata value
+                return True  # Stream is descriptive
+    return False  # No descriptive keywords found
+
+
+def filter_descriptive_streams(streams):
+    """
+    Filter out descriptive streams if REMOVE_DESCRIPTIVE_STREAMS is enabled.
+
+    :param streams: List of stream dicts
+    :return: Filtered list of stream dicts
+    """
+
+    if REMOVE_DESCRIPTIVE_STREAMS:  # Only filter when feature is enabled
+        return [s for s in streams if not is_descriptive_stream(s)]  # Exclude descriptive streams
+    
+    return streams  # Return original list when filtering disabled
+
+
+def filter_desired_streams(streams):
+    """
+    Return only streams classified as 'desired'.
+
+    :param streams: List of stream dicts
+    :return: List of streams with classification == 'desired'
+    """
+
+    return [s for s in streams if s.get("classification") == "desired"]  # Keep only desired-classified streams
+
+
+def select_best_stream(streams, kept_positions, priority_names, pos_key):
+    """
+    Select the best physical stream position following the given priority names.
+
+    :param streams: List of stream dicts
+    :param kept_positions: List of physical positions to consider
+    :param priority_names: Ordered list of display names to prefer
+    :param pos_key: Physical position key name ('audio_pos' or 'sub_pos')
+    :return: Selected physical position integer or None
+    """
+
+    candidate_pool = filter_descriptive_streams(streams)  # Remove descriptive streams when configured
+    desired_pool = filter_desired_streams(candidate_pool)  # Keep only streams classified as desired
+
+    for preferred in priority_names:  # Iterate priority names in order
+        candidates = build_candidate_aliases(preferred)  # Build candidate aliases for this preferred name
+        
+        for s in desired_pool:  # Scan desired streams for a match
+            pos = s.get(pos_key)  # Get the physical position
+            if pos not in kept_positions:  # Skip streams not part of kept positions
+                continue  # Continue to next stream
+            if stream_matches_candidates(s, candidates):  # If metadata matches any candidate alias
+                return pos  # Return the matched physical position immediately
+
+    return None  # No prioritized stream found
+
+
 def find_best_stream_by_priority(streams, kept_positions, priority_names, pos_key):
     """
     Select the best stream physical position based on priority names.
@@ -639,11 +718,13 @@ def apply_prune_and_set_defaults(video_path, audio_streams, subtitle_streams):
         return  # Exit without changes
 
     audio_priorities = resolve_priority_list("audio")  # Resolve audio priority names from config
-    default_audio_pos = find_best_stream_by_priority(audio_streams, kept_audio_positions, audio_priorities, "audio_pos")  # Find best audio by priority
+    default_audio_pos = select_best_stream(audio_streams, kept_audio_positions, audio_priorities, "audio_pos")  # Find best audio by priority using new helper
+    
     if default_audio_pos is None:  # If no prioritized audio found
         default_audio_pos = find_original_default_position(audio_streams, "audio_pos")  # Fallback to original default if present
     subtitle_priorities = resolve_priority_list("subtitle")  # Resolve subtitle priority names from config
-    default_sub_pos = find_best_stream_by_priority(subtitle_streams, kept_sub_positions, subtitle_priorities, "sub_pos")  # Find best subtitle by priority
+    default_sub_pos = select_best_stream(subtitle_streams, kept_sub_positions, subtitle_priorities, "sub_pos")  # Find best subtitle by priority using new helper
+    
     if default_sub_pos is None:  # If no prioritized subtitle found
         default_sub_pos = find_original_default_position(subtitle_streams, "sub_pos")  # Fallback to original default if present
 
