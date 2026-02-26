@@ -1061,7 +1061,7 @@ def main():
     :return: None
     """
     
-    global REMOVE_OTHER_AUDIO_TRACKS, REMOVE_OTHER_SUBTITLE_TRACKS
+    global REMOVE_OTHER_AUDIO_TRACKS, REMOVE_OTHER_SUBTITLE_TRACKS, REMOVE_DESCRIPTIVE_STREAMS  # Make descriptive config writable
 
     # Parse command-line arguments
     parser = argparse.ArgumentParser(
@@ -1079,12 +1079,20 @@ def main():
         default=None,  # Default to None so absence does not override constants
         help="Remove non-desired subtitle tracks from the video files"
     )
+    parser.add_argument(
+        "--remove-descriptive-streams",
+        action="store_true",  # Use presence to set True when explicitly passed
+        default=None,  # Default to None so absence does not override constants
+        help="Remove descriptive/SDH streams before selection"
+    )
     args = parser.parse_args()
 
     if args.remove_other_audio is not None:  # Only override when flag explicitly present
         REMOVE_OTHER_AUDIO_TRACKS = args.remove_other_audio  # Override global constant accordingly
     if args.remove_other_subtitles is not None:  # Only override when flag explicitly present
         REMOVE_OTHER_SUBTITLE_TRACKS = args.remove_other_subtitles  # Override global constant accordingly
+    if args.remove_descriptive_streams is not None:  # Only override when flag explicitly present
+        REMOVE_DESCRIPTIVE_STREAMS = args.remove_descriptive_streams  # Override global constant accordingly
 
     print(
         f"{BackgroundColors.CLEAR_TERMINAL}{BackgroundColors.BOLD}{BackgroundColors.GREEN}Welcome to the {BackgroundColors.CYAN}Default Audio Track Switcher{BackgroundColors.GREEN}!{Style.RESET_ALL}\n"
