@@ -1094,8 +1094,8 @@ def main():
         print(f"{BackgroundColors.GREEN}Mode: {BackgroundColors.CYAN}Removing Non-Desired Audio Tracks{Style.RESET_ALL}")
     if REMOVE_OTHER_SUBTITLE_TRACKS:  # If subtitle removal is enabled, print the mode
         print(f"{BackgroundColors.GREEN}Mode: {BackgroundColors.CYAN}Removing Non-Desired Subtitle Tracks{Style.RESET_ALL}")
-    if REMOVE_OTHER_AUDIO_TRACKS or REMOVE_OTHER_SUBTITLE_TRACKS:
-        print()  # Add blank line for spacing
+    if REMOVE_DESCRIPTIVE_STREAMS:  # If descriptive stream filtering is enabled, print the mode
+        print(f"{BackgroundColors.GREEN}Mode: {BackgroundColors.CYAN}Filtering Descriptive Streams{Style.RESET_ALL}")
 
     install_ffmpeg_and_ffprobe()  # Ensure ffmpeg and ffprobe are installed
 
