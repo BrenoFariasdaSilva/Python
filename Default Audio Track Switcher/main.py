@@ -527,6 +527,96 @@ def classify_streams(video_path):
     return audio_streams, subtitle_streams  # Return classified audio and subtitle stream lists
 
 
+def resolve_priority_list(stream_type):
+    """
+    Resolve the configured priority list for a stream type.
+
+    :param stream_type: "audio" or "subtitle"
+    :return: List of priority names in order
+    """
+
+    return STREAM_TYPE_PRIORITY_ORDER.get(stream_type, [])  # Return configured priority names or empty list
+
+
+def build_candidate_aliases(preferred):
+    """
+    Build a list of candidate alias strings for a preferred display name.
+
+    :param preferred: Preferred display name (e.g., 'English', 'Portuguese')
+    :return: List of alias strings to match against stream metadata
+    """
+
+    candidates = [preferred.lower()]  # Start with the preferred name lowercased
+    for aliases in DESIRED_LANGUAGES.values():  # Iterate known desired language alias lists
+        for al in aliases:  # For each alias in the alias list
+            try:  # Guard against non-string alias values
+                if preferred.lower() in al.lower():  # If alias text references the preferred name
+                    candidates.append(al.lower())  # Add matching alias to candidates
+            except Exception:  # Ignore problematic alias entries
+                continue  # Continue processing other aliases
+    return candidates  # Return accumulated candidate alias strings
+
+
+def stream_matches_candidates(stream, candidates):
+    """
+    Check whether a stream's metadata matches any candidate alias.
+
+    :param stream: Stream metadata dict with keys 'language', 'title', 'tags'
+    :param candidates: Iterable of candidate alias strings
+    :return: True if any candidate appears in any metadata field
+    """
+
+    values = [str(stream.get("language", "")).lower(), str(stream.get("title", "")).lower()]  # Collect language and title
+    for v in stream.get("tags", {}).values():  # Iterate all tag values to include them
+        try:  # Guard conversion to string
+            values.append(str(v).lower())  # Append lowercased tag value
+        except Exception:  # Ignore problematic tag values
+            continue  # Continue collecting other tags
+    return any(cand in v for cand in candidates for v in values)  # Return True if any candidate appears
+
+
+def find_best_stream_by_priority(streams, kept_positions, priority_names, pos_key):
+    """
+    Select the best stream physical position based on priority names.
+
+    :param streams: List of stream dicts
+    :param kept_positions: List of physical positions that will be kept
+    :param priority_names: Ordered list of display names to prefer
+    :param pos_key: Key name for the physical position ('audio_pos' or 'sub_pos')
+    :return: Selected physical position integer or None
+    """
+
+    for preferred in priority_names:  # Iterate each preferred name in priority order
+        candidates = build_candidate_aliases(preferred)  # Build candidate aliases for this preferred name
+        for s in streams:  # Scan streams for a matching candidate
+            if s.get("classification") != "desired":  # Skip streams not classified as desired
+                continue  # Continue to next stream
+            pos = s.get(pos_key)  # Get the physical position value
+            if pos not in kept_positions:  # Skip streams not in the kept list
+                continue  # Continue to next stream
+            if stream_matches_candidates(s, candidates):  # If metadata matches any candidate alias
+                return pos  # Return the matched physical position immediately
+    return None  # No prioritized stream found
+
+
+def find_original_default_position(streams, pos_key):
+    """
+    Find the original default stream physical position from source dispositions.
+
+    :param streams: List of stream dicts
+    :param pos_key: Key name for the physical position ('audio_pos' or 'sub_pos')
+    :return: Physical position int or None if none marked default
+    """
+
+    for s in streams:  # Iterate streams to find original default disposition
+        try:  # Guard access to disposition structure
+            if int(s.get("disposition", {}).get("default", 0)) == 1:  # Check ffprobe default flag
+                return s.get(pos_key)  # Return the original physical position
+        except Exception:  # Ignore malformed disposition values
+            continue  # Continue scanning streams
+    return None  # No original default found
+
+
 def apply_prune_and_set_defaults(video_path, audio_streams, subtitle_streams):
     """
     Build and run ffmpeg command to keep only DESIRED tracks and set defaults accordingly.
@@ -548,8 +638,14 @@ def apply_prune_and_set_defaults(video_path, audio_streams, subtitle_streams):
         print(f"{BackgroundColors.YELLOW}No desired audio tracks found for: {BackgroundColors.CYAN}{video_path}{Style.RESET_ALL}")  # Notify user
         return  # Exit without changes
 
-    default_audio_pos = kept_audio_positions[0]  # Choose first desired audio position as default
-    default_sub_pos = kept_sub_positions[0] if kept_sub_positions else None  # Choose first desired subtitle if present
+    audio_priorities = resolve_priority_list("audio")  # Resolve audio priority names from config
+    default_audio_pos = find_best_stream_by_priority(audio_streams, kept_audio_positions, audio_priorities, "audio_pos")  # Find best audio by priority
+    if default_audio_pos is None:  # If no prioritized audio found
+        default_audio_pos = find_original_default_position(audio_streams, "audio_pos")  # Fallback to original default if present
+    subtitle_priorities = resolve_priority_list("subtitle")  # Resolve subtitle priority names from config
+    default_sub_pos = find_best_stream_by_priority(subtitle_streams, kept_sub_positions, subtitle_priorities, "sub_pos")  # Find best subtitle by priority
+    if default_sub_pos is None:  # If no prioritized subtitle found
+        default_sub_pos = find_original_default_position(subtitle_streams, "sub_pos")  # Fallback to original default if present
 
     cmd = ["ffmpeg", "-y", "-i", video_path, "-map", "0", "-map", "-0:a"]  # Start command by mapping all and dropping audio
     cmd += ["-map", "-0:s"]  # Drop all subtitle streams to re-add only desired ones
@@ -562,13 +658,14 @@ def apply_prune_and_set_defaults(video_path, audio_streams, subtitle_streams):
 
     cmd += ["-c", "copy"]  # Use stream copy to avoid re-encoding
 
-    for i, pos in enumerate(kept_audio_positions):  # Set dispositions for audio streams in new output order
-        if pos == default_audio_pos:  # If this mapped audio is the chosen default
-            cmd += [f"-disposition:a:{i}", "default"]  # Set default disposition for this audio
-        else:  # Otherwise clear default flag
-            cmd += [f"-disposition:a:{i}", "0"]  # Clear default disposition for this audio
+    if default_audio_pos is not None:  # Only modify audio dispositions when a default has been determined
+        for i, pos in enumerate(kept_audio_positions):  # Set dispositions for audio streams in new output order
+            if pos == default_audio_pos:  # If this mapped audio is the chosen default
+                cmd += [f"-disposition:a:{i}", "default"]  # Set default disposition for this audio
+            else:  # Otherwise clear default flag
+                cmd += [f"-disposition:a:{i}", "0"]  # Clear default disposition for this audio
 
-    if default_sub_pos is not None:  # Only set subtitle dispositions if a desired subtitle default exists
+    if default_sub_pos is not None:  # Only modify subtitle dispositions when a default has been determined
         for i, pos in enumerate(kept_sub_positions):  # Iterate subtitle outputs to set dispositions
             if pos == default_sub_pos:  # If this mapped subtitle is chosen as default
                 cmd += [f"-disposition:s:{i}", "default"]  # Set default subtitle disposition
