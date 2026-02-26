@@ -85,7 +85,7 @@ IGNORE_FILE_PATTERNS = [
 
 # These will be set by command-line arguments in main()
 REMOVE_OTHER_AUDIO_TRACKS = True  # Set to True to remove other audio tracks after setting the default
-REMOVE_SUBTITLE_TRACKS = True  # Set to True to remove all subtitle tracks
+REMOVE_OTHER_SUBTITLE_TRACKS = True  # Set to True to remove other subtitle tracks
 
 STREAM_TYPE_PRIORITY_ORDER = {
     "audio": ["English", "Portuguese"],  # Priority for audio tracks (English first)
@@ -852,7 +852,7 @@ def apply_audio_track_default(video_path, audio_tracks, default_track_index, kep
 
     cmd = ["ffmpeg", "-y", "-i", video_path, "-map", "0", "-map", "-0:a"]  # Base mapping preserving subs
 
-    if REMOVE_SUBTITLE_TRACKS:
+    if REMOVE_OTHER_SUBTITLE_TRACKS:
         cmd += ["-map", "-0:s"]
 
     for idx in kept_indices:  # Map each kept audio track
@@ -980,7 +980,7 @@ def main():
     :return: None
     """
     
-    global REMOVE_OTHER_AUDIO_TRACKS, REMOVE_SUBTITLE_TRACKS
+    global REMOVE_OTHER_AUDIO_TRACKS, REMOVE_OTHER_SUBTITLE_TRACKS
 
     # Parse command-line arguments
     parser = argparse.ArgumentParser(
@@ -993,17 +993,17 @@ def main():
         help="Remove audio tracks not in the desired languages list"
     )
     parser.add_argument(
-        "--remove-subtitles",
+        "--remove-other-subtitles",
         action="store_true",  # Use presence to set True when explicitly passed
         default=None,  # Default to None so absence does not override constants
-        help="Remove all subtitle tracks from the video files"
+        help="Remove non-desired subtitle tracks from the video files"
     )
     args = parser.parse_args()
 
     if args.remove_other_audio is not None:  # Only override when flag explicitly present
         REMOVE_OTHER_AUDIO_TRACKS = args.remove_other_audio  # Override global constant accordingly
-    if args.remove_subtitles is not None:  # Only override when flag explicitly present
-        REMOVE_SUBTITLE_TRACKS = args.remove_subtitles  # Override global constant accordingly
+    if args.remove_other_subtitles is not None:  # Only override when flag explicitly present
+        REMOVE_OTHER_SUBTITLE_TRACKS = args.remove_other_subtitles  # Override global constant accordingly
 
     print(
         f"{BackgroundColors.CLEAR_TERMINAL}{BackgroundColors.BOLD}{BackgroundColors.GREEN}Welcome to the {BackgroundColors.CYAN}Default Audio Track Switcher{BackgroundColors.GREEN}!{Style.RESET_ALL}\n"
@@ -1011,9 +1011,9 @@ def main():
 
     if REMOVE_OTHER_AUDIO_TRACKS:  # If audio track removal is enabled, print the mode
         print(f"{BackgroundColors.GREEN}Mode: {BackgroundColors.CYAN}Removing non-desired audio tracks{Style.RESET_ALL}")
-    if REMOVE_SUBTITLE_TRACKS:  # If subtitle removal is enabled, print the mode
-        print(f"{BackgroundColors.GREEN}Mode: {BackgroundColors.CYAN}Removing subtitle tracks{Style.RESET_ALL}")
-    if REMOVE_OTHER_AUDIO_TRACKS or REMOVE_SUBTITLE_TRACKS:
+    if REMOVE_OTHER_SUBTITLE_TRACKS:  # If subtitle removal is enabled, print the mode
+        print(f"{BackgroundColors.GREEN}Mode: {BackgroundColors.CYAN}Removing non-desired subtitle tracks{Style.RESET_ALL}")
+    if REMOVE_OTHER_AUDIO_TRACKS or REMOVE_OTHER_SUBTITLE_TRACKS:
         print()  # Add blank line for spacing
 
     install_ffmpeg_and_ffprobe()  # Ensure ffmpeg and ffprobe are installed
