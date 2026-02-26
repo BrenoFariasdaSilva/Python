@@ -1127,6 +1127,8 @@ def main():
     if REMOVE_DESCRIPTIVE_STREAMS:  # If descriptive stream filtering is enabled, print the mode
         print(f"{BackgroundColors.GREEN}Mode: {BackgroundColors.CYAN}Filtering Descriptive Streams{Style.RESET_ALL}")
 
+    print()  # Add a newline for better separation before processing starts
+
     install_ffmpeg_and_ffprobe()  # Ensure ffmpeg and ffprobe are installed
 
     if not verify_filepath_exists(INPUT_DIR):  # If the input directory does not exist
