@@ -1151,8 +1151,12 @@ def main():
 
         try:  # Iterate over files and handle user interruptions
             for video in iterator:  # Iterate over chosen iterator (tqdm or list)
+                try:  # Attempt to compute the path to display in the progress bar
+                    rel_path = os.path.relpath(video, INPUT_DIR)  # Compute relative path from INPUT_DIR
+                except Exception:  # Fallback when relpath computation fails
+                    rel_path = os.path.basename(video)  # Use basename as safe fallback
                 if pbar is not None and hasattr(pbar, "set_description"):  # Update tqdm description only if available
-                    pbar.set_description(f"{BackgroundColors.GREEN}Processing: {BackgroundColors.CYAN}{os.path.basename(video)}{Style.RESET_ALL}")  # Update description with current file name
+                    pbar.set_description(f"{BackgroundColors.GREEN}Processing: {BackgroundColors.CYAN}{rel_path}{Style.RESET_ALL}")  # Update description with relative path
                 swap_audio_tracks(video)  # Process the audio tracks for this video
         except KeyboardInterrupt:  # Handle user interrupt (Ctrl+C) gracefully
             print(f"{BackgroundColors.RED}Interrupted by user. Exiting...{Style.RESET_ALL}")  # Notify user of interruption
