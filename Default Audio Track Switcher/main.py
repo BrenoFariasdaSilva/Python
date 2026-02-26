@@ -585,21 +585,37 @@ def is_descriptive_stream(stream):
     :param stream: Stream metadata dict
     :return: True if descriptive keywords are found, False otherwise
     """
-
-    keywords = ["sdh", "descriptive", "hearing", "hearing impaired", "commentary", "audio description"]  # Descriptive keywords to match
-    values = [str(stream.get("title", "")).lower(), str(stream.get("language", "")).lower()]  # Collect title and language values
     
-    for v in stream.get("tags", {}).values():  # Iterate tag values for additional metadata
-        try:  # Guard conversion to string
-            values.append(str(v).lower())  # Append tag value lowercased
-        except Exception:  # Ignore problematic tag values
-            continue  # Continue collecting other tags
-
-    for val in values:  # Evaluate all collected metadata values
-        for kw in keywords:  # Check each descriptive keyword
-            if kw in val:  # If keyword appears in metadata value
-                return True  # Stream is descriptive
-    return False  # No descriptive keywords found
+    keywords = ["sdh", "descriptive", "hearing impaired", "hearing", "commentary", "audio description", "described video"]  # Descriptive keywords to match
+    values = [str(stream.get("title", "")).lower()]  # Start with title normalized
+    values.append(str(stream.get("language", "")).lower())  # Append language normalized
+    tags = stream.get("tags", {}) or {}  # Safely get tags dict or empty
+    
+    for v in tags.values():  # Iterate over all tag values
+        try:  # Guard conversion to string for each tag value
+            values.append(str(v).lower())  # Append lowercased tag value
+        except Exception:  # Ignore problematic tag value conversions
+            continue  # Continue with next tag value
+    
+    disp = stream.get("disposition", {}) or {}  # Safely get disposition dict or empty
+    
+    try:  # Guard numeric/coercion checks on disposition flags
+        for key in ("hearing_impaired", "commentary", "descriptive", "audio_description", "described"):  # Keys to inspect
+            if key in disp and disp.get(key) is not None:  # If disposition key exists and is not None
+                val = disp.get(key)  # Get raw disposition value
+                sval = str(val).lower()  # Normalize disposition value to string
+                
+                if sval in ("1", "true", "yes"):  # Treat these as affirmative indicators
+                    return True  # Disposition indicates descriptive stream
+    except Exception:  # Ignore any unexpected disposition parsing issues
+        pass  # Continue to keyword scanning if disposition checks fail
+    
+    for val in values:  # Evaluate all collected metadata values for keywords
+        for kw in keywords:  # Iterate descriptive keywords
+            if kw in val:  # If keyword is present in any metadata value
+                return True  # Mark stream as descriptive
+    
+    return False  # No descriptive indicators found
 
 
 def filter_descriptive_streams(streams):
@@ -609,11 +625,13 @@ def filter_descriptive_streams(streams):
     :param streams: List of stream dicts
     :return: Filtered list of stream dicts
     """
-
-    if REMOVE_DESCRIPTIVE_STREAMS:  # Only filter when feature is enabled
-        return [s for s in streams if not is_descriptive_stream(s)]  # Exclude descriptive streams
     
-    return streams  # Return original list when filtering disabled
+    filtered = streams  # Initialize filtered list with original streams
+    
+    if REMOVE_DESCRIPTIVE_STREAMS:  # Only remove descriptive streams when configured
+        filtered = [s for s in streams if not is_descriptive_stream(s)]  # Build new list excluding descriptive streams
+    
+    return filtered  # Return the filtered (or original) list
 
 
 def filter_desired_streams(streams):
@@ -623,8 +641,10 @@ def filter_desired_streams(streams):
     :param streams: List of stream dicts
     :return: List of streams with classification == 'desired'
     """
-
-    return [s for s in streams if s.get("classification") == "desired"]  # Keep only desired-classified streams
+    
+    prefiltered = filter_descriptive_streams(streams)  # Ensure descriptive streams removed before classification filtering
+    
+    return [s for s in prefiltered if s.get("classification") == "desired"]  # Return only streams explicitly marked desired
 
 
 def select_best_stream(streams, kept_positions, priority_names, pos_key):
@@ -637,20 +657,22 @@ def select_best_stream(streams, kept_positions, priority_names, pos_key):
     :param pos_key: Physical position key name ('audio_pos' or 'sub_pos')
     :return: Selected physical position integer or None
     """
-
-    candidate_pool = filter_descriptive_streams(streams)  # Remove descriptive streams when configured
-    desired_pool = filter_desired_streams(candidate_pool)  # Keep only streams classified as desired
-
-    for preferred in priority_names:  # Iterate priority names in order
-        candidates = build_candidate_aliases(preferred)  # Build candidate aliases for this preferred name
+    
+    filtered_streams = filter_descriptive_streams(streams)  # Remove descriptive streams first to avoid reintroduction
+    desired_pool = [s for s in filtered_streams if s.get("classification") == "desired"]  # Build pool of desired streams only
+    
+    for preferred in priority_names:  # Iterate priority names in configured order
+        candidates = build_candidate_aliases(preferred)  # Build alias list for this preferred display name
         
-        for s in desired_pool:  # Scan desired streams for a match
-            pos = s.get(pos_key)  # Get the physical position
-            if pos not in kept_positions:  # Skip streams not part of kept positions
-                continue  # Continue to next stream
-            if stream_matches_candidates(s, candidates):  # If metadata matches any candidate alias
+        for s in desired_pool:  # Scan desired streams for a candidate match
+            pos = s.get(pos_key)  # Get the physical position for the stream
+            
+            if pos not in kept_positions:  # Skip streams that are not part of the kept positions
+                continue  # Continue to next candidate stream
+            
+            if stream_matches_candidates(s, candidates):  # If stream metadata matches any candidate alias
                 return pos  # Return the matched physical position immediately
-
+    
     return None  # No prioritized stream found
 
 
