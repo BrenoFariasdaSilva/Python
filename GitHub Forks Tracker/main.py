@@ -360,7 +360,7 @@ def main():
             print(f"{BackgroundColors.YELLOW}No forks found for {BackgroundColors.CYAN}{original_owner}{BackgroundColors.GREEN}/{BackgroundColors.CYAN}{repo}{Style.RESET_ALL}")  # print(f"{BackgroundColors.YELLOW}No forks found for {BackgroundColors.CYAN}{original_owner}{BackgroundColors.GREEN}/{BackgroundColors.CYAN}{repo}{Style.RESET_ALL}")
             return  # return
 
-        print(f"{BackgroundColors.GREEN}Collecting commits from original repository...{Style.RESET_ALL}")  # print(f"{BackgroundColors.GREEN}Collecting commits from original repository...{Style.RESET_ALL}")
+        print(f"{BackgroundColors.GREEN}Collecting commits from original repository {BackgroundColors.CYAN}{original_owner}/{repo}{BackgroundColors.GREEN}...{Style.RESET_ALL}")  # print(f"{BackgroundColors.GREEN}Collecting commits from original repository...{Style.RESET_ALL}")
         try:  # try:
             original_commits = api.list_commits(original_owner, repo)  # original_commits = api.list_commits(original_owner, repo)
         except Exception as exc:  # except Exception as exc:
@@ -380,7 +380,7 @@ def main():
         f"{BackgroundColors.GREEN}Start time: {BackgroundColors.CYAN}{start_time.strftime('%d/%m/%Y - %H:%M:%S')}\n{BackgroundColors.GREEN}Finish time: {BackgroundColors.CYAN}{finish_time.strftime('%d/%m/%Y - %H:%M:%S')}\n{BackgroundColors.GREEN}Execution time: {BackgroundColors.CYAN}{calculate_execution_time(start_time, finish_time)}{Style.RESET_ALL}"
     )  # Output the start and finish times
     print(
-        f"\n{BackgroundColors.BOLD}{BackgroundColors.GREEN}Program finished.{Style.RESET_ALL}"
+        f"{BackgroundColors.BOLD}{BackgroundColors.GREEN}Program finished.{Style.RESET_ALL}"
     )  # Output the end of the program message
     (
         atexit.register(play_sound) if RUN_FUNCTIONS["Play Sound"] else None
