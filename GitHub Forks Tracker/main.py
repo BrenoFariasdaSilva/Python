@@ -1,57 +1,44 @@
 """
 ================================================================================
-<PROJECT OR SCRIPT TITLE>
+GitHub Forks Tracker - main.py
 ================================================================================
 Author      : Breno Farias da Silva
-Created     : <YYYY-MM-DD>
+Created     : 2026-02-27
 Description :
-    <Provide a concise and complete overview of what this script does.>
-    <Mention its purpose, scope, and relevance to the larger project.>
-
-    Key features include:
-        - <Feature 1 — e.g., automatic data loading and preprocessing>
-        - <Feature 2 — e.g., model training and evaluation>
-        - <Feature 3 — e.g., visualization or report generation>
-        - <Feature 4 — e.g., logging or notification system>
-        - <Feature 5 — e.g., integration with other modules or datasets>
+    CLI entrypoint that loads configuration from `.env` and command-line
+    arguments, validates inputs and dispatches work to the engine module that
+    performs GitHub REST API calls and CSV export of divergent commits.
 
 Usage:
-    1. <Explain any configuration steps before running, such as editing variables or paths.>
-    2. <Describe how to execute the script — typically via Makefile or Python.>
-        $ make <target>   or   $ python <script_name>.py
-    3. <List what outputs are expected or where results are saved.>
+    $ python3 main.py --repo-url https://github.com/originalOwner/repo --token <token>
+    or
+    $ python3 main.py --original-owner originalOwner --repo repo --token <token>
 
 Outputs:
-    - <Output file or directory 1 — e.g., results.csv>
-    - <Output file or directory 2 — e.g., Feature_Analysis/plots/>
-    - <Output file or directory 3 — e.g., logs/output.txt>
-
-TODOs:
-    - <Add a task or improvement — e.g., implement CLI argument parsing.>
-    - <Add another improvement — e.g., extend support to Parquet files.>
-    - <Add optimization — e.g., parallelize evaluation loop.>
-    - <Add robustness — e.g., error handling or data validation.>
+    CSV files inside the `./Outputs/` directory for forks that contain
+    divergent commits.
 
 Dependencies:
-    - Python >= <version>
-    - <Library 1 — e.g., pandas>
-    - <Library 2 — e.g., numpy>
-    - <Library 3 — e.g., scikit-learn>
-    - <Library 4 — e.g., matplotlib, seaborn, tqdm, colorama>
+    - python-dotenv
+    - requests
 
 Assumptions & Notes:
-    - <List any key assumptions — e.g., last column is the target variable.>
-    - <Mention data format — e.g., CSV files only.>
-    - <Mention platform or OS-specific notes — e.g., sound disabled on Windows.>
-    - <Note on output structure or reusability.>
+    - CLI arguments override values from `.env`
+    - The `GITHUB_TOKEN` environment variable must be provided either via
+      `.env` or CLI to authenticate to GitHub's REST API.
 """
 
+
+import argparse  # For CLI parsing
 import atexit  # For playing a sound when the program finishes
 import datetime  # For getting the current date and time
 import os  # For running a command in the terminal
 import platform  # For getting the operating system name
 import sys  # For system-specific parameters and functions
 from colorama import Style  # For coloring the terminal
+from commits_diff import build_original_sha_set, process_single_fork   # For processing forks and computing divergent commits
+from dotenv import load_dotenv  # Load .env file when needed
+from github_api import GitHubAPI  # Core HTTP client for GitHub REST API
 from Logger import Logger  # For logging output to both terminal and file
 from pathlib import Path  # For handling file paths
 
@@ -69,6 +56,7 @@ class BackgroundColors:  # Colors for the terminal
 
 # Execution Constants:
 VERBOSE = False  # Set to True to output verbose messages
+OUTPUTS_DIR = "./Outputs/"  # The directory where the output files will be saved
 
 # Logger Setup:
 logger = Logger(f"./Logs/{Path(__file__).stem}.log", clean=True)  # Create a Logger instance
@@ -119,6 +107,103 @@ def verify_filepath_exists(filepath):
     )  # Output the verbose message
 
     return os.path.exists(filepath)  # Return True if the file or folder exists, False otherwise
+
+
+def create_env_from_example():
+    """
+    Create a `.env` file from `.env.example` when missing.
+
+    :param: None
+    :return: True if `.env` exists or was created successfully, False otherwise
+    """
+
+    example_path = Path(".env.example")  # Path to example file
+    target_path = Path(".env")  # Path to target .env
+    
+    if not verify_filepath_exists(example_path):  # Verify if example file exists
+        print(f"{BackgroundColors.CYAN}.env.example{BackgroundColors.GREEN} not found. Cannot create {BackgroundColors.CYAN}.env{Style.RESET_ALL}")  # Inform user
+        return False  # Signal failure
+
+    try:  # Attempt to copy contents
+        content = example_path.read_text(encoding="utf-8")  # Read example content
+        target_path.write_text(content, encoding="utf-8")  # Write .env file
+        print(f"{BackgroundColors.GREEN}Created {BackgroundColors.CYAN}.env{BackgroundColors.GREEN} from .env.example{Style.RESET_ALL}")  # Inform user
+        return True  # Success
+    except Exception as exc:  # On any error
+        print(f"{BackgroundColors.RED}Failed to create .env: {BackgroundColors.CYAN}{exc}{Style.RESET_ALL}")  # Inform user
+        return False  # Signal failure
+
+
+def parse_arguments():
+    """
+    Parse CLI arguments and return the parsed namespace.
+
+    :param: None
+    :return: argparse.Namespace with parsed CLI arguments
+    """
+
+    parser = argparse.ArgumentParser(description="Export divergent commits from forks")  # CLI parser
+    
+    parser.add_argument("--repo-url", help="Full GitHub repository URL (overrides owner+repo)", required=False)  # Repo URL
+    parser.add_argument("--original-owner", help="Original repository owner", required=False)  # Owner
+    parser.add_argument("--repo", help="Repository name", required=False)  # Repo name
+    parser.add_argument("--token", help="GitHub token", required=False)  # Token
+    parser.add_argument("--outputs", help="Outputs directory", default="./Outputs/", required=False)  # Outputs dir
+    
+    return parser.parse_args()  # Parse and return CLI args
+
+
+def parse_repo_url(repo_url):
+    """
+    Parse a GitHub repository URL into (owner, repo).
+
+    :param repo_url: Full repository URL
+    :return: tuple(owner, repo) on success, or None on failure
+    """
+
+    try:  # Normalize and split the URL
+        cleaned = repo_url.rstrip("/\n\r")  # Trim trailing slashes
+        parts = cleaned.split("/")  # Split by slash
+        owner = parts[-2]  # Owner is the penultimate part
+        name = parts[-1]  # Repo is the last part
+        
+        if not owner or not name:  # Validate parts
+            return None  # Invalid
+        
+        return (owner, name)  # Return parsed tuple
+    except Exception:  # Any error indicates parse failure
+        return None  # Signal failure
+
+
+def derive_configuration(args):
+    """
+    Combine environment variables and CLI arguments into effective configuration.
+
+    :param args: argparse.Namespace with CLI arguments
+    :return: tuple(token, original_owner, repo, outputs_dir) or (None, None, None, None) on parse error
+    """
+
+    env_token = os.getenv("GITHUB_TOKEN")  # Token from env
+    env_owner = os.getenv("ORIGINAL_OWNER")  # Owner from env
+    env_repo = os.getenv("REPO")  # Repo from env
+    env_repo_url = os.getenv("REPO_URL")  # Repo URL from env
+
+    token = args.token or env_token  # CLI overrides env for token
+    repo_url = args.repo_url or env_repo_url  # CLI overrides env for repo_url
+    original_owner = args.original_owner or env_owner  # CLI overrides env for owner
+    repo = args.repo or env_repo  # CLI overrides env for repo
+    outputs_dir = args.outputs  # Outputs directory
+
+    if repo_url:  # If a repo URL is provided
+        owner_repo = parse_repo_url(repo_url)  # Extract owner and repo from URL
+        
+        if not owner_repo:  # If parsing failed
+            print(f"{BackgroundColors.RED}Invalid REPO_URL: {BackgroundColors.GREEN}{repo_url}{Style.RESET_ALL}")  # Inform user
+            return (None, None, None, None)  # Signal parse error
+        
+        original_owner, repo = owner_repo  # Unpack parsed values
+
+    return (token, original_owner, repo, outputs_dir)  # Return effective configuration
 
 
 def to_seconds(obj):
@@ -233,14 +318,64 @@ def main():
     """
 
     print(
-        f"{BackgroundColors.CLEAR_TERMINAL}{BackgroundColors.BOLD}{BackgroundColors.GREEN}Welcome to the {BackgroundColors.CYAN}Main Template Python{BackgroundColors.GREEN} program!{Style.RESET_ALL}",
+        f"{BackgroundColors.CLEAR_TERMINAL}{BackgroundColors.BOLD}{BackgroundColors.GREEN}Welcome to the {BackgroundColors.CYAN}GitHub Forks Tracker{BackgroundColors.GREEN} Python Project!{Style.RESET_ALL}",
         end="\n\n",
     )  # Output the welcome message
-    start_time = datetime.datetime.now()  # Get the start time of the program
     
-    # Implement logic here
+    start_time = datetime.datetime.now()  # Get the start time of the program
+
+    dot_env_file = Path(".env")  # Path to .env file
+
+    if not verify_filepath_exists(dot_env_file):  # Verify if .env file exists
+        created = create_env_from_example()  # Attempt to create .env from .env.example
+        if not created:  # If creation failed
+            print(
+                f"{BackgroundColors.RED}Failed to create .env file. Please create it manually based on .env.example and run the program again.{Style.RESET_ALL}"
+            )  # Inform user of failure
+            return  # Exit
+
+    load_dotenv(dot_env_file)  # Load environment variables from .env file
+
+    args = parse_arguments()  # Parse CLI args
+
+    token, original_owner, repo, outputs_dir = derive_configuration(args)  # Derive effective configuration
+
+    if not token or not original_owner or not repo:  # Validate required inputs
+        print(
+            f"{BackgroundColors.RED}Missing required configuration. Provide GITHUB_TOKEN and ORIGINAL_OWNER+REPO or REPO_URL.{Style.RESET_ALL}"
+        )  # Show error message
+        return  # Exit
+
+    try:  # Execute main processing using modular API + diff utilities
+        api = GitHubAPI(token)  # Create API client
+
+        print(f"{BackgroundColors.GREEN}Listing forks for {BackgroundColors.CYAN}{original_owner}{BackgroundColors.GREEN}/{BackgroundColors.CYAN}{repo}{Style.RESET_ALL}")  # print(f"{BackgroundColors.GREEN}Listing forks for {BackgroundColors.CYAN}{original_owner}{BackgroundColors.GREEN}/{BackgroundColors.CYAN}{repo}{Style.RESET_ALL}")
+        try:  # try:
+            forks = api.list_forks(original_owner, repo)  # forks = api.list_forks(original_owner, repo)
+        except Exception as exc:  # except Exception as exc:
+            print(f"{BackgroundColors.RED}Failed to list forks: {BackgroundColors.YELLOW}{exc}{Style.RESET_ALL}")  # print(f"{BackgroundColors.RED}Failed to list forks: {BackgroundColors.YELLOW}{exc}{Style.RESET_ALL}")
+            return  # return
+
+        if not forks:  # if not forks:
+            print(f"{BackgroundColors.YELLOW}No forks found for {BackgroundColors.CYAN}{original_owner}{BackgroundColors.GREEN}/{BackgroundColors.CYAN}{repo}{Style.RESET_ALL}")  # print(f"{BackgroundColors.YELLOW}No forks found for {BackgroundColors.CYAN}{original_owner}{BackgroundColors.GREEN}/{BackgroundColors.CYAN}{repo}{Style.RESET_ALL}")
+            return  # return
+
+        print(f"{BackgroundColors.GREEN}Collecting commits from original repository...{Style.RESET_ALL}")  # print(f"{BackgroundColors.GREEN}Collecting commits from original repository...{Style.RESET_ALL}")
+        try:  # try:
+            original_commits = api.list_commits(original_owner, repo)  # original_commits = api.list_commits(original_owner, repo)
+        except Exception as exc:  # except Exception as exc:
+            print(f"{BackgroundColors.RED}Failed to fetch original commits: {BackgroundColors.YELLOW}{exc}{Style.RESET_ALL}")  # print(f"{BackgroundColors.RED}Failed to fetch original commits: {BackgroundColors.YELLOW}{exc}{Style.RESET_ALL}")
+            return  # return
+
+        original_shas = build_original_sha_set(original_commits)  # original_shas = build_original_sha_set(original_commits)
+
+        for fork in forks:  # for fork in forks:
+            process_single_fork(api, fork, original_shas, outputs_dir or OUTPUTS_DIR)  # process_single_fork(api, fork, original_shas, outputs_dir or OUTPUTS_DIR)
+    except Exception as exc:  # Catch and report unexpected errors
+        print(f"{BackgroundColors.RED}Unexpected error: {BackgroundColors.YELLOW}{exc}{Style.RESET_ALL}")  # Print error
 
     finish_time = datetime.datetime.now()  # Get the finish time of the program
+    
     print(
         f"{BackgroundColors.GREEN}Start time: {BackgroundColors.CYAN}{start_time.strftime('%d/%m/%Y - %H:%M:%S')}\n{BackgroundColors.GREEN}Finish time: {BackgroundColors.CYAN}{finish_time.strftime('%d/%m/%Y - %H:%M:%S')}\n{BackgroundColors.GREEN}Execution time: {BackgroundColors.CYAN}{calculate_execution_time(start_time, finish_time)}{Style.RESET_ALL}"
     )  # Output the start and finish times
