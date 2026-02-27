@@ -23,7 +23,7 @@ venv: $(VENV)/bin/activate
 
 $(VENV)/bin/activate:
 	$(PYTHON) -m venv $(VENV)
-	$(PIP) install --upgrade pip
+	$(PYTHON) -m pip install --upgrade pip
 	touch $(VENV)/bin/activate
 
 run:
