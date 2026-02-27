@@ -1,56 +1,39 @@
 """
 ================================================================================
-<PROJECT OR SCRIPT TITLE>
+GitHub Forks Tracker - github_api.py
 ================================================================================
 Author      : Breno Farias da Silva
-Created     : <YYYY-MM-DD>
+Created     : 2026-02-27
 Description :
-    <Provide a concise and complete overview of what this script does.>
-    <Mention its purpose, scope, and relevance to the larger project.>
-
-    Key features include:
-        - <Feature 1 — e.g., automatic data loading and preprocessing>
-        - <Feature 2 — e.g., model training and evaluation>
-        - <Feature 3 — e.g., visualization or report generation>
-        - <Feature 4 — e.g., logging or notification system>
-        - <Feature 5 — e.g., integration with other modules or datasets>
+    HTTP client for the GitHub REST API used by the GitHub Forks Tracker.
+    Provides robust pagination, retry/backoff and rate-limit handling.
 
 Usage:
-    1. <Explain any configuration steps before running, such as editing variables or paths.>
-    2. <Describe how to execute the script — typically via Makefile or Python.>
-        $ make <target>   or   $ python <script_name>.py
-    3. <List what outputs are expected or where results are saved.>
+    Import `GitHubAPI` and call `list_forks(owner, repo)` and
+    `list_commits(owner, repo)` to iterate repository data.
 
 Outputs:
-    - <Output file or directory 1 — e.g., results.csv>
-    - <Output file or directory 2 — e.g., Feature_Analysis/plots/>
-    - <Output file or directory 3 — e.g., logs/output.txt>
-
-TODOs:
-    - <Add a task or improvement — e.g., implement CLI argument parsing.>
-    - <Add another improvement — e.g., extend support to Parquet files.>
-    - <Add optimization — e.g., parallelize evaluation loop.>
-    - <Add robustness — e.g., error handling or data validation.>
+    None (library module).
 
 Dependencies:
-    - Python >= <version>
-    - <Library 1 — e.g., pandas>
-    - <Library 2 — e.g., numpy>
-    - <Library 3 — e.g., scikit-learn>
-    - <Library 4 — e.g., matplotlib, seaborn, tqdm, colorama>
+    - requests
+    - colorama
 
 Assumptions & Notes:
-    - <List any key assumptions — e.g., last column is the target variable.>
-    - <Mention data format — e.g., CSV files only.>
-    - <Mention platform or OS-specific notes — e.g., sound disabled on Windows.>
-    - <Note on output structure or reusability.>
+    - Uses `per_page=100` and parses the `Link` header for pagination.
+    - Handles 5xx retries and waits on rate-limit resets using
+      `X-RateLimit-Remaining` / `X-RateLimit-Reset` headers.
 """
+
 
 import atexit  # For playing a sound when the program finishes
 import datetime  # For getting the current date and time
 import os  # For running a command in the terminal
 import platform  # For getting the operating system name
+import requests  # Local import to avoid modifying top-level template
 import sys  # For system-specific parameters and functions
+import time  # For sleeping between retries
+import typing  # For type hints
 from colorama import Style  # For coloring the terminal
 from Logger import Logger  # For logging output to both terminal and file
 from pathlib import Path  # For handling file paths
@@ -89,6 +72,232 @@ RUN_FUNCTIONS = {
 }
 
 # Functions Definitions:
+
+
+class GitHubAPI:
+    """
+    Minimal GitHub REST API client with pagination and retry logic.
+
+    :param token: Personal access token for GitHub API authentication
+    :return: None
+    """
+
+    def __init__(self, token: str) -> None:
+        """
+        Initialize the GitHubAPI client with an optional token for authentication.
+        
+        :param token: Personal access token for GitHub API authentication
+        :return: None
+        """
+        
+        self.session = requests.Session()  # Create a requests session
+        
+        if token:  # If token provided
+            self.session.headers.update({"Authorization": f"Bearer {token}"})  # Set auth header
+        
+        self.session.headers.update({"Accept": "application/vnd.github.v3+json"})  # Use REST v3
+
+    def execute_single_request(self, method: str, url: str, params: typing.Optional[dict] = None) -> "requests.Response":
+        """
+        Execute a single HTTP request and return the response.
+
+        :param method: HTTP method
+        :param url: Full URL
+        :param params: Query parameters
+        :return: requests.Response
+        """
+
+        return self.session.request(method, url, params=params, timeout=20)  # Perform request
+
+    def is_rate_limited(self, resp: "requests.Response") -> bool:
+        """
+        Verify if response indicates a rate limit has been reached.
+
+        :param resp: Response object
+        :return: True if rate limited
+        """
+
+        remaining = resp.headers.get("X-RateLimit-Remaining")  # Remaining calls
+        reset = resp.headers.get("X-RateLimit-Reset")  # Reset epoch
+        
+        return resp.status_code == 403 and remaining == "0" and bool(reset)  # Rate limited verify
+
+    def compute_rate_limit_wait(self, resp: "requests.Response", fallback: float) -> int:
+        """
+        Compute seconds to wait until rate limit reset, fallback on error.
+
+        :param resp: Response object
+        :param fallback: Fallback seconds
+        :return: Seconds to wait
+        """
+
+        reset = resp.headers.get("X-RateLimit-Reset")  # Reset epoch
+        
+        if reset is None:  # Missing header
+            return int(fallback)  # Fallback to backoff
+        
+        try:  # Attempt to parse reset time
+            reset_int = int(reset)  # Convert reset to int
+        except Exception:  # Parse error
+            return int(fallback)  # Fallback to backoff on parse error
+        
+        return max(1, reset_int - int(time.time()))  # Compute wait seconds
+
+    def is_server_error(self, resp: "requests.Response") -> bool:
+        """
+        Verify if response is a server-side error (5xx).
+
+        :param resp: Response object
+        :return: True if server error
+        """
+
+        return resp.status_code >= 500  # Server error verify
+
+    def is_client_error(self, resp: "requests.Response") -> bool:
+        """
+        Verify if response is a client-side error (4xx).
+
+        :param resp: Response object
+        :return: True if client error
+        """
+
+        return resp.status_code >= 400  # Client error verify
+
+    def extract_link_header(self, resp: "requests.Response") -> typing.Optional[str]:
+        """
+        Extract the Link header from a response if present.
+
+        :param resp: Response object
+        :return: Link header string or None
+        """
+
+        return resp.headers.get("Link")  # Return Link header
+
+    def parse_next_url(self, link_header: str) -> typing.Optional[str]:
+        """
+        Parse a Link header and return the URL for rel="next" if available.
+
+        :param link_header: The Link header string
+        :return: Next page URL or None
+        """
+
+        parts = link_header.split(",")  # Split link parts
+        
+        for part in parts:  # Iterate parts
+            if 'rel="next"' in part:  # Next link found
+                return part.split(";")[0].strip()[1:-1]  # Extract and return URL
+        
+        return None  # No next link
+
+    def yield_items_from_data(self, data: typing.Any) -> typing.Iterator[dict]:
+        """
+        Yield items from parsed JSON data (list or single object).
+
+        :param data: Parsed JSON payload
+        :return: Iterator of items
+        """
+
+        if isinstance(data, list):  # If list of items
+            for item in data:  # Iterate list
+                yield item  # Yield each
+            return  # End generator
+        
+        yield data  # Yield single object
+
+    def request(self, method: str, url: str, params: typing.Optional[dict] = None) -> "requests.Response":
+        """
+        Perform HTTP request with retries, backoff and rate-limit handling.
+
+        :param method: HTTP method (GET, POST, etc.)
+        :param url: Full URL to request
+        :param params: Query parameters
+        :return: requests.Response on success
+        """
+
+        backoff = 1.0  # Initial backoff seconds
+        for attempt in range(8):  # Retry loop
+            try:  # Attempt request
+                resp = self.execute_single_request(method, url, params=params)  # Perform single request
+            except Exception:  # Network error (requests.RequestException)
+                time.sleep(backoff)  # Sleep before retry
+                backoff *= 2  # Exponential backoff
+                continue  # Retry
+
+            if self.is_rate_limited(resp):  # Rate limited
+                wait_seconds = self.compute_rate_limit_wait(resp, backoff)  # Compute wait
+                time.sleep(wait_seconds + 1)  # Sleep until reset
+                continue  # Retry after wait
+
+            if self.is_server_error(resp):  # Server error
+                time.sleep(backoff)  # Sleep then retry
+                backoff *= 2  # Increase backoff
+                continue  # Retry
+
+            if self.is_client_error(resp):  # Client error
+                raise RuntimeError(f"HTTP {resp.status_code} for {url}")  # Raise for 4xx
+
+            return resp  # Return successful response
+
+        raise RuntimeError("Max retries exceeded for URL: " + url)  # Give up after retries
+
+    def get_all_pages(self, url: typing.Optional[str], params: typing.Optional[dict] = None) -> typing.Iterator[dict]:
+        """
+        Yield items from paginated GitHub endpoints using `per_page=100` and Link headers.
+
+        :param url: Endpoint URL
+        :param params: Query parameters
+        :yield: Parsed JSON items one by one
+        """
+
+        params = dict(params or {})  # Copy params
+        params["per_page"] = 100  # Force 100 per page
+
+        while url:  # Walk pages
+            resp = self.request("GET", url, params=params)  # Perform request with retries
+            if resp.status_code == 404:  # Not found
+                return  # Stop iteration on 404
+
+            data = resp.json()  # Parse JSON body
+            for item in self.yield_items_from_data(data):  # Yield parsed items
+                yield item  # Yield each item
+
+            link = self.extract_link_header(resp)  # Extract Link header
+            next_url = self.parse_next_url(link) if link else None  # Determine next page
+            url = next_url  # Advance to next page
+
+    def list_forks(self, owner: str, repo: str) -> typing.List[dict]:
+        """
+        List forks for a repository using GET /repos/{owner}/{repo}/forks.
+
+        :param owner: Original repository owner
+        :param repo: Repository name
+        :return: List of fork repository dicts
+        """
+
+        url = f"https://api.github.com/repos/{owner}/{repo}/forks"  # Forks endpoint
+        items: typing.List[dict] = []  # Collect forks
+        
+        for item in self.get_all_pages(url):  # Iterate pages
+            items.append(item)  # Append fork
+        
+        return items  # Return forks
+
+    def list_commits(self, owner: str, repo: str) -> typing.List[dict]:
+        """
+        Retrieve all commits for a repository using GET /repos/{owner}/{repo}/commits.
+
+        :param owner: Repository owner
+        :param repo: Repository name
+        :return: List of commits (newest first as returned by GitHub)
+        """
+
+        url = f"https://api.github.com/repos/{owner}/{repo}/commits"  # Commits endpoint
+        commits: typing.List[dict] = []  # Collection
+        
+        for item in self.get_all_pages(url):  # Iterate items
+            commits.append(item)  # Append commit
+        
+        return commits  # Return list
 
 
 def verbose_output(true_string="", false_string=""):
@@ -233,14 +442,16 @@ def main():
     """
 
     print(
-        f"{BackgroundColors.CLEAR_TERMINAL}{BackgroundColors.BOLD}{BackgroundColors.GREEN}Welcome to the {BackgroundColors.CYAN}Main Template Python{BackgroundColors.GREEN} program!{Style.RESET_ALL}",
+        f"{BackgroundColors.CLEAR_TERMINAL}{BackgroundColors.BOLD}{BackgroundColors.GREEN}Welcome to the {BackgroundColors.CYAN}GitHub Forks Tracker - github_api.py{BackgroundColors.GREEN}!{Style.RESET_ALL}",
         end="\n\n",
     )  # Output the welcome message
+
     start_time = datetime.datetime.now()  # Get the start time of the program
     
     # Implement logic here
 
     finish_time = datetime.datetime.now()  # Get the finish time of the program
+    
     print(
         f"{BackgroundColors.GREEN}Start time: {BackgroundColors.CYAN}{start_time.strftime('%d/%m/%Y - %H:%M:%S')}\n{BackgroundColors.GREEN}Finish time: {BackgroundColors.CYAN}{finish_time.strftime('%d/%m/%Y - %H:%M:%S')}\n{BackgroundColors.GREEN}Execution time: {BackgroundColors.CYAN}{calculate_execution_time(start_time, finish_time)}{Style.RESET_ALL}"
     )  # Output the start and finish times
