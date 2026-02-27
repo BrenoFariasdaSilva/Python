@@ -299,6 +299,17 @@ class GitHubAPI:
         
         return commits  # Return list
 
+    def build_repo_url(self, owner: str, repo: str) -> str:
+        """
+        Build the canonical GitHub repository URL for a given owner and repo.
+
+        :param owner: Repository owner/login
+        :param repo: Repository name
+        :return: Full https:// URL for the repository
+        """
+
+        return f"https://github.com/{owner}/{repo}"
+
 
 def verbose_output(true_string="", false_string=""):
     """
