@@ -192,7 +192,13 @@ def build_commit_csv_row(
     return [commit_number, sha, date, owner_name, message, commit_url]  # CSV row
 
 
-def export_commits_csv(api: GitHubAPI, fork_name: str, fork_owner: str, commits: typing.List[dict], outputs_dir: str) -> str:
+def export_commits_csv(
+    api: GitHubAPI,
+    fork_name: str,
+    fork_owner: str,
+    commits: typing.List[dict],
+    outputs_dir: str,
+) -> str:
     """
     Export commits to CSV and return the output path.
 
@@ -208,10 +214,7 @@ def export_commits_csv(api: GitHubAPI, fork_name: str, fork_owner: str, commits:
 
     Path(outputs_dir).mkdir(parents=True, exist_ok=True)  # Ensure outputs dir exists
     count = len(commits)  # Number of divergent commits
-    fork_url = f"https://github.com/{fork_owner}/{fork_name}"
-    sanitized = fork_url.replace('://', '__')
-    sanitized = re.sub(r"[^A-Za-z0-9._-]", "-", sanitized)  # Sanitize for filename
-    safe_name = f"{sanitized}-{count}.csv"  # File name using sanitized URL
+    safe_name = f"{fork_name}-{fork_owner}-{count}.csv"  # File name using fork name and owner
     output_path = os.path.join(outputs_dir, safe_name)  # Full path
 
     header = [
