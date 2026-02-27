@@ -31,6 +31,7 @@ import csv  # Local import for CSV writing
 import datetime  # For getting the current date and time
 import os  # For running a command in the terminal
 import platform  # For getting the operating system name
+import re  # For sanitizing filenames
 import sys  # For system-specific parameters and functions
 import typing  # For type hints
 from colorama import Style  # For coloring the terminal
@@ -138,26 +139,60 @@ def find_divergent_commits(original_shas: "set[str]", fork_commits: "list") -> "
     return divergent  # Return filtered list
 
 
-def build_commit_csv_row(commit: dict, commit_number: int) -> "list[typing.Any]":
+def build_commit_url(
+    api: typing.Optional["GitHubAPI"], fork_owner: str, fork_name: str, sha: str
+) -> str:
+    """
+    Build a commit URL using the API helper method.
+
+    :param api: Optional GitHubAPI client instance
+    :param fork_owner: Owner login of the fork
+    :param fork_name: Repository name of the fork
+    :param sha: Commit SHA hash
+    :return: URL string to the commit on GitHub, or empty string on failure
+    """
+
+    commit_url: str = ""  # Initialize URL
+    if api and fork_owner and fork_name and sha:  # Ensure all required info exists
+        try:  # Attempt to build URL using API helper
+            base: str = api.build_repo_url(fork_owner, fork_name)  # Build base URL
+            commit_url = f"{base}/commit/{sha}"  # Construct full commit URL
+        except Exception:  # Silently ignore failures
+            commit_url = ""  # Return empty string if construction fails
+
+    return commit_url  # Return commit URL
+
+
+def build_commit_csv_row(
+    commit: dict,
+    commit_number: int,
+    api: typing.Optional["GitHubAPI"] = None,
+    fork_owner: typing.Optional[str] = None,
+    fork_name: typing.Optional[str] = None,
+) -> typing.List[typing.Any]:
     """
     Build a CSV row from a commit dictionary.
 
     :param commit: Commit dictionary returned from GitHub API
     :param commit_number: Sequential commit number (oldest->newest)
+    :param api: Optional GitHubAPI client for URL construction
+    :param fork_owner: Optional fork owner login
+    :param fork_name: Optional fork repository name
     :return: List representing a CSV row
     """
 
-    commit_obj = commit.get("commit", {})  # Commit object
-    author_obj = commit_obj.get("author") or {}  # Author object
-    sha = commit.get("sha", "")  # Commit SHA
-    date = author_obj.get("date", "")  # ISO date
-    owner_name = author_obj.get("name") or "Unknown"  # Owner fallback
-    message = commit_obj.get("message", "")  # Full message
-    
-    return [commit_number, sha, date, owner_name, message]  # Return formatted row
+    commit_obj: dict = commit.get("commit", {})  # Commit details
+    author_obj: dict = commit_obj.get("author") or {}  # Author info
+    sha: str = commit.get("sha", "")  # Commit SHA
+    date: str = author_obj.get("date", "")  # Commit ISO date
+    owner_name: str = author_obj.get("name") or "Unknown"  # Commit author name
+    message: str = commit_obj.get("message", "")  # Commit message
+    commit_url: str = build_commit_url(api, fork_owner or "", fork_name or "", sha)  # Build URL
+
+    return [commit_number, sha, date, owner_name, message, commit_url]  # CSV row
 
 
-def export_commits_csv(fork_name: str, fork_owner: str, commits: "list", outputs_dir: str) -> str:
+def export_commits_csv(api: GitHubAPI, fork_name: str, fork_owner: str, commits: typing.List[dict], outputs_dir: str) -> str:
     """
     Export commits to CSV and return the output path.
 
@@ -173,23 +208,33 @@ def export_commits_csv(fork_name: str, fork_owner: str, commits: "list", outputs
 
     Path(outputs_dir).mkdir(parents=True, exist_ok=True)  # Ensure outputs dir exists
     count = len(commits)  # Number of divergent commits
-    safe_name = f"{fork_name}-{fork_owner}-{count}.csv"  # File name
+    fork_url = f"https://github.com/{fork_owner}/{fork_name}"
+    sanitized = fork_url.replace('://', '__')
+    sanitized = re.sub(r"[^A-Za-z0-9._-]", "-", sanitized)  # Sanitize for filename
+    safe_name = f"{sanitized}-{count}.csv"  # File name using sanitized URL
     output_path = os.path.join(outputs_dir, safe_name)  # Full path
 
-    header = ["Commit Number", "Commit Hash", "Commit Date", "Commit Owner", "Commit Message"]  # CSV header
+    header = [
+        "Commit Number",
+        "Commit Hash",
+        "Commit Date",
+        "Commit Owner",
+        "Commit Message",
+        "Commit URL",
+    ]  # CSV header with URL
 
     with open(output_path, "w", newline="", encoding="utf-8") as fh:  # Open file
         writer = csv.writer(fh, quoting=csv.QUOTE_MINIMAL)  # CSV writer
         writer.writerow(header)  # Write header
-        
+
         for idx, commit in enumerate(commits, start=1):  # Iterate commits
-            row = build_commit_csv_row(commit, idx)  # Build row
+            row = build_commit_csv_row(commit, idx, api=api, fork_owner=fork_owner, fork_name=fork_name)  # Build row with URL
             writer.writerow(row)  # Write CSV row
 
     return output_path  # Return path
 
 
-def process_single_fork(api: "GitHubAPI", fork: dict, original_shas: "set[str]", outputs_dir: str) -> None:
+def process_single_fork(api: GitHubAPI, fork: dict, original_shas: typing.Set[str], outputs_dir: str) -> None:
     """
     Process a single fork: fetch commits, compute divergence and export CSV.
 
@@ -220,7 +265,7 @@ def process_single_fork(api: "GitHubAPI", fork: dict, original_shas: "set[str]",
         print(f"{BackgroundColors.YELLOW}No divergent commits for {fork_owner}/{fork_name}{Style.RESET_ALL}")  # Log
         return  # Nothing to export
 
-    outpath = export_commits_csv(fork_name, fork_owner, divergent, outputs_dir)  # Write CSV
+    outpath = export_commits_csv(api, fork_name, fork_owner, divergent, outputs_dir)  # Write CSV
     print(f"{BackgroundColors.GREEN}Exported {len(divergent)} divergent commits to {outpath}{Style.RESET_ALL}")  # Log
 
 
