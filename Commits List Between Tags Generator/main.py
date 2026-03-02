@@ -76,7 +76,7 @@ def verify_git_installed():
         return False  # Git is not installed
 
 
-def _tag_sort_key(t):
+def tag_sort_key(t):
     """
     Key function for sorting tags in a human-friendly way.
 
@@ -143,7 +143,7 @@ def get_repository_tags(repo_url):
     except Exception as e:  # If an error occurs during the process
         print(f"{BackgroundColors.RED}Failed to retrieve tags: {BackgroundColors.CYAN}{e}{Style.RESET_ALL}")
 
-    tags_list = sorted(tags_list, key=_tag_sort_key)  # Sort tags from lowest → highest
+    tags_list = sorted(tags_list, key=tag_sort_key)  # Sort tags from lowest → highest
 
     return tags_list  # Return the list of tag names
 
