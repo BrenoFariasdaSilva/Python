@@ -10,6 +10,7 @@ from pydriller import Repository  # PyDriller is a Python framework that helps d
 # Execution Constant:
 REPO_URL = "https://github.com/BrenoFariasdaSilva/DDoS-Detector"  # The URL of the GitHub repository
 SPLIT_ALL = True  # If both tags are empty and SPLIT_ALL == True, split by all tags instead of single run
+SIMPLIFIED_CSV = True  # Whether to generate simplified CSV files with fewer columns by default
 
 # Filepaths Constants:
 START_PATH = os.getcwd()  # Get the current working directory
@@ -255,6 +256,23 @@ def write_commits_to_csv(commits_list, output_csv):
             )
 
 
+def write_simplified_csv(commits_list, output_csv) -> None:
+    """
+    Write a simplified CSV containing only commit number, hash and message.
+
+    :param commits_list: List of tuples with commit details.
+    :param output_csv: The output CSV file path for the simplified CSV.
+    :return: None
+    """
+
+    simplified_header = ["Commit Number", "Commit Hash", "Commit Message"]  # Define simplified CSV header columns
+    with open(output_csv, mode="w", newline="", encoding="utf-8") as csv_file:  # Open the simplified CSV file for writing
+        writer = csv.DictWriter(csv_file, fieldnames=simplified_header)  # Create a CSV writer for simplified CSV
+        writer.writeheader()  # Write the simplified CSV header to the file
+        for commit in commits_list:  # Iterate over the commits list to populate simplified CSV
+            writer.writerow({"Commit Number": commit[0], "Commit Hash": commit[1], "Commit Message": commit[3]})  # Write simplified row for each commit
+
+
 def process_all_splits(repo_url, repo_name):
     """
     Handles the SPLIT_ALL feature:
@@ -303,6 +321,10 @@ def process_all_splits(repo_url, repo_name):
 
         output_csv = f"{RELATIVE_OUTPUT_DIRECTORY_PATH}{index:0{width}d}.{repo_name}-{label_from}_to_{label_to}-commits_list.csv"  # The output CSV file path for the segment
         write_commits_to_csv(commits_tuple_list, output_csv)  # Generate the CSV file for the segment
+        
+        if SIMPLIFIED_CSV:  # Verify if simplified CSV generation is enabled
+            simplified_output_csv = output_csv.replace("-commits_list.csv", "-commits_list-simplified.csv")  # Build simplified CSV filename from the full CSV filename
+            write_simplified_csv(commits_tuple_list, simplified_output_csv)  # Generate the simplified CSV for the segment
 
     print(f"\n{BackgroundColors.GREEN}All SPLIT_ALL CSV files generated successfully.{Style.RESET_ALL}")
 
@@ -343,6 +365,10 @@ def main():
     create_directory(FULL_OUTPUT_DIRECTORY_PATH, RELATIVE_OUTPUT_DIRECTORY_PATH)  # Create the output directory
     output_csv = f"{RELATIVE_OUTPUT_DIRECTORY_PATH}{repo_name}-{from_tag}_to_{to_tag}-commits_list.csv"  # The output CSV file path
     write_commits_to_csv(commits_tuple_list, output_csv)  # Generate the CSV file
+    
+    if SIMPLIFIED_CSV:  # Verify if simplified CSV generation is enabled
+        simplified_output_csv = output_csv.replace("-commits_list.csv", "-commits_list-simplified.csv")  # Build simplified CSV filename from the full CSV filename
+        write_simplified_csv(commits_tuple_list, simplified_output_csv)  # Generate the simplified CSV file
 
     print(f"\n{BackgroundColors.CYAN}Program finished.{Style.RESET_ALL}")
 
