@@ -179,6 +179,24 @@ def get_commits_information(repo_url, from_tag=None, to_tag=None):
     return commits_list  # Return the list of commit tuples
 
 
+def generate_tags_txt(repo_url, output_dir, repo_name):
+    """
+    Generate a TXT file with repository tags from oldest to newest.
+
+    :param repo_url: URL of the Git repository.
+    :param output_dir: Full path to the output directory where the TXT will be saved.
+    :param repo_name: Repository name used to name the output file.
+    :return: None
+    """
+
+    tags = get_repository_tags(repo_url)  # Retrieve all tags from the repository
+    create_directory(output_dir, RELATIVE_OUTPUT_DIRECTORY_PATH)  # Ensure output directory exists before writing
+    output_path = os.path.join(output_dir, f"{repo_name}-tags_list.txt")  # Build the full output TXT file path
+    with open(output_path, mode="w", encoding="utf-8") as txt_file:  # Open the TXT file for writing in UTF-8
+        for tag in tags:  # Iterate over sorted tags oldest → newest
+            txt_file.write(f"{tag}\n")  # Write each tag on its own line in the TXT file
+
+
 def create_directory(full_directory_name, relative_directory_name):
     """
     Creates a directory.
@@ -307,6 +325,8 @@ def main():
 
     from_tag = ""  # The starting tag. if set to None or "", it will start from the beginning
     to_tag = ""  # The ending tag. if set to None or "", it will go until the latest commit
+
+    generate_tags_txt(repo_url, FULL_OUTPUT_DIRECTORY_PATH, repo_name)  # Generate tags TXT regardless of tag filters
 
     if (
         (from_tag in ("", None)) and (to_tag in ("", None)) and SPLIT_ALL
