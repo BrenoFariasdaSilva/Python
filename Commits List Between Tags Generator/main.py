@@ -149,6 +149,48 @@ def get_repository_tags(repo_url):
     return tags_list  # Return the list of tag names
 
 
+def get_repository_tags_with_hashes(repo_url):
+    """
+    Retrieve tag names and commit hashes from a remote Git repository.
+
+    :param repo_url: URL of the Git repository
+    :return: list of tuples with (tag_name, commit_hash)
+    """
+
+    if not verify_git_installed():  # Verify if git is installed on the system
+        print(f"{BackgroundColors.RED}Git is not installed on this system. Please install Git to retrieve repository tags.{Style.RESET_ALL}")  # Notify that git is missing
+        return []  # Return empty list if git is not installed
+
+    tags_map = {}  # Map to store tag -> hash mappings
+    try:
+        proc = subprocess.run(["git", "ls-remote", "--tags", repo_url], capture_output=True, text=True, check=False)  # Run git ls-remote to fetch tags and hashes
+        if proc.returncode != 0:  # Verify if git command succeeded
+            raise RuntimeError(proc.stderr.strip() or f"git exited with code {proc.returncode}")  # Raise error with git stderr
+        lines = proc.stdout.splitlines()  # Split stdout into lines
+        for line in lines:  # Iterate over each output line
+            if not line.strip():  # Verify line is not empty
+                continue  # Skip empty lines
+            parts = line.split()  # Split the line into hash and ref
+            if len(parts) < 2:  # Verify there are at least two parts
+                continue  # Skip malformed lines
+            h = parts[0]  # Capture the object hash from the line
+            ref = parts[1]  # Capture the ref part from the line
+            if ref.startswith("refs/tags/"):  # Verify ref corresponds to a tag
+                tag_part = ref[len("refs/tags/"):]  # Extract the tag name from the ref
+                if tag_part.endswith("^{}") :  # Verify the ref is the peeled object that contains the commit hash
+                    tag_name = tag_part[:-3]  # Remove the ^{} suffix to obtain the tag name
+                    tags_map[tag_name] = h  # Store peeled hash for the tag which is the commit hash
+                else:
+                    if tag_part not in tags_map:  # Verify we don't overwrite an already peeled hash
+                        tags_map[tag_part] = h  # Store the hash for the tag
+    except Exception as e:
+        print(f"{BackgroundColors.RED}Failed to retrieve tags with hashes: {BackgroundColors.CYAN}{e}{Style.RESET_ALL}")  # Print error when retrieval fails
+
+    sorted_tags = sorted(tags_map.items(), key=lambda x: tag_sort_key(x[0]))  # Sort the tag-hash pairs using tag_sort_key on tag name
+
+    return sorted_tags  # Return the sorted list of (tag, hash) tuples
+
+
 def get_commits_information(repo_url, from_tag=None, to_tag=None):
     """
     Generates a CSV file with commit dates and messages between specific tags in a GitHub repository.
@@ -196,6 +238,12 @@ def generate_tags_txt(repo_url, output_dir, repo_name):
     with open(output_path, mode="w", encoding="utf-8") as txt_file:  # Open the TXT file for writing in UTF-8
         for tag in tags:  # Iterate over sorted tags oldest → newest
             txt_file.write(f"{tag}\n")  # Write each tag on its own line in the TXT file
+
+    tag_hashes = get_repository_tags_with_hashes(repo_url)  # Retrieve tags with their commit hashes
+    output_hash_path = os.path.join(output_dir, f"{repo_name}-tags_with_hashes.txt")  # Build output TXT path for tag-hash pairs
+    with open(output_hash_path, mode="w", encoding="utf-8") as hash_file:  # Open the tag-hash TXT file for writing in UTF-8
+        for tag, h in tag_hashes:  # Iterate over tag-hash pairs
+            hash_file.write(f"{tag} {h}\n")  # Write tag, space, and commit hash per line
 
 
 def create_directory(full_directory_name, relative_directory_name):
