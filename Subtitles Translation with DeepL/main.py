@@ -63,7 +63,6 @@ from dotenv import load_dotenv  # For loading environment variables from .env fi
 from Logger import Logger  # For logging output to both terminal and file
 from pathlib import Path  # For handling file paths
 from shutil import copyfile  # For copying files
-from tqdm import tqdm  # For progress bars
 
 
 # Macros:
@@ -291,58 +290,59 @@ def translate_text_block(text_block, translator):
 
 def translate_srt_lines(srt_file, lines):
     """
-    Translates lines from an SRT file using DeepL API.
-    Timing and index lines remain unchanged.
+    Translates lines from an SRT file using DeepL API, keeping timing and index lines unchanged.
 
-    :param srt_file: Path to the SRT file (for logging purposes)
-    :param lines: List of SRT lines
-    :return: List of translated lines
+    :param srt_file: Path to the SRT file (for logging purposes).
+    :param lines: List of SRT lines.
+    :return: List of translated lines.
     """
 
     verbose_output(
         f"{BackgroundColors.GREEN}Translating SRT lines from file: {BackgroundColors.CYAN}{srt_file}{Style.RESET_ALL}"
-    )  # Output the verbose message
+    )  # Output verbose message for translating SRT lines
 
-    translator = deepl.DeepLClient(auth_key=DEEPL_API_KEY)  # Create a DeepL client
-    translated_lines = []  # List to store translated lines
-    buffer = []  # Buffer to store text lines for translation
+    translator = deepl.DeepLClient(auth_key=DEEPL_API_KEY)  # Create a DeepL client with the loaded API key
+    translated_lines = []  # Initialize empty list for storing translated lines
+    buffer = []  # Initialize empty buffer for batching subtitle text lines
 
-    with tqdm(
-        total=len(lines),
-        desc=f"{BackgroundColors.GREEN}Processing: {BackgroundColors.CYAN}{getattr(srt_file, 'name', str(srt_file))}{Style.RESET_ALL}",
-        unit="line",
-        ncols=100,
-        leave=False,
-        bar_format=f"{BackgroundColors.CYAN}{{l_bar}}{{bar}}{BackgroundColors.GREEN}{{r_bar}}{Style.RESET_ALL}",
-    ) as pbar:
-        current_line = 0
-        for line in lines:
-            stripped = line.strip()
-            if (
-                stripped == "" or stripped.replace(":", "").replace(",", "").isdigit() or "-->" in line
-            ):
-                if buffer:
-                    translated = translate_text_block("\n".join(buffer), translator)
-                    if translated is None:
-                        translated = buffer
-                    translated_lines.extend(translated)
-                    buffer = []
-                translated_lines.append(line.rstrip("\n"))
-            else:
-                buffer.append(stripped)
-            current_line += 1
-            pbar.set_postfix({"progress": f"{current_line}/{len(lines)}"})
-            pbar.update(1)
-        if buffer:
-            translated = translate_text_block("\n".join(buffer), translator)
-            if translated is None:
-                translated = buffer
-            translated_lines.extend(translated)
-            # Update for remaining lines
-            current_line += len(buffer)
-            pbar.set_postfix({"progress": f"{current_line}/{len(lines)}"})
-            pbar.update(len(buffer))
-    return translated_lines
+    total_lines = len(lines)  # Store total line count for progress percentage calculation
+    current_line = 0  # Initialize line counter for progress tracking
+    filename = getattr(srt_file, "name", str(srt_file))  # Extract filename string for progress display
+    real_stderr = sys.__stderr__ if sys.__stderr__ is not None else open(os.devnull, "w")  # Resolve original stderr to a non-None stream for in-place progress output
+
+    for line in lines:  # Iterate through each line in the SRT file
+        stripped = line.strip()  # Remove leading and trailing whitespace from the current line
+
+        if (
+            stripped == "" or stripped.replace(":", "").replace(",", "").isdigit() or "-->" in line
+        ):  # Verify if the line is empty, a sequence index, or a timing marker
+            if buffer:  # Verify if the translation buffer contains pending text lines
+                translated = translate_text_block("\n".join(buffer), translator)  # Translate all buffered text lines as one block
+                if translated is None:  # Verify if translation returned None instead of a result
+                    translated = buffer  # Fall back to the original buffer lines on failed translation
+                translated_lines.extend(translated)  # Append translated lines to the result list
+                buffer = []  # Reset buffer after processing the current block
+            translated_lines.append(line.rstrip("\n"))  # Append the timing or index line to result unchanged
+        else:  # Handle regular subtitle text lines
+            buffer.append(stripped)  # Append the stripped text line to the translation buffer
+
+        current_line += 1  # Increment the processed line counter
+        percent = int(current_line / total_lines * 100) if total_lines > 0 else 0  # Calculate progress as an integer percentage
+        filled = percent // 10  # Calculate the number of filled segments in the progress bar
+        bar = "#" * filled + "-" * (10 - filled)  # Build the visual progress bar string with filled and empty segments
+        real_stderr.write(f"\r{BackgroundColors.GREEN}Processing: {BackgroundColors.CYAN}{filename}{BackgroundColors.GREEN} [{bar}] {percent}%{Style.RESET_ALL}   ")  # Overwrite current terminal line with updated progress
+        real_stderr.flush()  # Flush original stderr to force immediate display of progress
+
+    if buffer:  # Verify if the buffer still contains unprocessed text lines after the loop
+        translated = translate_text_block("\n".join(buffer), translator)  # Translate the remaining buffered text lines
+        if translated is None:  # Verify if translation returned None for the remaining block
+            translated = buffer  # Fall back to the original buffer lines on failed translation
+        translated_lines.extend(translated)  # Append the remaining translated lines to the result list
+
+    real_stderr.write("\n")  # Advance the terminal cursor to a new line after progress finishes
+    real_stderr.flush()  # Flush original stderr to finalize the progress output
+
+    return translated_lines  # Return the complete list of translated lines
 
 
 def save_srt(lines, output_file):
@@ -443,29 +443,20 @@ def main():
         print(f"No .srt files found in directory: {INPUT_DIR}")  # Output message
         return  # Exit the program
 
-    with tqdm(
-        srt_files,
-        desc=f"{BackgroundColors.GREEN}Translating {BackgroundColors.CYAN}SRT{BackgroundColors.GREEN} files",
-        unit="file",
-    ) as progress_bar:  # Progress bar for SRT files
-        for srt_file in progress_bar:  # Iterate through each SRT file
-            progress_bar.set_description(
-                f"{BackgroundColors.GREEN}Processing: {BackgroundColors.CYAN}{srt_file.name}{BackgroundColors.GREEN}"
-            )
+    for srt_file in srt_files:  # Iterate through each SRT file in the input directory
+        srt_lines = read_srt(srt_file)  # Read SRT file into a list of lines
 
-            srt_lines = read_srt(srt_file)  # Read SRT
+        if DESCRIPTIVE_SUBTITLES_REMOVAL:  # Verify if descriptive subtitle removal is enabled
+            srt_lines = remove_descriptive_subtitles(srt_file)  # Clean SRT lines by removing descriptive text
 
-            if DESCRIPTIVE_SUBTITLES_REMOVAL:  # Remove descriptive subtitles if enabled
-                srt_lines = remove_descriptive_subtitles(srt_file)  # Clean SRT lines
+        translated_lines = translate_srt_lines(srt_file, srt_lines)  # Translate SRT lines using DeepL API
 
-            translated_lines = translate_srt_lines(srt_file, srt_lines)  # Translate
+        relative_path = srt_file.relative_to(INPUT_DIR).parent  # Extract relative path from the input directory
+        output_subdir = OUTPUT_DIR / relative_path  # Build the output subdirectory path
+        output_subdir.mkdir(parents=True, exist_ok=True)  # Ensure the output subdirectory exists
 
-            relative_path = srt_file.relative_to(INPUT_DIR).parent  # Get relative path
-            output_subdir = OUTPUT_DIR / relative_path  # Create output subdirectory path
-            output_subdir.mkdir(parents=True, exist_ok=True)  # Ensure output subdir exists
-
-            output_file = output_subdir / f"{srt_file.stem}_ptBR.srt"  # Build output file path
-            save_srt(translated_lines, output_file)  # Save translated SRT
+        output_file = output_subdir / f"{srt_file.stem}_ptBR.srt"  # Build the output file path with ptBR suffix
+        save_srt(translated_lines, output_file)  # Save the translated SRT to the output file
 
     finish_time = datetime.datetime.now()  # Get the finish time of the program
     print(
