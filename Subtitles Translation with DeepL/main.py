@@ -437,7 +437,7 @@ def main():
     if not os.path.exists(OUTPUT_DIR):  # If the output directory does not exist
         os.makedirs(OUTPUT_DIR)  # Create the output directory
 
-    srt_files = [f for f in Path(INPUT_DIR).glob("*.srt") if f.is_file()]  # List of SRT file paths
+    srt_files = [f for f in Path(INPUT_DIR).rglob("*.srt") if f.is_file()]  # List of SRT file paths (includes subdirectories)
 
     if not srt_files:  # If no SRT files were found
         print(f"No .srt files found in directory: {INPUT_DIR}")  # Output message
