@@ -279,6 +279,14 @@ def parse_dir_name(dir_name):
         resolution = match.group("res")  # Capture resolution token (e.g., '1080p')
         return series, season, resolution  # Return parsed tuple for classic pattern
 
+    release_match = re.match(r"(?P<series>[A-Za-z0-9\._]+?)\.S(?P<season>\d{2})\.", dir_name, re.IGNORECASE)  # Attempt release-style match for series.Sxx.extra-tokens with resolution anywhere in name
+    if release_match:  # If release-style pattern with extra tokens between season and resolution matched
+        series = release_match.group("series").replace(".", " ")  # Convert dotted series token to readable series name
+        season = int(release_match.group("season"))  # Convert captured season string to integer
+        res_search = re.search(r"\b(\d{3,4}p|4k)\b", dir_name, re.IGNORECASE)  # Search for resolution token anywhere in the full directory name
+        resolution = res_search.group(0) if res_search else None  # Preserve matched resolution casing or use None when absent
+        return series, season, resolution  # Return parsed tuple for release-style pattern
+
     name_only = os.path.basename(dir_name)  # Extract the final path component or the name itself
     season_match = re.match(r"^Season\s*(?P<num>\d{1,2})", name_only, re.IGNORECASE)  # Match names starting with 'Season <number>'
     if not season_match:  # If no season-style match found
