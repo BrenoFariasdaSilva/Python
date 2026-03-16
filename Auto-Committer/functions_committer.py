@@ -212,7 +212,7 @@ def extract_functions_between(text, start_name, end_name):
 
     verbose_output(f"{BackgroundColors.GREEN}Extracting functions between {BackgroundColors.CYAN}{start_name}{BackgroundColors.GREEN} and {BackgroundColors.CYAN}{end_name}{Style.RESET_ALL}")
     
-    pattern = r"^def\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\(.*?\):.*?(?=^def\s|\Z)"  # Regex pattern for top-level defs
+    pattern = r"^def\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\(.*?\)\s*(?:->.*?)?\s*:.*?(?=^def\s|\Z)"  # Regex pattern for top-level defs with optional return type annotations.
     matches = list(re.finditer(pattern, text, flags=re.DOTALL | re.MULTILINE))  # Find all matches
     funcs = [(m.group(1), m.group(0), m.start(), m.end()) for m in matches]  # Extract function details
     start_idx = next(i for i, f in enumerate(funcs) if f[0] == start_name)  # Find start function index
