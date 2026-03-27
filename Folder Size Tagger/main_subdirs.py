@@ -344,10 +344,16 @@ def extract_clean_directory_name(dirname: str) -> str:
     """
 
     name = dirname  # Preserve the original name for processing
-    name = re.sub(r"^\d+\.\s", "", name)  # Remove leading index pattern if present
-    name = re.sub(r"\s\d+(?:\.\d+)?GB$", "", name)  # Remove trailing size suffix if present
+    # Remove index prefix like '1. ' at start
+    name = re.sub(r"^\d+\.\s+", "", name)
+    # Remove any trailing GB size suffixes, allowing optional separators like space, underscore or hyphen
+    name = re.sub(r"[_\-\s]*\d+(?:\.\d+)?GB$", "", name, flags=re.IGNORECASE)
+    # Remove trailing collision suffixes like '_1' or ' (1)' or ' - 1' or a lone trailing number
+    name = re.sub(r"(?:[_\-\s]*\(\d+\)|[_\-]*\d+)$", "", name)
+    # Normalize internal whitespace to single space
+    name = re.sub(r"\s+", " ", name)
 
-    return name.strip()  # Return trimmed clean name
+    return name.strip()  # Return final trimmed clean name
 
 
 def build_indexed_name(index: int, clean_name: str, size_gb: float) -> str:
@@ -360,6 +366,27 @@ def build_indexed_name(index: int, clean_name: str, size_gb: float) -> str:
     """
 
     return f"{index}. {clean_name} {size_gb:.2f}GB"  # Return the indexed and suffixed directory name
+
+
+def extract_clean_file_name(filename: str) -> tuple:
+    """
+    Remove index prefix and GB suffix from filename and return name and extension.
+
+    :param filename: Filename with extension.
+    :return: Tuple(clean_name_without_extension, extension).
+    """
+
+    name, extension = os.path.splitext(filename)  # Split filename into base and extension
+    # Remove index prefix like '1. ' at start
+    name = re.sub(r"^\d+\.\s+", "", name)
+    # Remove any trailing GB size suffixes, allowing optional separators like space, underscore or hyphen
+    name = re.sub(r"[_\-\s]*\d+(?:\.\d+)?GB$", "", name, flags=re.IGNORECASE)
+    # Remove trailing collision suffixes like '_1' or ' (1)' or ' - 1' or a lone trailing number
+    name = re.sub(r"(?:[_\-\s]*\(\d+\)|[_\-]*\d+)$", "", name)
+    # Normalize internal whitespace to single spaces
+    name = re.sub(r"\s+", " ", name)
+
+    return name.strip(), extension  # Return cleaned name and original extension
 
 
 def collect_directory_metadata(paths: list) -> list:
@@ -385,13 +412,13 @@ def collect_directory_metadata(paths: list) -> list:
 
 def sort_directories_by_size(metadata: list) -> list:
     """
-    Sort metadata list by ascending directory size in bytes.
+    Sort metadata list by descending directory size in bytes.
 
     :param metadata: List of (path, name, size_bytes) tuples.
     :return: Sorted list of metadata tuples.
     """
 
-    return sorted(metadata, key=lambda t: t[2])  # Return metadata sorted by the size_bytes element
+    return sorted(metadata, key=lambda t: t[2], reverse=True)  # Return metadata sorted by size_bytes descending
 
 
 def is_directory_empty(path: str) -> bool:
@@ -454,22 +481,42 @@ def perform_safe_rename(original_path: str, target_name: str) -> None:
 
     parent = os.path.dirname(original_path)  # Resolve parent directory path
     dest = os.path.join(parent, target_name)  # Build initial destination path
-    if os.path.exists(dest):  # Verify if destination already exists
-        base, ext = os.path.splitext(target_name)  # Split name and extension if any
-        suffix = 1  # Initialize numeric suffix
 
-        while True:  # Iterate to find a unique name
-            candidate = f"{base}_{suffix}{ext}"  # Build candidate name with numeric suffix
-            candidate_path = os.path.join(parent, candidate)  # Build candidate absolute path
-            if not os.path.exists(candidate_path):  # Verify uniqueness of candidate path
-                dest = candidate_path  # Use unique candidate as destination
-                break  # Exit collision resolution loop
-            suffix += 1  # Increment suffix for next candidate
+    # If already named correctly, skip
+    if os.path.basename(original_path) == target_name:
+        return
 
-    try:  # Protect rename filesystem operation
-        os.rename(original_path, dest)  # Perform directory rename to resolved destination
-    except (PermissionError, OSError):  # Handle rename failures and access errors
-        return  # Exit safely when rename fails
+    # If destination exists, check if it's the same file (or identical size) and skip
+    if os.path.exists(dest):
+        try:
+            # If they refer to the same filesystem entry, nothing to do
+            if os.path.abspath(dest) == os.path.abspath(original_path):
+                return
+            # If both are files and same size, assume duplicate and skip rename
+            if os.path.isfile(dest) and os.path.isfile(original_path):
+                try:
+                    if os.path.getsize(dest) == os.path.getsize(original_path):
+                        return
+                except OSError:
+                    pass
+        except Exception:
+            pass
+
+        # Otherwise resolve collision by appending a numeric suffix
+        base, ext = os.path.splitext(target_name)
+        suffix = 1
+        while True:
+            candidate = f"{base}_{suffix}{ext}"
+            candidate_path = os.path.join(parent, candidate)
+            if not os.path.exists(candidate_path):
+                dest = candidate_path
+                break
+            suffix += 1
+
+    try:
+        os.rename(original_path, dest)
+    except (PermissionError, OSError):
+        return
 
 
 def to_seconds(obj):
@@ -593,19 +640,11 @@ def main():
     input_path = get_input_path(sys.argv)  # Resolve input path from default value and CLI arguments
 
     if not verify_filepath_exists(input_path):  # Verify if the resolved input path exists
-        print(  # Output a missing path message
-            f"{BackgroundColors.RED}Input path {BackgroundColors.CYAN}{input_path}{BackgroundColors.RED} was not found.{Style.RESET_ALL}"  # Build missing input path message
-        )  # Output the error message for invalid input path
-        finish_time = datetime.datetime.now()  # Get the finish time when input path is invalid
-        print(  # Output timing data for invalid path flow
-            f"{BackgroundColors.GREEN}Start time: {BackgroundColors.CYAN}{start_time.strftime('%d/%m/%Y - %H:%M:%S')}\n{BackgroundColors.GREEN}Finish time: {BackgroundColors.CYAN}{finish_time.strftime('%d/%m/%Y - %H:%M:%S')}\n{BackgroundColors.GREEN}Execution time: {BackgroundColors.CYAN}{calculate_execution_time(start_time, finish_time)}{Style.RESET_ALL}"  # Build timing message
-        )  # Output execution timing details
-        print(  # Output final program completion message
-            f"{BackgroundColors.BOLD}{BackgroundColors.GREEN}Program finished.{Style.RESET_ALL}"  # Build completion message
-        )  # Output completion message
-        (  # Execute optional exit routine registration
-            atexit.register(play_sound) if RUN_FUNCTIONS["Play Sound"] else None  # Register play_sound based on runtime configuration
-        )  # Complete conditional exit routine registration
+        print(f"{BackgroundColors.RED}Input path {BackgroundColors.CYAN}{input_path}{BackgroundColors.RED} was not found.{Style.RESET_ALL}")
+        finish_time = datetime.datetime.now()
+        print(f"{BackgroundColors.GREEN}Start time: {BackgroundColors.CYAN}{start_time.strftime('%d/%m/%Y - %H:%M:%S')}\n{BackgroundColors.GREEN}Finish time: {BackgroundColors.CYAN}{finish_time.strftime('%d/%m/%Y - %H:%M:%S')}\n{BackgroundColors.GREEN}Execution time: {BackgroundColors.CYAN}{calculate_execution_time(start_time, finish_time)}{Style.RESET_ALL}")
+        print(f"{BackgroundColors.BOLD}{BackgroundColors.GREEN}Program finished.{Style.RESET_ALL}")
+        atexit.register(play_sound) if RUN_FUNCTIONS["Play Sound"] else None
         return  # Exit main function early for invalid input path
 
     directories = get_directories_in_path(input_path)  # Retrieve first-level directories from input path
@@ -618,7 +657,7 @@ def main():
     directories = delete_empty_directories(directories)  # Delete empty directories before metadata collection
 
     metadata = collect_directory_metadata(directories)  # Collect path, name and size metadata for remaining directories
-    sorted_meta = sort_directories_by_size(metadata)  # Sort directories ascending by size in bytes
+    sorted_meta = sort_directories_by_size(metadata)  # Sort directories by size (descending: largest first)
 
     for index, (path, original_name, size_bytes) in enumerate(sorted_meta, start=1):  # Iterate sorted directories with index
         clean_name = extract_clean_directory_name(original_name)  # Normalize original name by removing index and GB suffix
