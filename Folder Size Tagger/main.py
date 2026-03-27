@@ -242,6 +242,235 @@ def rename_directory(original_path: str, new_name: str) -> None:
         return  # Exit safely when rename fails
 
 
+def delete_foto_directories(path: str) -> None:
+    """
+    Delete Foto and Fotos directories from a first-level directory.
+
+    :param path: First-level directory path.
+    :return: None.
+    """
+
+    target_names = {"foto", "fotos"}  # Define target directory names for deletion
+
+    try:  # Protect first-level entry listing
+        entries = os.listdir(path)  # Read first-level entries from current directory
+    except (PermissionError, OSError):  # Handle inaccessible directory listing
+        return  # Exit safely when listing fails
+
+    for entry in entries:  # Iterate through first-level entries
+        entry_path = os.path.join(path, entry)  # Build absolute entry path
+
+        if not os.path.isdir(entry_path):  # Verify if current entry is not a directory
+            continue  # Skip non-directory entries
+
+        if entry.lower() not in target_names:  # Verify if directory name is not a Foto target
+            continue  # Skip non-target directories
+
+        try:  # Protect recursive directory deletion
+            import shutil  # Import here for deletion operation
+            shutil.rmtree(entry_path)  # Delete directory and all nested contents
+        except (PermissionError, OSError):  # Handle deletion access and OS failures
+            continue  # Skip failed deletion and continue processing
+
+
+def move_video_contents_to_parent(path: str) -> None:
+    """
+    Move Video and Videos directory contents to the first-level directory root.
+
+    :param path: First-level directory path.
+    :return: None.
+    """
+
+    target_names = {"video", "videos"}  # Define target directory names for content move
+
+    try:  # Protect first-level entry listing
+        entries = os.listdir(path)  # Read first-level entries from current directory
+    except (PermissionError, OSError):  # Handle inaccessible directory listing
+        return  # Exit safely when listing fails
+
+    for entry in entries:  # Iterate through first-level entries
+        source_directory_path = os.path.join(path, entry)  # Build absolute source directory path
+
+        if not os.path.isdir(source_directory_path):  # Verify if current entry is not a directory
+            continue  # Skip non-directory entries
+
+        if entry.lower() not in target_names:  # Verify if directory name is not a Video target
+            continue  # Skip non-target directories
+
+        try:  # Protect source directory content listing
+            source_items = os.listdir(source_directory_path)  # Read items inside Video target directory
+        except (PermissionError, OSError):  # Handle inaccessible source directory listing
+            continue  # Skip inaccessible source directory
+
+        for source_item in source_items:  # Iterate through each source content item
+            source_item_path = os.path.join(source_directory_path, source_item)  # Build absolute source item path
+            destination_item_path = os.path.join(path, source_item)  # Build initial destination item path
+            destination_exists = os.path.exists(destination_item_path)  # Verify if destination path already exists
+
+            if destination_exists:  # Verify if a destination conflict exists
+                source_stem, source_extension = os.path.splitext(source_item)  # Split source item name into stem and extension
+                suffix_index = 1  # Initialize numeric suffix index for conflict resolution
+
+                while True:  # Iterate until a unique destination name is found
+                    candidate_name = f"{source_stem}_{suffix_index}{source_extension}"  # Build candidate item name with numeric suffix
+                    candidate_path = os.path.join(path, candidate_name)  # Build candidate destination path
+
+                    if not os.path.exists(candidate_path):  # Verify if candidate destination path is available
+                        destination_item_path = candidate_path  # Assign conflict-safe destination path
+                        break  # Stop conflict resolution loop
+
+                    suffix_index += 1  # Increment suffix index for next candidate
+
+            try:  # Protect filesystem move operation
+                import shutil  # Import here for move operation
+                shutil.move(source_item_path, destination_item_path)  # Move source item to destination path
+            except (PermissionError, OSError, Exception):  # Handle move errors and filesystem conflicts
+                continue  # Skip failed move and continue processing
+
+        try:  # Protect source directory removal after content move
+            os.rmdir(source_directory_path)  # Remove now-empty Video target directory
+        except (PermissionError, OSError):  # Handle non-empty or inaccessible directory removal
+            continue  # Skip failed directory removal and continue processing
+
+
+def extract_clean_directory_name(dirname: str) -> str:
+    """
+    Remove existing index prefix and GB suffix from a directory name.
+
+    :param dirname: Directory name to normalize.
+    :return: Clean directory name without index or GB suffix.
+    """
+
+    name = dirname  # Preserve the original name for processing
+    name = re.sub(r"^\d+\.\s", "", name)  # Remove leading index pattern if present
+    name = re.sub(r"\s\d+(?:\.\d+)?GB$", "", name)  # Remove trailing size suffix if present
+
+    return name.strip()  # Return trimmed clean name
+
+
+def build_indexed_name(index: int, clean_name: str, size_gb: float) -> str:
+    """
+    Build the final indexed directory name with size suffix.
+
+    :param index: Numeric index for ordering.
+    :param clean_name: Directory base name without index or suffix.
+    :return: Formatted indexed directory name.
+    """
+
+    return f"{index}. {clean_name} {size_gb:.2f}GB"  # Return the indexed and suffixed directory name
+
+
+def collect_directory_metadata(paths: list) -> list:
+    """
+    Collect (path, original_name, size_bytes) tuples for given directories.
+
+    :param paths: List of directory paths to measure.
+    :return: List of metadata tuples.
+    """
+
+    metadata = []  # Initialize metadata list
+
+    for p in paths:  # Iterate through given directory paths
+        try:  # Protect basename and size measurement
+            original_name = os.path.basename(p)  # Extract the original directory name
+            size_bytes = calculate_directory_size_bytes(p)  # Compute recursive size in bytes
+            metadata.append((p, original_name, size_bytes))  # Append metadata tuple
+        except (PermissionError, OSError):  # Handle access and OS errors
+            continue  # Skip directories that cannot be accessed
+
+    return metadata  # Return collected metadata
+
+
+def sort_directories_by_size(metadata: list) -> list:
+    """
+    Sort metadata list by ascending directory size in bytes.
+
+    :param metadata: List of (path, name, size_bytes) tuples.
+    :return: Sorted list of metadata tuples.
+    """
+
+    return sorted(metadata, key=lambda t: t[2])  # Return metadata sorted by the size_bytes element
+
+
+def is_directory_empty(path: str) -> bool:
+    """
+    Determine whether a directory is empty or has zero total size.
+
+    :param path: Directory path to verify.
+    :return: True when directory is empty or zero-sized, False otherwise.
+    """
+
+    try:  # Protect directory listing operation
+        entries = os.listdir(path)  # List entries inside the directory
+    except (PermissionError, OSError):  # Handle inaccessible directory listing
+        return False  # Consider inaccessible directories as non-empty for safety
+
+    if not entries:  # Verify when there are no entries inside directory
+        return True  # Directory is empty
+
+    size_bytes = calculate_directory_size_bytes(path)  # Compute recursive size in bytes
+
+    return size_bytes == 0  # Return True when total size is zero
+
+
+def delete_empty_directories(paths: list) -> list:
+    """
+    Delete empty directories and return the remaining paths list.
+
+    :param paths: List of directory paths to inspect and possibly delete.
+    :return: Filtered list of directory paths that remain.
+    """
+
+    remaining = []  # Initialize list for non-deleted directories
+
+    for p in paths:  # Iterate through supplied directory paths
+        try:  # Protect emptiness verification and deletion
+            if is_directory_empty(p):  # Verify if directory is empty by criteria
+                try:  # Protect removal operation for empty directory
+                    if not os.listdir(p):  # Verify if directory truly has no entries
+                        os.rmdir(p)  # Remove empty directory
+                    else:  # Handle case with no size but entries (defensive)
+                        import shutil  # Import here for recursive removal
+                        shutil.rmtree(p)  # Remove directory recursively
+                except (PermissionError, OSError):  # Handle deletion access failures
+                    remaining.append(p)  # Keep directory when deletion fails
+            else:  # Keep non-empty directories
+                remaining.append(p)  # Preserve directory path for further processing
+        except (PermissionError, OSError):  # Handle access failures during inspection
+            remaining.append(p)  # Preserve directory when inspection fails
+
+    return remaining  # Return updated directory list excluding deleted ones
+
+
+def perform_safe_rename(original_path: str, target_name: str) -> None:
+    """
+    Rename a directory avoiding name collisions by appending numeric suffixes.
+
+    :param original_path: Current absolute directory path.
+    :param target_name: Desired new directory name.
+    :return: None.
+    """
+
+    parent = os.path.dirname(original_path)  # Resolve parent directory path
+    dest = os.path.join(parent, target_name)  # Build initial destination path
+    if os.path.exists(dest):  # Verify if destination already exists
+        base, ext = os.path.splitext(target_name)  # Split name and extension if any
+        suffix = 1  # Initialize numeric suffix
+
+        while True:  # Iterate to find a unique name
+            candidate = f"{base}_{suffix}{ext}"  # Build candidate name with numeric suffix
+            candidate_path = os.path.join(parent, candidate)  # Build candidate absolute path
+            if not os.path.exists(candidate_path):  # Verify uniqueness of candidate path
+                dest = candidate_path  # Use unique candidate as destination
+                break  # Exit collision resolution loop
+            suffix += 1  # Increment suffix for next candidate
+
+    try:  # Protect rename filesystem operation
+        os.rename(original_path, dest)  # Perform directory rename to resolved destination
+    except (PermissionError, OSError):  # Handle rename failures and access errors
+        return  # Exit safely when rename fails
+
+
 def to_seconds(obj):
     """
     Converts various time-like objects to seconds.
@@ -380,21 +609,21 @@ def main():
 
     directories = get_directories_in_path(input_path)  # Retrieve first-level directories from input path
 
-    for directory_path in directories:  # Iterate through each first-level directory
-        current_directory_name = os.path.basename(directory_path)  # Resolve current directory name
+    for directory_path in directories:  # Iterate through each first-level directory for media cleanup
+        delete_foto_directories(directory_path)  # Delete Foto and Fotos directories inside current first-level directory
+        move_video_contents_to_parent(directory_path)  # Move Video and Videos contents to current first-level directory root
 
-        if current_directory_name.endswith("GB"):  # Verify if directory name already ends with GB suffix
-            continue  # Skip directory already labeled with size suffix
+    directories = get_directories_in_path(input_path)  # Refresh first-level directory list after cleanup
+    directories = delete_empty_directories(directories)  # Delete empty directories before metadata collection
 
-        directory_size_bytes = calculate_directory_size_bytes(directory_path)  # Calculate recursive directory size in bytes
+    metadata = collect_directory_metadata(directories)  # Collect path, name and size metadata for remaining directories
+    sorted_meta = sort_directories_by_size(metadata)  # Sort directories ascending by size in bytes
 
-        if directory_size_bytes <= 0:  # Verify if directory is empty or inaccessible
-            continue  # Skip empty or inaccessible directories
-
-        directory_size_gb = convert_bytes_to_gb(directory_size_bytes)  # Convert directory size from bytes to gigabytes
-        renamed_directory_name = format_directory_name(current_directory_name, directory_size_gb)  # Build formatted directory name with GB suffix
-
-        rename_directory(directory_path, renamed_directory_name)  # Rename directory using formatted name
+    for index, (path, original_name, size_bytes) in enumerate(sorted_meta, start=1):  # Iterate sorted directories with index
+        clean_name = extract_clean_directory_name(original_name)  # Normalize original name by removing index and GB suffix
+        size_gb = convert_bytes_to_gb(size_bytes)  # Convert size from bytes to gigabytes
+        new_name = build_indexed_name(index, clean_name, size_gb)  # Build the final indexed and suffixed name
+        perform_safe_rename(path, new_name)  # Rename directory safely avoiding collisions
     
     # Implement logic here
 
