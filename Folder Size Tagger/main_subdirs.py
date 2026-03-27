@@ -259,6 +259,34 @@ def move_video_contents_to_parent(path: str) -> None:
             continue  # Skip failed directory removal and continue processing
 
 
+def delete_image_files_in_directory(path: str) -> None:
+    """
+    Delete image files in a directory non-recursively.
+
+    :param path: Directory path to inspect for image files.
+    :return: None.
+    """
+
+    image_exts = {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".tiff"}  # Define image extensions set.
+
+    try:  # Protect directory listing operation
+        entries = os.listdir(path)  # Read first-level entries from the directory.
+    except (PermissionError, OSError):  # Handle inaccessible directory listing
+        return  # Exit when listing fails.
+
+    for entry in entries:  # Iterate through first-level entries
+        file_path = os.path.join(path, entry)  # Build absolute file path.
+        if not os.path.isfile(file_path):  # Verify current entry is a file.
+            continue  # Skip non-file entries.
+        _, ext = os.path.splitext(entry)  # Split filename to get extension.
+        if ext.lower() not in image_exts:  # Verify extension is not an image type.
+            continue  # Skip non-image files.
+        try:  # Protect file deletion operation
+            os.remove(file_path)  # Remove the image file.
+        except (PermissionError, OSError):  # Handle deletion access failures
+            continue  # Skip files that cannot be removed.
+
+
 def calculate_directory_size_bytes(path: str) -> int:
     """
     Calculate recursive directory size in bytes.
@@ -692,6 +720,7 @@ def main():
     for directory_path in directories:  # Iterate through each first-level directory for media cleanup
         delete_foto_directories(directory_path)  # Delete Foto and Fotos directories inside current first-level directory
         move_video_contents_to_parent(directory_path)  # Move Video and Videos contents to current first-level directory root
+        delete_image_files_in_directory(directory_path)  # Delete image files after media directory cleanup
 
     directories = get_directories_in_path(input_path)  # Refresh first-level directory list after cleanup
     directories = delete_empty_directories(directories)  # Delete empty directories before metadata collection
