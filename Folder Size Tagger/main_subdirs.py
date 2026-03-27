@@ -208,7 +208,7 @@ def move_video_contents_to_parent(path: str) -> None:
     :return: None.
     """
 
-    target_names = {"video", "videos"}  # Define target directory names for content move
+    target_names = {"video", "videos", "vídeo", "vídeos"}  # Define target directory names for content move
 
     try:  # Protect first-level entry listing
         entries = os.listdir(path)  # Read first-level entries from current directory
