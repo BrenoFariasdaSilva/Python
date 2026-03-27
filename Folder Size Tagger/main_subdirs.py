@@ -389,6 +389,46 @@ def extract_clean_file_name(filename: str) -> tuple:
     return name.strip(), extension  # Return cleaned name and original extension
 
 
+def process_files_in_directory(directory_path: str) -> None:
+    """
+    Process files in a directory and rename them with indexed GB suffix.
+
+    :param directory_path: Directory path to process.
+    :return: None.
+    """
+
+    try:  # Attempt to list first-level entries in the directory.
+        entries = os.listdir(directory_path)  # Read first-level entries from directory.
+    except (PermissionError, OSError):  # Handle inaccessible directory listing.
+        return  # Exit when listing fails.
+
+    files_meta = []  # Initialize list for file metadata tuples.
+
+    for entry in entries:  # Iterate through first-level entries.
+        file_path = os.path.join(directory_path, entry)  # Build absolute file path.
+        if not os.path.isfile(file_path):  # Verify current entry is a file.
+            continue  # Skip non-file entries.
+        try:  # Attempt to read file size.
+            size_bytes = os.path.getsize(file_path)  # Get file size in bytes.
+        except (PermissionError, OSError):  # Handle inaccessible file metadata.
+            continue  # Skip files that cannot be sized.
+        files_meta.append((file_path, size_bytes))  # Append metadata for the file.
+
+    files_sorted = sorted(files_meta, key=lambda t: t[1], reverse=True)  # Sort files by size descending.
+
+    for idx, (file_path, size_bytes) in enumerate(files_sorted, start=1):  # Iterate sorted files with local index.
+        filename = os.path.basename(file_path)  # Extract the filename from the path.
+        name, extension = os.path.splitext(filename)  # Split filename into name and extension.
+        name = re.sub(r"^\d+\.\s+", "", name)  # Remove index prefix like '1. '.
+        name = re.sub(r"(\s*\d+(?:\.\d+)?GB)+$", "", name, flags=re.IGNORECASE)  # Remove trailing GB size suffixes.
+        name = re.sub(r"\s+\d+$", "", name)  # Remove trailing numeric tokens.
+        name = re.sub(r"\s+", " ", name).strip()  # Normalize whitespace and trim.
+        clean_name = name  # Assign cleaned name derived only from file basename.
+        size_gb = convert_bytes_to_gb(size_bytes)  # Convert file size from bytes to gigabytes.
+        target_name = f"{idx}. {clean_name} {size_gb:.2f}GB{extension}"  # Build the target file name.
+        perform_safe_rename(file_path, target_name)  # Rename file safely avoiding collisions.
+
+
 def collect_directory_metadata(paths: list) -> list:
     """
     Collect (path, original_name, size_bytes) tuples for given directories.
@@ -661,6 +701,7 @@ def main():
 
     for index, (path, original_name, size_bytes) in enumerate(sorted_meta, start=1):  # Iterate sorted directories with index
         clean_name = extract_clean_directory_name(original_name)  # Normalize original name by removing index and GB suffix
+        process_files_in_directory(path)  # Process and rename files inside the directory before renaming the directory
         size_gb = convert_bytes_to_gb(size_bytes)  # Convert size from bytes to gigabytes
         new_name = build_indexed_name(index, clean_name, size_gb)  # Build the final indexed and suffixed name
         perform_safe_rename(path, new_name)  # Rename directory safely avoiding collisions
