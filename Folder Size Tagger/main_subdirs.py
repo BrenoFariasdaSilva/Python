@@ -170,7 +170,7 @@ def get_directories_in_path(path: str) -> list:
     return directories  # Return the discovered first-level directories
 
 
-def delete_foto_directories(path: str) -> None:
+def delete_listed_directories(path: str) -> None:
     """
     Delete the listed directories inside a path if they match the Foto target names.
 
@@ -718,7 +718,7 @@ def main():
     directories = get_directories_in_path(input_path)  # Retrieve first-level directories from input path
 
     for directory_path in directories:  # Iterate through each first-level directory for media cleanup
-        delete_foto_directories(directory_path)  # Delete Foto and Fotos directories inside current first-level directory
+        delete_listed_directories(directory_path)  # Delete Foto and Fotos directories inside current first-level directory
         move_video_contents_to_parent(directory_path)  # Move Video and Videos contents to current first-level directory root
         delete_image_files_in_directory(directory_path)  # Delete image files after media directory cleanup
 
