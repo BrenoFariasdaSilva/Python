@@ -18,7 +18,7 @@ class BackgroundColors:  # Colors for the terminal
 
 # Execution Constants:
 VERBOSE = False  # Set to True to output verbose messages
-INPUT_DIRECTORY = "./Input"  # The input directory to process files from
+INPUT_DIRECTORIES = ["./Input"]  # The input directories to process files from
 
 # Ignored Files and Directories:
 IGNORED_FILES = {"Makefile", "main.py", "requirements.txt"}  # Files to be ignored
@@ -79,13 +79,19 @@ def get_directories():
     :return: List of absolute paths to subdirectories
     """
 
-    dirs = [
-        os.path.normpath(os.path.abspath(root)) for root, _, _ in os.walk(INPUT_DIRECTORY)
-    ]  # Collect all directories
-    if (
-        len(dirs) > 1 and os.path.normpath(os.path.abspath(INPUT_DIRECTORY)) in dirs
-    ):  # If root dir has subdirs, remove itself
-        dirs.remove(os.path.normpath(os.path.abspath(INPUT_DIRECTORY)))  # Remove the root input directory
+    dirs = []  # Initialize aggregate directory list
+
+    for base_dir in INPUT_DIRECTORIES:  # Iterate over each configured base directory
+        for root, _, _ in os.walk(base_dir):  # Walk the directory tree for this base directory
+            dirs.append(os.path.normpath(os.path.abspath(root)))  # Collect each discovered directory
+
+    # Remove any base directory root if it contains subdirectories to avoid processing the root itself
+    base_abs_set = {os.path.normpath(os.path.abspath(d)) for d in INPUT_DIRECTORIES}  # Compute absolute bases set
+    for base_abs in base_abs_set:  # Iterate through each absolute base path
+        if any(d != base_abs and d.startswith(base_abs + os.sep) for d in dirs):  # Verify if base contains nested dirs
+            if base_abs in dirs:  # Verify base_abs presence before removal
+                dirs.remove(base_abs)  # Remove the root base directory when nested dirs exist
+
     return dirs  # Return only valid subdirectories
 
 
@@ -399,11 +405,11 @@ def main():
         end="\n\n",
     )
 
-    if not verify_filepath_exists(INPUT_DIRECTORY):  # If the input directory does not exist
+    if not any(verify_filepath_exists(d) for d in INPUT_DIRECTORIES):  # Verify at least one configured input directory exists
         print(
-            f"{BackgroundColors.RED}Input directory {BackgroundColors.CYAN}{INPUT_DIRECTORY}{BackgroundColors.RED} not found. Please create the directory and add files to it.{Style.RESET_ALL}"
-        )  # Output the error message
-        return  # Exit the program
+            f"{BackgroundColors.RED}Input directories {BackgroundColors.CYAN}{', '.join(INPUT_DIRECTORIES)}{BackgroundColors.RED} not found. Please create the directories and add files to them.{Style.RESET_ALL}"
+        )  # Output the error message listing all configured input directories
+        return  # Exit the program when none of the configured input directories exist
 
     dirs = get_directories()  # Get all directories inside the input directory
 
