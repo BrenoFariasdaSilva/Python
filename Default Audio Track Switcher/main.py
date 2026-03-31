@@ -60,7 +60,6 @@ import subprocess  # For running terminal commands
 import unicodedata  # For removing accents during normalization
 from colorama import Style  # For coloring the terminal
 from tqdm import tqdm  # For displaying a progress bar
-from typing import Optional, Dict  # For optional typing hints
 
 
 # Macros:
