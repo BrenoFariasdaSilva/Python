@@ -53,9 +53,11 @@ import atexit  # For playing a sound when the program finishes
 import json  # For parsing JSON output from ffprobe
 import os  # For running a command in the terminal
 import platform  # For getting the operating system name
+import re  # For text normalization with regular expressions
 import shutil  # For checking if a command exists
 import signal  # For temporarily ignoring SIGINT during tqdm construction
 import subprocess  # For running terminal commands
+import unicodedata  # For removing accents during normalization
 from colorama import Style  # For coloring the terminal
 from tqdm import tqdm  # For displaying a progress bar
 from typing import Optional, Dict  # For optional typing hints
@@ -96,8 +98,8 @@ STREAM_TYPE_PRIORITY_ORDER = {
 }  # Desired languages in order of priority for each stream type
 
 DESIRED_LANGUAGES = {  # Dictionary of desired languages with their corresponding language codes (case-insensitive)
-    "English": ["english", "eng", "en"],  # Languages to prioritize when selecting default audio track
-    "Brazilian Portuguese": ["brazilian", "portuguese", "pt-br", "pt"],  # Additional languages can be added here
+    "English": ["english", "eng", "en",  "Inglês"],  # Languages to prioritize when selecting default audio track
+    "Brazilian Portuguese": ["brazilian", "portuguese",  "PT-BR FULL", "pt-br", "pt"],  # Additional languages can be added here
 }
 
 UNDESIRED_LANGUAGES = {  # Dictionary of undesired languages with their corresponding language codes (case-insensitive)
@@ -180,6 +182,87 @@ def get_desired_languages():
     """
 
     return [lang for langs in DESIRED_LANGUAGES.values() for lang in langs]  # Flatten the list of desired languages
+
+
+def normalize_text(value):
+    """
+    Normalize text for robust language matching across inconsistent metadata.
+
+    :param value: Raw metadata text
+    :return: Normalized text
+    """
+
+    text = "" if value is None else str(value)  # Convert input to string safely
+    text = text.lower()  # Convert text to lowercase
+    text = unicodedata.normalize("NFKD", text)  # Normalize Unicode text for accent stripping
+    text = "".join(ch for ch in text if not unicodedata.combining(ch))  # Remove combining accent marks
+    text = re.sub(r"\b\d+(\.\d+)?\b", " ", text)  # Remove audio quality numeric markers such as 5.1 and 7.1
+    text = re.sub(r"[\(\)\[\]\-_]", " ", text)  # Replace extra symbols with spaces
+    text = re.sub(r"\s+", " ", text).strip()  # Normalize consecutive whitespace
+    return text  # Return normalized text
+
+
+def get_normalized_desired_language_aliases():
+    """
+    Build normalized language alias lists from DESIRED_LANGUAGES.
+
+    :param none
+    :return: Dict with canonical language key and normalized aliases
+    """
+
+    normalized_aliases = {}  # Initialize mapping for canonical language aliases
+    for language_key, aliases in DESIRED_LANGUAGES.items():  # Iterate each canonical language and aliases
+        ordered_aliases = []  # Initialize ordered alias container for this language
+        seen_aliases = set()  # Initialize set to avoid duplicate aliases
+        key_alias = normalize_text(language_key)  # Normalize canonical language key as an alias
+        if key_alias != "" and key_alias not in seen_aliases:  # Verify canonical alias is valid and unique
+            ordered_aliases.append(key_alias)  # Add canonical normalized key alias
+            seen_aliases.add(key_alias)  # Mark canonical alias as seen
+        for alias in aliases:  # Iterate configured aliases for this language
+            normalized_alias = normalize_text(alias)  # Normalize alias text with the same pipeline
+            if normalized_alias == "":  # Verify alias is not empty after normalization
+                continue  # Continue to next alias when normalized alias is empty
+            if normalized_alias in seen_aliases:  # Verify alias has not already been added
+                continue  # Continue to next alias when alias is duplicated
+            ordered_aliases.append(normalized_alias)  # Add normalized alias preserving order
+            seen_aliases.add(normalized_alias)  # Mark normalized alias as seen
+        normalized_aliases[language_key] = ordered_aliases  # Save normalized alias list for canonical key
+    return normalized_aliases  # Return normalized alias mapping
+
+
+def detect_language(raw_lang, raw_title, stream_type):
+    """
+    Detect canonical language name from raw language/title metadata.
+
+    :param raw_lang: Raw language metadata from tags
+    :param raw_title: Raw title metadata from tags
+    :param stream_type: Stream type key ('audio' or 'subtitle')
+    :return: Canonical language key from DESIRED_LANGUAGES or None
+    """
+
+    normalized_lang = normalize_text(raw_lang)  # Normalize raw language text
+    normalized_title = normalize_text(raw_title)  # Normalize raw title text
+    values = [normalized_lang, normalized_title]  # Build candidate normalized values list
+    normalized_aliases = get_normalized_desired_language_aliases()  # Build normalized desired language aliases
+    priority_names = resolve_priority_list(stream_type)  # Resolve configured priority names for stream type
+    ordered_languages = []  # Initialize ordered canonical language list
+    for language_name in priority_names:  # Iterate language names in configured priority order
+        if language_name in DESIRED_LANGUAGES and language_name not in ordered_languages:  # Verify canonical priority language exists and is unique
+            ordered_languages.append(language_name)  # Add priority language to ordered scan list
+    for language_name in DESIRED_LANGUAGES.keys():  # Iterate remaining canonical desired languages
+        if language_name not in ordered_languages:  # Verify language was not already inserted by priority
+            ordered_languages.append(language_name)  # Add remaining language after priority languages
+    for language_name in ordered_languages:  # Iterate canonical language names in deterministic order
+        aliases = normalized_aliases.get(language_name, [])  # Get normalized aliases for current language
+        for alias in aliases:  # Iterate aliases for this canonical language
+            if alias == "":  # Verify alias is not empty
+                continue  # Continue to next alias if empty
+            for value in values:  # Iterate normalized metadata values
+                if value == "":  # Verify current value has content
+                    continue  # Continue to next value when empty
+                if alias in value:  # Verify alias appears in normalized metadata
+                    return language_name  # Return detected canonical language immediately
+    return None  # Return None when no canonical language match is found
 
 
 def install_chocolatey():
@@ -411,18 +494,27 @@ def get_audio_tracks(video_path):
     for stream in streams:  # Iterate over each stream entry
         if stream.get("codec_type") == "audio":  # Only handle audio streams here
             index = stream.get("index", None)  # Get global stream index from ffprobe
+            codec_name = stream.get("codec_name", "")  # Get codec name for structured output
+            channels = stream.get("channels")  # Get channel count for structured output
             tags = stream.get("tags", {}) or {}  # Get tags dict for language/title metadata
-            language = tags.get("language") or tags.get("lang") or "und"  # Prefer language tag or fallback
-            title = tags.get("title", "")  # Get title tag if present
+            raw_lang = tags.get("language") or tags.get("LANGUAGE") or tags.get("lang") or ""  # Extract raw language tag with fallbacks
+            raw_title = tags.get("title") or ""  # Extract raw title tag with fallback
+            detected_language = detect_language(raw_lang, raw_title, "audio")  # Detect canonical language from normalized metadata
             disposition = stream.get("disposition", {}) or {}  # Get disposition dict if present
             tracks.append({  # Append detailed audio track info for classification
+                "index": index,  # Structured stream index field
                 "global_index": index,  # Global stream index for ffmpeg mapping
                 "audio_pos": audio_count,  # Physical position among audio streams (0-based)
+                "language": detected_language,  # Canonical detected language key or None
+                "raw_language": raw_lang,  # Raw language metadata text
+                "raw_title": raw_title,  # Raw title metadata text
+                "codec": codec_name,  # Audio codec name
+                "channels": channels,  # Audio channel count
                 "tags": tags,  # Raw tags mapping
-                "language": language,  # Primary language value discovered
-                "title": title,  # Title metadata if present
+                "title": raw_title,  # Title metadata preserved for compatibility
                 "disposition": disposition,  # Disposition flags
             })
+            verbose_output(f"[DEBUG] Audio Stream {audio_count}: detected_lang={detected_language} raw=\"{raw_title}\" codec={codec_name} channels={channels}")  # Output per-audio debug log with normalized detection
             audio_count += 1  # Increment physical audio position counter
 
     return tracks  # Return the list of detailed audio tracks
@@ -446,18 +538,27 @@ def get_subtitle_tracks(video_path):
     for stream in streams:  # Iterate over each stream entry
         if stream.get("codec_type") == "subtitle":  # Only handle subtitle streams here
             index = stream.get("index", None)  # Get global stream index from ffprobe
+            codec_name = stream.get("codec_name", "")  # Get subtitle codec name for structured output
+            channels = stream.get("channels")  # Get subtitle channels value if provided
             tags = stream.get("tags", {}) or {}  # Get tags dict for language/title metadata
-            language = tags.get("language") or tags.get("lang") or "und"  # Prefer language tag or fallback
-            title = tags.get("title", "")  # Get title tag if present
+            raw_lang = tags.get("language") or tags.get("LANGUAGE") or tags.get("lang") or ""  # Extract raw language tag with fallbacks
+            raw_title = tags.get("title") or ""  # Extract raw title tag with fallback
+            detected_language = detect_language(raw_lang, raw_title, "subtitle")  # Detect canonical language from normalized metadata
             disposition = stream.get("disposition", {}) or {}  # Get disposition dict if present
             subs.append({  # Append detailed subtitle track info for classification
+                "index": index,  # Structured stream index field
                 "global_index": index,  # Global stream index for ffmpeg mapping
                 "sub_pos": sub_count,  # Physical position among subtitle streams (0-based)
+                "language": detected_language,  # Canonical detected language key or None
+                "raw_language": raw_lang,  # Raw language metadata text
+                "raw_title": raw_title,  # Raw title metadata text
+                "codec": codec_name,  # Subtitle codec name
+                "channels": channels,  # Subtitle channels value for structural parity
                 "tags": tags,  # Raw tags mapping
-                "language": language,  # Primary language value discovered
-                "title": title,  # Title metadata if present
+                "title": raw_title,  # Title metadata preserved for compatibility
                 "disposition": disposition,  # Disposition flags
             })
+            verbose_output(f"[DEBUG] Subtitle Stream {sub_count}: detected_lang={detected_language} raw=\"{raw_title}\" codec={codec_name}")  # Output per-subtitle debug log with normalized detection
             sub_count += 1  # Increment physical subtitle position counter
 
     return subs  # Return the list of detailed subtitle tracks
@@ -471,58 +572,17 @@ def classify_streams(video_path):
     :return: Tuple (audio_streams, subtitle_streams) each being a list of dicts with 'classification'
     """
 
-    desired_aliases = {alias.lower() for aliases in DESIRED_LANGUAGES.values() for alias in aliases}  # Build set of desired aliases
-    undesired_aliases = {alias.lower() for aliases in UNDESIRED_LANGUAGES.values() for alias in aliases}  # Build set of undesired aliases
-
     audio_streams = get_audio_tracks(video_path)  # Get detailed audio streams for the file
     subtitle_streams = get_subtitle_tracks(video_path)  # Get detailed subtitle streams for the file
 
     for a in audio_streams:  # Classify each audio stream
-        matched_desired = False  # Flag marking desired match
-        matched_undesired = False  # Flag marking undesired match
-        values = []  # List of metadata values to match against aliases
-        values.append(str(a.get("language", "")).lower())  # Add language tag to matching values
-        values.append(str(a.get("title", "")).lower())  # Add title tag to matching values
-        for v in a.get("tags", {}).values():  # Add all tag values to the matching pool
-            try:  # Ensure safe conversion to string
-                values.append(str(v).lower())  # Append tag value lowercased
-            except Exception:  # Ignore any problematic tag values
-                continue  # Continue on tag parsing error
-
-        for v in values:  # Evaluate all collected metadata values
-            if any(alias in v for alias in desired_aliases):  # If any desired alias is found
-                matched_desired = True  # Mark as desired
-                break  # Stop searching for this stream
-            if any(alias in v for alias in undesired_aliases):  # If any undesired alias is found
-                matched_undesired = True  # Mark as undesired
-                break  # Stop searching for this stream
-
-        if matched_desired:  # If desired matched then classify as desired
+        if a.get("language") in DESIRED_LANGUAGES:  # Verify detected canonical language belongs to desired set
             a["classification"] = "desired"  # Label the audio stream as desired
         else:  # Otherwise classify as undesired per strict mode
             a["classification"] = "undesired"  # Label the audio stream as undesired
 
     for s in subtitle_streams:  # Classify each subtitle stream
-        matched_desired = False  # Flag marking desired match
-        matched_undesired = False  # Flag marking undesired match
-        values = []  # List of metadata values to match against aliases
-        values.append(str(s.get("language", "")).lower())  # Add language tag to matching values
-        values.append(str(s.get("title", "")).lower())  # Add title tag to matching values
-        for v in s.get("tags", {}).values():  # Add all tag values to the matching pool
-            try:  # Ensure safe conversion to string
-                values.append(str(v).lower())  # Append tag value lowercased
-            except Exception:  # Ignore any problematic tag values
-                continue  # Continue on tag parsing error
-
-        for v in values:  # Evaluate all collected metadata values
-            if any(alias in v for alias in desired_aliases):  # If any desired alias is found
-                matched_desired = True  # Mark as desired
-                break  # Stop searching for this stream
-            if any(alias in v for alias in undesired_aliases):  # If any undesired alias is found
-                matched_undesired = True  # Mark as undesired
-                break  # Stop searching for this stream
-
-        if matched_desired:  # If desired matched then classify as desired
+        if s.get("language") in DESIRED_LANGUAGES:  # Verify detected canonical language belongs to desired set
             s["classification"] = "desired"  # Label the subtitle stream as desired
         else:  # Otherwise classify as undesired per strict mode
             s["classification"] = "undesired"  # Label the subtitle stream as undesired
@@ -658,22 +718,18 @@ def select_best_stream(streams, kept_positions, priority_names, pos_key):
     :return: Selected physical position integer or None
     """
     
-    filtered_streams = filter_descriptive_streams(streams)  # Remove descriptive streams first to avoid reintroduction
-    desired_pool = [s for s in filtered_streams if s.get("classification") == "desired"]  # Build pool of desired streams only
+    filtered_streams = filter_descriptive_streams(streams)  # Remove descriptive streams before priority selection
+    candidate_streams = [s for s in filtered_streams if s.get(pos_key) in kept_positions]  # Keep only streams that remain mapped
     
-    for preferred in priority_names:  # Iterate priority names in configured order
-        candidates = build_candidate_aliases(preferred)  # Build alias list for this preferred display name
-        
-        for s in desired_pool:  # Scan desired streams for a candidate match
-            pos = s.get(pos_key)  # Get the physical position for the stream
-            
-            if pos not in kept_positions:  # Skip streams that are not part of the kept positions
-                continue  # Continue to next candidate stream
-            
-            if stream_matches_candidates(s, candidates):  # If stream metadata matches any candidate alias
-                return pos  # Return the matched physical position immediately
+    for preferred in priority_names:  # Iterate language priorities in configured order
+        for s in candidate_streams:  # Iterate candidate streams in original physical order
+            if s.get("language") == preferred:  # Verify canonical detected language matches current priority language
+                return s.get(pos_key)  # Return matching stream physical position immediately
     
-    return None  # No prioritized stream found
+    if len(candidate_streams) > 0:  # Verify at least one candidate stream exists for fallback
+        return candidate_streams[0].get(pos_key)  # Fallback to the first available candidate stream
+    
+    return None  # Return None when there are no candidate streams to select
 
 
 def find_best_stream_by_priority(streams, kept_positions, priority_names, pos_key):
@@ -749,6 +805,15 @@ def apply_prune_and_set_defaults(video_path, audio_streams, subtitle_streams):
     
     if default_sub_pos is None:  # If no prioritized subtitle found
         default_sub_pos = find_original_default_position(subtitle_streams, "sub_pos")  # Fallback to original default if present
+
+    selected_audio_stream = next((a for a in audio_streams if a.get("audio_pos") == default_audio_pos), None)  # Resolve selected audio stream metadata for debug output
+    selected_subtitle_stream = next((s for s in subtitle_streams if s.get("sub_pos") == default_sub_pos), None)  # Resolve selected subtitle stream metadata for debug output
+    selected_audio_index = selected_audio_stream.get("index") if selected_audio_stream is not None else None  # Resolve selected audio stream index safely
+    selected_subtitle_index = selected_subtitle_stream.get("index") if selected_subtitle_stream is not None else None  # Resolve selected subtitle stream index safely
+    selected_audio_lang = selected_audio_stream.get("language") if selected_audio_stream is not None else None  # Resolve selected audio language safely
+    selected_subtitle_lang = selected_subtitle_stream.get("language") if selected_subtitle_stream is not None else None  # Resolve selected subtitle language safely
+    verbose_output(f"[DEBUG] Selected audio stream: {selected_audio_index} (lang={selected_audio_lang})")  # Output final selected audio stream debug log
+    verbose_output(f"[DEBUG] Selected subtitle stream: {selected_subtitle_index} (lang={selected_subtitle_lang})")  # Output final selected subtitle stream debug log
 
     cmd = ["ffmpeg", "-y", "-i", video_path, "-map", "0", "-map", "-0:a"]  # Start command by mapping all and dropping audio
     cmd += ["-map", "-0:s"]  # Drop all subtitle streams to re-add only desired ones
