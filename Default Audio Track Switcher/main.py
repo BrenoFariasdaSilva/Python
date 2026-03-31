@@ -515,7 +515,13 @@ def get_audio_tracks(video_path):
                 "title": raw_title,  # Title metadata preserved for compatibility
                 "disposition": disposition,  # Disposition flags
             })
-            verbose_output(f"[DEBUG] Audio Stream {audio_count}: detected_lang={detected_language} raw=\"{raw_title}\" codec={codec_name} channels={channels}")  # Output per-audio debug log with normalized detection
+            verbose_output(
+                f"{BackgroundColors.CYAN}[DEBUG]{Style.RESET_ALL} Audio Stream {BackgroundColors.YELLOW}{audio_count}{Style.RESET_ALL}: "  # Colored debug tag and stream index
+                f"detected_lang={BackgroundColors.GREEN}{detected_language}{Style.RESET_ALL} "  # Colored detected language
+                f"raw=\"{BackgroundColors.CYAN}{raw_title}{Style.RESET_ALL}\" "  # Colored raw title
+                f"codec={BackgroundColors.YELLOW}{codec_name}{Style.RESET_ALL} "  # Colored codec name
+                f"channels={BackgroundColors.CYAN}{channels}{Style.RESET_ALL}"
+            )  # Output per-audio debug log with normalized detection (colored)
             audio_count += 1  # Increment physical audio position counter
 
     return tracks  # Return the list of detailed audio tracks
