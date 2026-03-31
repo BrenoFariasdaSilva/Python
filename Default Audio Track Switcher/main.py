@@ -389,12 +389,13 @@ def should_ignore_file(filename):
     Determine whether the file should be ignored based on IGNORE_FILE_PATTERNS.
 
     :param filename: Name of the file to evaluate
-    :return: True if the filename contains any IGNORE_FILE_PATTERNS keyword (case-insensitive), False otherwise
+    :return: True if the filename ends with any IGNORE_FILE_PATTERNS extension (case-insensitive), False otherwise
     """
 
     lower_name = filename.lower()  # Normalize filename to lowercase for case-insensitive matching
     for pattern in IGNORE_FILE_PATTERNS:  # Iterate configured ignore file patterns
-        if pattern.lower() in lower_name:  # Substring-based, case-insensitive check
+        lower_pattern = pattern.lower()  # Normalize pattern to lowercase for case-insensitive comparison
+        if lower_name.endswith(lower_pattern):  # Verify filename ends with the extension pattern
             verbose_output(
                 f"{BackgroundColors.YELLOW}Skipping temporary/incomplete file: {BackgroundColors.CYAN}{filename}{BackgroundColors.YELLOW} (matches pattern '{pattern}'){Style.RESET_ALL}"
             )  # Verbose message explaining why file is skipped
