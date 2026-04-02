@@ -780,6 +780,129 @@ def find_original_default_position(streams, pos_key):
     return None  # No original default found
 
 
+def find_current_default_stream(streams):
+    """
+    Find the current default stream from disposition metadata.
+
+    :param streams: List of stream dicts
+    :return: Stream dict marked as default or None
+    """
+
+    for stream in streams:  # Iterate stream list to locate the stream marked as default.
+        try:  # Guard disposition coercion for malformed metadata values.
+            if int(stream.get("disposition", {}).get("default", 0)) == 1:  # Verify ffprobe default flag is enabled.
+                return stream  # Return stream immediately when default disposition is present.
+        except Exception:  # Ignore malformed disposition values and continue scanning.
+            continue  # Continue iteration when disposition parsing fails.
+
+    return None  # Return None when no default stream is marked.
+
+
+def resolve_priority_canonical_language(stream_type):
+    """
+    Resolve the highest-priority configured language to a canonical desired key.
+
+    :param stream_type: Stream type key ('audio' or 'subtitle')
+    :return: Canonical language key from DESIRED_LANGUAGES or None
+    """
+
+    priority_names = resolve_priority_list(stream_type)  # Resolve ordered priority names for the requested stream type.
+    if len(priority_names) == 0:  # Verify at least one configured priority exists.
+        return None  # Return None when no priority language is configured.
+
+    top_priority_name = priority_names[0]  # Read the highest-priority display name from configuration.
+    if top_priority_name in DESIRED_LANGUAGES:  # Verify top priority already matches a canonical desired language key.
+        return top_priority_name  # Return canonical key directly when an exact key match exists.
+
+    normalized_priority = normalize_text(top_priority_name)  # Normalize top priority text for robust alias comparison.
+    normalized_aliases = get_normalized_desired_language_aliases()  # Build normalized alias map for desired languages.
+
+    for language_name, aliases in normalized_aliases.items():  # Iterate canonical language aliases for fuzzy canonical resolution.
+        for alias in aliases:  # Iterate each normalized alias for the current canonical language.
+            if alias == "":  # Verify alias has meaningful content before comparison.
+                continue  # Continue to next alias when normalized alias is empty.
+            if alias == normalized_priority or normalized_priority in alias or alias in normalized_priority:  # Verify alias relation between priority value and canonical aliases.
+                return language_name  # Return canonical language key when alias relation matches.
+
+    return None  # Return None when no canonical desired language can be resolved.
+
+
+def detect_stream_language_for_validation(stream, stream_type):
+    """
+    Detect canonical stream language using tags, title, codec, and fuzzy aliases.
+
+    :param stream: Stream metadata dict
+    :param stream_type: Stream type key ('audio' or 'subtitle')
+    :return: Canonical language key from DESIRED_LANGUAGES or None
+    """
+
+    tags = stream.get("tags", {}) or {}  # Resolve stream tags mapping with empty fallback.
+    raw_lang = stream.get("raw_language") or tags.get("language") or tags.get("LANGUAGE") or tags.get("lang") or ""  # Resolve raw language metadata with fallbacks.
+    raw_title = stream.get("raw_title") or stream.get("title") or tags.get("title") or ""  # Resolve raw title metadata with fallbacks.
+    detected_language = detect_language(raw_lang, raw_title, stream_type)  # Reuse existing normalized language detector first.
+    if detected_language is not None:  # Verify canonical language was resolved from standard metadata fields.
+        return detected_language  # Return detected canonical language immediately when available.
+
+    normalized_aliases = get_normalized_desired_language_aliases()  # Build normalized desired language aliases for fallback matching.
+    metadata_values = []  # Initialize metadata value list for fuzzy fallback matching.
+    metadata_values.append(normalize_text(stream.get("codec", "")))  # Append normalized codec name to fallback candidates.
+    metadata_values.append(normalize_text(raw_lang))  # Append normalized raw language value to fallback candidates.
+    metadata_values.append(normalize_text(raw_title))  # Append normalized raw title value to fallback candidates.
+    for value in tags.values():  # Iterate all tag values for additional fuzzy matching input.
+        metadata_values.append(normalize_text(value))  # Append normalized tag value to fallback candidates.
+
+    priority_names = resolve_priority_list(stream_type)  # Resolve configured priority language names for deterministic ordering.
+    ordered_languages = []  # Initialize ordered canonical language scan list.
+    for language_name in priority_names:  # Iterate configured priority names first.
+        if language_name in DESIRED_LANGUAGES and language_name not in ordered_languages:  # Verify language is canonical and not duplicated.
+            ordered_languages.append(language_name)  # Append canonical priority language to ordered scan list.
+    for language_name in DESIRED_LANGUAGES.keys():  # Iterate remaining canonical desired language keys.
+        if language_name not in ordered_languages:  # Verify language key has not already been added.
+            ordered_languages.append(language_name)  # Append remaining canonical language after priority languages.
+
+    for language_name in ordered_languages:  # Iterate canonical language keys in deterministic order.
+        for alias in normalized_aliases.get(language_name, []):  # Iterate normalized aliases for current canonical language.
+            if alias == "":  # Verify alias is not empty before metadata comparison.
+                continue  # Continue to next alias when normalized alias is empty.
+            for metadata_value in metadata_values:  # Iterate normalized metadata values for substring matching.
+                if metadata_value == "":  # Verify metadata value has content before matching.
+                    continue  # Continue to next metadata value when empty.
+                if alias in metadata_value:  # Verify alias appears in current normalized metadata value.
+                    return language_name  # Return canonical language key when a fuzzy match is found.
+
+    return None  # Return None when language detection cannot resolve a canonical desired language.
+
+
+def should_skip_processing_for_correct_defaults(video_path, audio_streams, subtitle_streams):
+    """
+    Determine whether processing can be skipped when default streams already match priority.
+
+    :param video_path: Path to the video file
+    :param audio_streams: List of parsed audio stream dicts
+    :param subtitle_streams: List of parsed subtitle stream dicts
+    :return: True when both default audio and subtitle streams already match highest priority
+    """
+
+    default_audio_stream = find_current_default_stream(audio_streams)  # Resolve currently flagged default audio stream.
+    default_subtitle_stream = find_current_default_stream(subtitle_streams)  # Resolve currently flagged default subtitle stream.
+    desired_audio_language = resolve_priority_canonical_language("audio")  # Resolve canonical top-priority audio language from configuration.
+    desired_subtitle_language = resolve_priority_canonical_language("subtitle")  # Resolve canonical top-priority subtitle language from configuration.
+
+    if default_audio_stream is None or default_subtitle_stream is None:  # Verify both default streams exist before skip decision.
+        return False  # Return False when one of the default streams is missing.
+    if desired_audio_language is None or desired_subtitle_language is None:  # Verify top-priority canonical languages were resolved from configuration.
+        return False  # Return False when priority canonical languages cannot be resolved.
+
+    current_audio_language = detect_stream_language_for_validation(default_audio_stream, "audio")  # Detect canonical language for current default audio stream.
+    current_subtitle_language = detect_stream_language_for_validation(default_subtitle_stream, "subtitle")  # Detect canonical language for current default subtitle stream.
+
+    if current_audio_language == desired_audio_language and current_subtitle_language == desired_subtitle_language:  # Verify both defaults already match highest-priority desired languages.
+        verbose_output(f"[DEBUG] Skipping file as default streams already match desired priority: {os.path.basename(video_path)}")  # Output debug skip log in the existing format.
+        return True  # Return True to skip remuxing for this file.
+
+    return False  # Return False when at least one default stream does not match configured priority.
+
+
 def apply_prune_and_set_defaults(video_path, audio_streams, subtitle_streams):
     """
     Build and run ffmpeg command to keep only DESIRED tracks and set defaults accordingly.
@@ -1081,6 +1204,9 @@ def swap_audio_tracks(video_path):
                 f"{BackgroundColors.YELLOW}No audio tracks found for: {BackgroundColors.CYAN}{video_path}{Style.RESET_ALL}"
             )
             return  # Skip this file
+
+        if should_skip_processing_for_correct_defaults(video_path, audio_streams, subtitle_streams):  # Verify whether both current defaults already match highest-priority desired languages.
+            return  # Skip remuxing when default streams already match configured priority.
 
         apply_prune_and_set_defaults(video_path, audio_streams, subtitle_streams)  # Prune non-desired and set defaults
         return  # Return after pruning operation
