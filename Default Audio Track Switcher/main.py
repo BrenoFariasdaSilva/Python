@@ -98,7 +98,7 @@ STREAM_TYPE_PRIORITY_ORDER = {
 
 DESIRED_LANGUAGES = {  # Dictionary of desired languages with their corresponding language codes (case-insensitive)
     "English": ["english", "eng", "en",  "Inglês"],  # Languages to prioritize when selecting default audio track
-    "Brazilian Portuguese": ["brazilian", "portuguese", "COMPLETA PT-BR", "PT-BR COMPLETA", "PT-BR FULL", "Português (Brasil)", "pt-br", "PT-BR FORCED", "pt"],  # Additional languages can be added here
+    "Brazilian Portuguese": ["PT-BR FULL", "brazilian", "portuguese", "COMPLETA PT-BR", "PT-BR COMPLETA", "Português (Brasil)", "pt-br", "PT-BR FORCED", "pt"],  # Additional languages can be added here
 }
 
 UNDESIRED_LANGUAGES = {  # Dictionary of undesired languages with their corresponding language codes (case-insensitive)
