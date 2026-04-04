@@ -738,6 +738,145 @@ def select_best_stream(streams, kept_positions, priority_names, pos_key):
     return None  # Return None when there are no candidate streams to select
 
 
+def resolve_canonical_language_from_priority_name(priority_name):
+    """
+    Resolve a priority display name to a canonical DESIRED_LANGUAGES key.
+
+    :param priority_name: Priority name from STREAM_TYPE_PRIORITY_ORDER
+    :return: Canonical DESIRED_LANGUAGES key or None
+    """
+
+    if priority_name in DESIRED_LANGUAGES:  # Verify direct canonical key match first
+        return priority_name  # Return canonical key immediately when exact key exists
+
+    normalized_priority_name = normalize_text(priority_name)  # Normalize priority text for robust alias matching
+    normalized_aliases = get_normalized_desired_language_aliases()  # Build normalized alias mapping for canonical lookup
+    for language_name, aliases in normalized_aliases.items():  # Iterate canonical language keys and aliases
+        for alias in aliases:  # Iterate normalized aliases for the current canonical language
+            if alias == "":  # Verify alias contains meaningful content before comparing
+                continue  # Continue to next alias when current alias is empty
+            if alias == normalized_priority_name or normalized_priority_name in alias or alias in normalized_priority_name:  # Verify alias relation between priority name and canonical alias
+                return language_name  # Return canonical language key when alias relation matches
+
+    return None  # Return None when no canonical language can be resolved
+
+
+def get_ordered_language_aliases_for_priority(language_name):
+    """
+    Build normalized aliases for a canonical language preserving DESIRED_LANGUAGES order.
+
+    :param language_name: Canonical DESIRED_LANGUAGES key
+    :return: Ordered list of normalized aliases from DESIRED_LANGUAGES values
+    """
+
+    ordered_aliases = []  # Initialize ordered alias list for scoring
+    seen_aliases = set()  # Initialize set for duplicate suppression
+    for alias in DESIRED_LANGUAGES.get(language_name, []):  # Iterate configured aliases in declaration order
+        normalized_alias = normalize_text(alias)  # Normalize alias text for robust case-insensitive matching
+        if normalized_alias == "":  # Verify normalized alias has content
+            continue  # Continue to next alias when normalized alias is empty
+        if normalized_alias in seen_aliases:  # Verify alias has not already been added
+            continue  # Continue to next alias when duplicate alias is found
+        ordered_aliases.append(normalized_alias)  # Append alias preserving DESIRED_LANGUAGES ordering
+        seen_aliases.add(normalized_alias)  # Mark alias as added to keep scoring deterministic
+
+    return ordered_aliases  # Return ordered normalized aliases for scoring
+
+
+def compute_stream_language_alias_priority_score(stream, ordered_aliases):
+    """
+    Compute stream score using first matching alias index from ordered aliases.
+
+    :param stream: Stream metadata dict
+    :param ordered_aliases: Ordered normalized alias list for target language
+    :return: Integer score where lower is better
+    """
+
+    metadata_values = []  # Initialize metadata values container for substring matching
+    metadata_values.append(normalize_text(stream.get("raw_title", "")))  # Add normalized raw title metadata
+    metadata_values.append(normalize_text(stream.get("title", "")))  # Add normalized title metadata fallback
+    metadata_values.append(normalize_text(stream.get("raw_language", "")))  # Add normalized raw language metadata
+    for value in (stream.get("tags", {}) or {}).values():  # Iterate all tag values for broader metadata matching
+        metadata_values.append(normalize_text(value))  # Add normalized tag value for substring scoring
+
+    fallback_score = len(ordered_aliases) + 1000  # Define deterministic fallback score for non-matching aliases
+    for alias_index, alias in enumerate(ordered_aliases):  # Iterate aliases in strict declaration order for scoring
+        if alias == "":  # Verify alias has content before comparing
+            continue  # Continue to next alias when alias is empty
+        for metadata_value in metadata_values:  # Iterate normalized metadata values for substring match
+            if metadata_value == "":  # Verify metadata value has content before comparing
+                continue  # Continue to next metadata value when empty
+            if alias in metadata_value:  # Verify ordered alias appears as substring in metadata value
+                return alias_index  # Return first alias index as strict priority score
+
+    return fallback_score  # Return fallback score when no alias match is found
+
+
+def subtitle_stream_matches_language_aliases(stream, ordered_aliases):
+    """
+    Verify whether subtitle metadata matches any alias from a canonical language group.
+
+    :param stream: Subtitle stream metadata dict
+    :param ordered_aliases: Ordered normalized alias list for a canonical language
+    :return: True when at least one alias matches subtitle metadata, False otherwise
+    """
+
+    metadata_values = []  # Initialize metadata values container for alias matching
+    metadata_values.append(normalize_text(stream.get("raw_title", "")))  # Add normalized raw title metadata
+    metadata_values.append(normalize_text(stream.get("title", "")))  # Add normalized title metadata fallback
+    metadata_values.append(normalize_text(stream.get("raw_language", "")))  # Add normalized raw language metadata
+    for value in (stream.get("tags", {}) or {}).values():  # Iterate all tag values for additional metadata matching
+        metadata_values.append(normalize_text(value))  # Add normalized tag value to metadata candidates
+
+    for alias in ordered_aliases:  # Iterate aliases in configured priority order
+        if alias == "":  # Verify alias contains meaningful content before matching
+            continue  # Continue to next alias when alias is empty
+        for metadata_value in metadata_values:  # Iterate metadata values to evaluate substring match
+            if metadata_value == "":  # Verify metadata value contains content before matching
+                continue  # Continue to next metadata value when empty
+            if alias in metadata_value:  # Verify alias appears in subtitle metadata value
+                return True  # Return True immediately when alias metadata match is found
+
+    return False  # Return False when no aliases match subtitle metadata
+
+
+def select_best_subtitle_stream(streams, kept_positions, priority_names, pos_key):
+    """
+    Select the best subtitle position by stream-type priority then alias priority score.
+
+    :param streams: List of subtitle stream dicts
+    :param kept_positions: List of subtitle positions to consider
+    :param priority_names: Ordered priority names from STREAM_TYPE_PRIORITY_ORDER['subtitle']
+    :param pos_key: Physical position key name ('sub_pos')
+    :return: Selected subtitle physical position integer or None
+    """
+
+    filtered_streams = filter_descriptive_streams(streams)  # Remove descriptive streams before subtitle selection
+    candidate_streams = [s for s in filtered_streams if s.get(pos_key) in kept_positions]  # Keep only mapped subtitle candidates
+
+    for preferred in priority_names:  # Iterate configured subtitle language priorities in order
+        canonical_language = resolve_canonical_language_from_priority_name(preferred)  # Resolve priority display name to canonical desired language
+        if canonical_language is None:  # Verify canonical language was resolved for current priority name
+            continue  # Continue to next priority name when canonical language resolution fails
+        language_aliases = get_ordered_language_aliases_for_priority(canonical_language)  # Get strict ordered aliases for intra-language scoring
+        ranked_candidates = []  # Initialize ranked candidate tuples for current language
+
+        for stream_order, stream in enumerate(candidate_streams):  # Iterate candidates preserving existing stream order for tie-breaking
+            if not subtitle_stream_matches_language_aliases(stream, language_aliases):  # Verify subtitle metadata matches current canonical language aliases
+                continue  # Continue to next stream when language group does not match
+            priority_score = compute_stream_language_alias_priority_score(stream, language_aliases)  # Compute intra-language alias priority score
+            ranked_candidates.append((priority_score, stream_order, stream.get(pos_key)))  # Store score, stable order, and stream position
+
+        if len(ranked_candidates) > 0:  # Verify at least one candidate exists for current language priority
+            ranked_candidates.sort(key=lambda item: (item[0], item[1]))  # Sort by strict alias score then existing stream order tie-breaker
+            return ranked_candidates[0][2]  # Return best subtitle position for current language priority
+
+    if len(candidate_streams) > 0:  # Verify at least one subtitle candidate exists for fallback
+        return candidate_streams[0].get(pos_key)  # Fallback to first candidate preserving existing behavior when no priority language matches
+
+    return None  # Return None when no subtitle candidates are available
+
+
 def find_best_stream_by_priority(streams, kept_positions, priority_names, pos_key):
     """
     Select the best stream physical position based on priority names.
@@ -895,8 +1034,12 @@ def should_skip_processing_for_correct_defaults(video_path, audio_streams, subti
 
     current_audio_language = detect_stream_language_for_validation(default_audio_stream, "audio")  # Detect canonical language for current default audio stream.
     current_subtitle_language = detect_stream_language_for_validation(default_subtitle_stream, "subtitle")  # Detect canonical language for current default subtitle stream.
+    desired_subtitle_positions = [s.get("sub_pos") for s in subtitle_streams if s.get("classification") == "desired"]  # Compute desired subtitle positions for strict default verification.
+    subtitle_priorities = resolve_priority_list("subtitle")  # Resolve configured subtitle priorities for strict default verification.
+    expected_subtitle_pos = select_best_subtitle_stream(subtitle_streams, desired_subtitle_positions, subtitle_priorities, "sub_pos")  # Resolve expected default subtitle position using strict intra-language priority.
+    current_default_subtitle_pos = default_subtitle_stream.get("sub_pos")  # Resolve current default subtitle position for equality verification.
 
-    if current_audio_language == desired_audio_language and current_subtitle_language == desired_subtitle_language:  # Verify both defaults already match highest-priority desired languages.
+    if current_audio_language == desired_audio_language and current_subtitle_language == desired_subtitle_language and expected_subtitle_pos == current_default_subtitle_pos:  # Verify both defaults match priority language and subtitle variant priority.
         verbose_output(f"[DEBUG] Skipping file as default streams already match desired priority: {os.path.basename(video_path)}")  # Output debug skip log in the existing format.
         return True  # Return True to skip remuxing for this file.
 
@@ -930,7 +1073,7 @@ def apply_prune_and_set_defaults(video_path, audio_streams, subtitle_streams):
     if default_audio_pos is None:  # If no prioritized audio found
         default_audio_pos = find_original_default_position(audio_streams, "audio_pos")  # Fallback to original default if present
     subtitle_priorities = resolve_priority_list("subtitle")  # Resolve subtitle priority names from config
-    default_sub_pos = select_best_stream(subtitle_streams, kept_sub_positions, subtitle_priorities, "sub_pos")  # Find best subtitle by priority using new helper
+    default_sub_pos = select_best_subtitle_stream(subtitle_streams, kept_sub_positions, subtitle_priorities, "sub_pos")  # Find best subtitle by stream priority and intra-language alias score
     
     if default_sub_pos is None:  # If no prioritized subtitle found
         default_sub_pos = find_original_default_position(subtitle_streams, "sub_pos")  # Fallback to original default if present
@@ -1149,6 +1292,18 @@ def apply_audio_track_default(video_path, audio_tracks, default_track_index, kep
 
     cmd = ["ffmpeg", "-y", "-i", video_path, "-map", "0", "-map", "-0:a"]  # Base mapping preserving subs
 
+    subtitle_streams = []  # Initialize subtitle stream container for default selection in fallback mode
+    default_sub_pos = None  # Initialize default subtitle position for disposition assignment
+    if not REMOVE_OTHER_SUBTITLE_TRACKS:  # Only compute subtitle default when subtitle streams are preserved
+        try:  # Guard subtitle parsing and selection path to keep fallback resilient
+            _, subtitle_streams = classify_streams(video_path)  # Collect classified subtitle streams from current input file
+            kept_sub_positions = [s.get("sub_pos") for s in subtitle_streams if s.get("classification") == "desired"]  # Compute desired subtitle positions for default selection
+            subtitle_priorities = resolve_priority_list("subtitle")  # Resolve configured subtitle priorities in declared order
+            default_sub_pos = select_best_subtitle_stream(subtitle_streams, kept_sub_positions, subtitle_priorities, "sub_pos")  # Resolve best subtitle default using metadata alias priority
+        except Exception:  # Preserve original fallback behavior when subtitle parsing fails
+            subtitle_streams = []  # Reset subtitle stream list on selection failure
+            default_sub_pos = None  # Keep subtitle default unset on selection failure
+
     if REMOVE_OTHER_SUBTITLE_TRACKS:
         cmd += ["-map", "-0:s"]
 
@@ -1162,6 +1317,13 @@ def apply_audio_track_default(video_path, audio_tracks, default_track_index, kep
             cmd += ["-disposition:a:" + str(i), "default"]  # Set as default
         else:  # If this is not the default track
             cmd += ["-disposition:a:" + str(i), "0"]  # Unset default
+
+    if not REMOVE_OTHER_SUBTITLE_TRACKS and len(subtitle_streams) > 0:  # Only set subtitle dispositions when subtitle streams are preserved
+        for i, _ in enumerate(subtitle_streams):  # Iterate subtitle outputs in preserved stream order
+            if default_sub_pos is not None and i == default_sub_pos:  # Verify this subtitle is the selected default stream
+                cmd += ["-disposition:s:" + str(i), "default"]  # Set selected subtitle as default
+            else:  # For non-selected subtitle streams
+                cmd += ["-disposition:s:" + str(i), "0"]  # Clear subtitle default and forced flags
 
     cmd += [temp_file]  # Output file
 
