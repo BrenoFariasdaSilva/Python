@@ -90,6 +90,7 @@ IGNORE_FILE_PATTERNS = [
 REMOVE_OTHER_AUDIO_TRACKS = True  # Set to True to remove other audio tracks after setting the default
 REMOVE_OTHER_SUBTITLE_TRACKS = True  # Set to True to remove other subtitle tracks
 REMOVE_DESCRIPTIVE_STREAMS = True  # If True, remove descriptive/SDH streams (audio and subtitles) before selection
+REMOVE_FORCED_STREAMS = True  # If True, remove forced streams before selection
 
 STREAM_TYPE_PRIORITY_ORDER = {
     "audio": ["English", "Portuguese"],  # Priority for audio tracks (English first)
@@ -684,19 +685,62 @@ def is_descriptive_stream(stream):
     return False  # No descriptive indicators found
 
 
+def is_forced_stream(stream):
+    """
+    Detect whether a stream is forced.
+
+    :param stream: Stream metadata dict
+    :return: True if forced keywords or disposition flags are found, False otherwise
+    """
+
+    keywords = ["forced"]  # Forced keyword to match
+    values = [str(stream.get("title", "")).lower()]  # Start with title normalized
+    values.append(str(stream.get("language", "")).lower())  # Append language normalized
+    tags = stream.get("tags", {}) or {}  # Safely get tags dict or empty
+
+    for v in tags.values():  # Iterate over all tag values
+        try:  # Guard conversion to string for each tag value
+            values.append(str(v).lower())  # Append lowercased tag value
+        except Exception:  # Ignore problematic tag value conversions
+            continue  # Continue with next tag value
+
+    disp = stream.get("disposition", {}) or {}  # Safely get disposition dict or empty
+
+    try:  # Guard numeric/coercion checks on disposition flags
+        for key in ("forced",):  # Keys to inspect
+            if key in disp and disp.get(key) is not None:  # If disposition key exists and is not None
+                val = disp.get(key)  # Get raw disposition value
+                sval = str(val).lower()  # Normalize disposition value to string
+
+                if sval in ("1", "true", "yes"):  # Treat these as affirmative indicators
+                    return True  # Disposition indicates forced stream
+    except Exception:  # Ignore any unexpected disposition parsing issues
+        pass  # Continue to keyword scanning if disposition checks fail
+
+    for val in values:  # Evaluate all collected metadata values for keywords
+        for kw in keywords:  # Iterate forced keywords
+            if kw in val:  # If keyword is present in any metadata value
+                return True  # Mark stream as forced
+
+    return False  # No forced indicators found
+
+
 def filter_undesired_streams(streams):
     """
-    Filter out undesired streams based on classification and descriptive detection.
+    Filter out undesired streams based on classification and stream detection.
 
     :param streams: List of stream dicts
     :return: Filtered list of stream dicts
     """
-    
+
     filtered = streams  # Initialize filtered list with original streams
     
     if REMOVE_DESCRIPTIVE_STREAMS:  # Only remove descriptive streams when configured
-        filtered = [s for s in streams if not is_descriptive_stream(s)]  # Build new list excluding descriptive streams
+        filtered = [s for s in filtered if not is_descriptive_stream(s)]  # Build new list excluding descriptive streams
     
+    if REMOVE_FORCED_STREAMS:  # Only remove forced streams when configured
+        filtered = [s for s in filtered if not is_forced_stream(s)]  # Build new list excluding forced streams
+
     return filtered  # Return the filtered (or original) list
 
 
@@ -708,7 +752,7 @@ def filter_desired_streams(streams):
     :return: List of streams with classification == 'desired'
     """
     
-    prefiltered = filter_undesired_streams(streams)  # Ensure descriptive streams removed before classification filtering
+    prefiltered = filter_undesired_streams(streams)  # Ensure undesired streams removed before classification filtering
     
     return [s for s in prefiltered if s.get("classification") == "desired"]  # Return only streams explicitly marked desired
 
@@ -724,7 +768,7 @@ def select_best_stream(streams, kept_positions, priority_names, pos_key):
     :return: Selected physical position integer or None
     """
     
-    filtered_streams = filter_undesired_streams(streams)  # Remove descriptive streams before priority selection
+    filtered_streams = filter_undesired_streams(streams)  # Remove undesired streams before priority selection
     candidate_streams = [s for s in filtered_streams if s.get(pos_key) in kept_positions]  # Keep only streams that remain mapped
     
     for preferred in priority_names:  # Iterate language priorities in configured order
@@ -851,7 +895,7 @@ def select_best_subtitle_stream(streams, kept_positions, priority_names, pos_key
     :return: Selected subtitle physical position integer or None
     """
 
-    filtered_streams = filter_undesired_streams(streams)  # Remove descriptive streams before subtitle selection
+    filtered_streams = filter_undesired_streams(streams)  # Remove undesired streams before subtitle selection
     candidate_streams = [s for s in filtered_streams if s.get(pos_key) in kept_positions]  # Keep only mapped subtitle candidates
 
     for preferred in priority_names:  # Iterate configured subtitle language priorities in order
@@ -1442,7 +1486,7 @@ def main():
     :return: None
     """
     
-    global REMOVE_OTHER_AUDIO_TRACKS, REMOVE_OTHER_SUBTITLE_TRACKS, REMOVE_DESCRIPTIVE_STREAMS  # Make descriptive config writable
+    global REMOVE_OTHER_AUDIO_TRACKS, REMOVE_OTHER_SUBTITLE_TRACKS, REMOVE_DESCRIPTIVE_STREAMS, REMOVE_FORCED_STREAMS  # Make descriptive and forced config writable
 
     # Parse command-line arguments
     parser = argparse.ArgumentParser(
@@ -1466,6 +1510,12 @@ def main():
         default=None,  # Default to None so absence does not override constants
         help="Remove descriptive/SDH streams before selection"
     )
+    parser.add_argument(  # Register the remove forced streams flag
+        "--remove-forced-streams",
+        action="store_true",  # Use presence to set True when explicitly passed
+        default=None,  # Default to None so absence does not override constants
+        help="Remove forced streams before selection"  # Describe the forced stream filter
+    )
     args = parser.parse_args()
 
     if args.remove_other_audio is not None:  # Only override when flag explicitly present
@@ -1474,6 +1524,8 @@ def main():
         REMOVE_OTHER_SUBTITLE_TRACKS = args.remove_other_subtitles  # Override global constant accordingly
     if args.remove_descriptive_streams is not None:  # Only override when flag explicitly present
         REMOVE_DESCRIPTIVE_STREAMS = args.remove_descriptive_streams  # Override global constant accordingly
+    if args.remove_forced_streams is not None:  # Only override when flag explicitly present
+        REMOVE_FORCED_STREAMS = args.remove_forced_streams  # Override global constant accordingly
 
     print(
         f"{BackgroundColors.CLEAR_TERMINAL}{BackgroundColors.BOLD}{BackgroundColors.GREEN}Welcome to the {BackgroundColors.CYAN}Default Audio Track Switcher{BackgroundColors.GREEN}!{Style.RESET_ALL}\n"
@@ -1485,6 +1537,8 @@ def main():
         print(f"{BackgroundColors.GREEN}Mode: {BackgroundColors.CYAN}Removing Non-Desired Subtitle Tracks{Style.RESET_ALL}")
     if REMOVE_DESCRIPTIVE_STREAMS:  # If descriptive stream filtering is enabled, print the mode
         print(f"{BackgroundColors.GREEN}Mode: {BackgroundColors.CYAN}Filtering Descriptive Streams{Style.RESET_ALL}")
+    if REMOVE_FORCED_STREAMS:  # If forced stream filtering is enabled, print the mode
+        print(f"{BackgroundColors.GREEN}Mode: {BackgroundColors.CYAN}Filtering Forced Streams{Style.RESET_ALL}")
 
     print()  # Add a newline for better separation before processing starts
 
