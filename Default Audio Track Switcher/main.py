@@ -684,9 +684,9 @@ def is_descriptive_stream(stream):
     return False  # No descriptive indicators found
 
 
-def filter_descriptive_streams(streams):
+def filter_undesired_streams(streams):
     """
-    Filter out descriptive streams if REMOVE_DESCRIPTIVE_STREAMS is enabled.
+    Filter out undesired streams based on classification and descriptive detection.
 
     :param streams: List of stream dicts
     :return: Filtered list of stream dicts
@@ -708,7 +708,7 @@ def filter_desired_streams(streams):
     :return: List of streams with classification == 'desired'
     """
     
-    prefiltered = filter_descriptive_streams(streams)  # Ensure descriptive streams removed before classification filtering
+    prefiltered = filter_undesired_streams(streams)  # Ensure descriptive streams removed before classification filtering
     
     return [s for s in prefiltered if s.get("classification") == "desired"]  # Return only streams explicitly marked desired
 
@@ -724,7 +724,7 @@ def select_best_stream(streams, kept_positions, priority_names, pos_key):
     :return: Selected physical position integer or None
     """
     
-    filtered_streams = filter_descriptive_streams(streams)  # Remove descriptive streams before priority selection
+    filtered_streams = filter_undesired_streams(streams)  # Remove descriptive streams before priority selection
     candidate_streams = [s for s in filtered_streams if s.get(pos_key) in kept_positions]  # Keep only streams that remain mapped
     
     for preferred in priority_names:  # Iterate language priorities in configured order
@@ -851,7 +851,7 @@ def select_best_subtitle_stream(streams, kept_positions, priority_names, pos_key
     :return: Selected subtitle physical position integer or None
     """
 
-    filtered_streams = filter_descriptive_streams(streams)  # Remove descriptive streams before subtitle selection
+    filtered_streams = filter_undesired_streams(streams)  # Remove descriptive streams before subtitle selection
     candidate_streams = [s for s in filtered_streams if s.get(pos_key) in kept_positions]  # Keep only mapped subtitle candidates
 
     for preferred in priority_names:  # Iterate configured subtitle language priorities in order
