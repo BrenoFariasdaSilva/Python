@@ -666,7 +666,7 @@ def is_descriptive_stream(stream):
     disp = stream.get("disposition", {}) or {}  # Safely get disposition dict or empty
     
     try:  # Guard numeric/coercion checks on disposition flags
-        for key in ("hearing_impaired", "commentary", "descriptive", "audio_description", "described"):  # Keys to inspect
+        for key in ("sdh", "hearing_impaired", "commentary", "descriptive", "audio_description", "described"):  # Keys to inspect
             if key in disp and disp.get(key) is not None:  # If disposition key exists and is not None
                 val = disp.get(key)  # Get raw disposition value
                 sval = str(val).lower()  # Normalize disposition value to string
