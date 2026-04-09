@@ -1078,7 +1078,8 @@ def should_skip_processing_for_correct_defaults(video_path, audio_streams, subti
 
     current_audio_language = detect_stream_language_for_validation(default_audio_stream, "audio")  # Detect canonical language for current default audio stream.
     current_subtitle_language = detect_stream_language_for_validation(default_subtitle_stream, "subtitle")  # Detect canonical language for current default subtitle stream.
-    desired_subtitle_positions = [s.get("sub_pos") for s in subtitle_streams if s.get("classification") == "desired"]  # Compute desired subtitle positions for strict default verification.
+    filtered_subtitle_streams = filter_undesired_streams(subtitle_streams)  # Remove descriptive/forced subtitles before position extraction.
+    desired_subtitle_positions = [s.get("sub_pos") for s in filtered_subtitle_streams if s.get("classification") == "desired"]  # Compute desired subtitle positions from filtered streams.
     subtitle_priorities = resolve_priority_list("subtitle")  # Resolve configured subtitle priorities for strict default verification.
     expected_subtitle_pos = select_best_subtitle_stream(subtitle_streams, desired_subtitle_positions, subtitle_priorities, "sub_pos")  # Resolve expected default subtitle position using strict intra-language priority.
     current_default_subtitle_pos = default_subtitle_stream.get("sub_pos")  # Resolve current default subtitle position for equality verification.
@@ -1104,8 +1105,10 @@ def apply_prune_and_set_defaults(video_path, audio_streams, subtitle_streams):
     ext = ext.lower()  # Normalize extension to lowercase
     temp_file = root + ".tmp" + ext  # Build temporary output path
 
-    kept_audio_positions = [a.get("audio_pos") for a in audio_streams if a.get("classification") == "desired"]  # Compute desired audio positions
-    kept_sub_positions = [s.get("sub_pos") for s in subtitle_streams if s.get("classification") == "desired"]  # Compute desired subtitle positions
+    filtered_audio_streams = filter_undesired_streams(audio_streams)  # Remove descriptive/forced audio before position extraction.
+    kept_audio_positions = [a.get("audio_pos") for a in filtered_audio_streams if a.get("classification") == "desired"]  # Compute desired audio positions from filtered streams.
+    filtered_subtitle_streams = filter_undesired_streams(subtitle_streams)  # Remove descriptive/forced subtitles before position extraction.
+    kept_sub_positions = [s.get("sub_pos") for s in filtered_subtitle_streams if s.get("classification") == "desired"]  # Compute desired subtitle positions from filtered streams.
 
     if not kept_audio_positions:  # If no desired audio streams were found then abort per strict rules
         print(f"{BackgroundColors.YELLOW}No desired audio tracks found for: {BackgroundColors.CYAN}{video_path}{Style.RESET_ALL}")  # Notify user
