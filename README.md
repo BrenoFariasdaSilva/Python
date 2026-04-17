@@ -22,7 +22,7 @@ Feel free to contribute and send suggestions.
 ![GitHub Code Size in Bytes](https://img.shields.io/github/languages/code-size/BrenoFariasdaSilva/Python)
 ![GitHub Last Commit](https://img.shields.io/github/last-commit/BrenoFariasdaSilva/Python)
 ![GitHub](https://img.shields.io/github/license/BrenoFariasdaSilva/Python)
-![wakatime](https://wakatime.com/badge/github/BrenoFariasdaSilva/Python.svg)
+![wakatime](https://wakatime.com/badge/user/28f6c354-43b3-4634-8ec1-631893fe27d0/project/f9779661-2918-490f-8fa7-9041fb36aab4.svg)
 
 </div>
 
