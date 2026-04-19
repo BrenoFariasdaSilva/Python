@@ -69,7 +69,7 @@ class BackgroundColors:  # Colors for the terminal
 
 # Execution Constants:
 VERBOSE = False  # Set to True to output verbose messages
-INPUT_PATH = "D:\\Sem Backup\\Download\\Temp\\TeraBox\\"  # Set the default input path for first-level directory processing
+INPUT_PATH = r"D:/Sem Backup/Download/Temp/TeraBox/"  # Set the default input path for first-level directory processing
 
 # Logger Setup:
 logger = Logger(f"./Logs/{Path(__file__).stem}.log", clean=True)  # Create a Logger instance
