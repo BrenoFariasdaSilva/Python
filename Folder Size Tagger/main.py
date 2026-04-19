@@ -658,7 +658,7 @@ def main():
         perform_safe_rename(path, new_name)  # Rename directory safely avoiding collisions
     
     print(
-        f"{BackgroundColors.GREEN}Total files deleted: {BackgroundColors.CYAN}{DELETION_STATS['files_deleted']}{BackgroundColors.GREEN} | Total dirs deleted: {BackgroundColors.CYAN}{DELETION_STATS['dirs_deleted']}{BackgroundColors.GREEN} | Total deleted size: {BackgroundColors.CYAN}{convert_bytes_to_gb(DELETION_STATS['bytes_deleted']):.2f}GB{Style.RESET_ALL}"
+        f"{BackgroundColors.GREEN}Total files deleted: {BackgroundColors.CYAN}{DELETION_STATS['files_deleted']}{BackgroundColors.GREEN} | Total dirs deleted: {BackgroundColors.CYAN}{DELETION_STATS['dirs_deleted']}{BackgroundColors.GREEN} | Total deleted size: {BackgroundColors.CYAN}{convert_bytes_to_gb(DELETION_STATS['bytes_deleted']):.2f} GB{Style.RESET_ALL}"
     )  # Output aggregated deletion statistics
 
     finish_time = datetime.datetime.now()  # Get the finish time of the program
