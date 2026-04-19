@@ -657,17 +657,15 @@ def main():
         new_name = build_indexed_name(index, clean_name, size_gb)  # Build the final indexed and suffixed name
         perform_safe_rename(path, new_name)  # Rename directory safely avoiding collisions
     
-    # Implement logic here
+    print(
+        f"{BackgroundColors.GREEN}Total files deleted: {BackgroundColors.CYAN}{DELETION_STATS['files_deleted']}{BackgroundColors.GREEN} | Total dirs deleted: {BackgroundColors.CYAN}{DELETION_STATS['dirs_deleted']}{BackgroundColors.GREEN} | Total deleted size: {BackgroundColors.CYAN}{convert_bytes_to_gb(DELETION_STATS['bytes_deleted']):.2f}GB{Style.RESET_ALL}"
+    )  # Output aggregated deletion statistics
 
     finish_time = datetime.datetime.now()  # Get the finish time of the program
     
     print(
         f"{BackgroundColors.GREEN}Start time: {BackgroundColors.CYAN}{start_time.strftime('%d/%m/%Y - %H:%M:%S')}\n{BackgroundColors.GREEN}Finish time: {BackgroundColors.CYAN}{finish_time.strftime('%d/%m/%Y - %H:%M:%S')}\n{BackgroundColors.GREEN}Execution time: {BackgroundColors.CYAN}{calculate_execution_time(start_time, finish_time)}{Style.RESET_ALL}"
     )  # Output the start and finish times
-    
-    print(
-        f"{BackgroundColors.GREEN}Total files deleted: {BackgroundColors.CYAN}{DELETION_STATS['files_deleted']}{BackgroundColors.GREEN} | Total dirs deleted: {BackgroundColors.CYAN}{DELETION_STATS['dirs_deleted']}{BackgroundColors.GREEN} | Total deleted size: {BackgroundColors.CYAN}{convert_bytes_to_gb(DELETION_STATS['bytes_deleted']):.2f}GB{Style.RESET_ALL}"
-    )  # Output aggregated deletion statistics
     
     print(
         f"{BackgroundColors.BOLD}{BackgroundColors.GREEN}Program finished.{Style.RESET_ALL}"
