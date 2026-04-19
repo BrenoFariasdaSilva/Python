@@ -93,6 +93,9 @@ RUN_FUNCTIONS = {
     "Play Sound": True,  # Set to True to play a sound when the program finishes
 }
 
+# Deletion statistics accumulator:
+DELETION_STATS = {"files_deleted": 0, "dirs_deleted": 0, "bytes_deleted": 0}  # Tracks deleted files, directories and total bytes
+
 # Functions Definitions:
 
 
@@ -195,7 +198,13 @@ def delete_listed_directories(path: str) -> None:
             continue  # Skip non-target directories
 
         try:  # Protect recursive directory deletion
+            files_count = 0  # Initialize file counter for this directory
+            for _root, _dirs, files in os.walk(entry_path):  # Traverse directory to count files
+                files_count += len(files)  # Increment file counter for each file found
+            dir_size = calculate_directory_size_bytes(entry_path)  # Compute directory size before deletion
             shutil.rmtree(entry_path)  # Delete directory and all nested contents
+            update_deletion_stats(files_count, dir_size)  # Aggregate deleted files and bytes metrics
+            DELETION_STATS["dirs_deleted"] += 1  # Increment deleted directories counter
         except (PermissionError, OSError):  # Handle deletion access and OS failures
             continue  # Skip failed deletion and continue processing
 
@@ -255,6 +264,7 @@ def move_video_contents_to_parent(path: str) -> None:
 
         try:  # Protect source directory removal after content move
             os.rmdir(source_directory_path)  # Remove now-empty Video target directory
+            DELETION_STATS["dirs_deleted"] += 1  # Increment deleted directories counter after successful removal
         except (PermissionError, OSError):  # Handle non-empty or inaccessible directory removal
             continue  # Skip failed directory removal and continue processing
 
@@ -282,7 +292,9 @@ def delete_image_files_in_directory(path: str) -> None:
         if ext.lower() not in image_exts:  # Verify extension is not an image type.
             continue  # Skip non-image files.
         try:  # Protect file deletion operation
+            size_bytes = os.path.getsize(file_path)  # Get file size before removal
             os.remove(file_path)  # Remove the image file.
+            update_deletion_stats(1, size_bytes)  # Aggregate deletion stats for the removed file
         except (PermissionError, OSError):  # Handle deletion access failures
             continue  # Skip files that cannot be removed.
 
@@ -324,6 +336,21 @@ def convert_bytes_to_gb(size_bytes: int) -> float:
     rounded_size_gb = round(size_gb, 2)  # Round the converted value to two decimal places
 
     return rounded_size_gb  # Return rounded gigabyte value
+
+
+def update_deletion_stats(deleted_files: int, deleted_bytes: int) -> dict:
+    """
+    Aggregate deletion statistics increments.
+
+    :param deleted_files: Number of files deleted in this operation.
+    :param deleted_bytes: Total bytes deleted in this operation.
+    :return: Current deletion statistics dictionary.
+    """
+
+    global DELETION_STATS  # Reference global deletion statistics accumulator
+    DELETION_STATS["files_deleted"] += int(deleted_files)  # Increment files deleted counter
+    DELETION_STATS["bytes_deleted"] += int(deleted_bytes)  # Increment bytes deleted accumulator
+    return DELETION_STATS  # Return the updated statistics dictionary
 
 
 def format_directory_name(dirname: str, size_gb: float) -> str:
@@ -587,8 +614,15 @@ def delete_empty_directories(paths: list) -> list:
                 try:  # Protect removal operation for empty directory
                     if not os.listdir(p):  # Verify if directory truly has no entries
                         os.rmdir(p)  # Remove empty directory
+                        DELETION_STATS["dirs_deleted"] += 1  # Increment deleted directories counter for empty dir
                     else:  # Handle case with no size but entries (defensive)
+                        files_count = 0  # Initialize file counter for recursive removal
+                        for _root, _dirs, files in os.walk(p):  # Traverse directory tree to count files
+                            files_count += len(files)  # Increment file counter for each file
+                        dir_size = calculate_directory_size_bytes(p)  # Compute total size before recursive removal
                         shutil.rmtree(p)  # Remove directory recursively
+                        update_deletion_stats(files_count, dir_size)  # Aggregate deleted files and bytes metrics for recursive removal
+                        DELETION_STATS["dirs_deleted"] += 1  # Increment deleted directories counter for recursive removal
                 except (PermissionError, OSError):  # Handle deletion access failures
                     remaining.append(p)  # Keep directory when deletion fails
             else:  # Keep non-empty directories
@@ -803,6 +837,10 @@ def main():
     print(
         f"{BackgroundColors.GREEN}Start time: {BackgroundColors.CYAN}{start_time.strftime('%d/%m/%Y - %H:%M:%S')}\n{BackgroundColors.GREEN}Finish time: {BackgroundColors.CYAN}{finish_time.strftime('%d/%m/%Y - %H:%M:%S')}\n{BackgroundColors.GREEN}Execution time: {BackgroundColors.CYAN}{calculate_execution_time(start_time, finish_time)}{Style.RESET_ALL}"
     )  # Output the start and finish times
+    
+    print(
+        f"{BackgroundColors.GREEN}Total files deleted: {BackgroundColors.CYAN}{DELETION_STATS['files_deleted']}{BackgroundColors.GREEN} | Total dirs deleted: {BackgroundColors.CYAN}{DELETION_STATS['dirs_deleted']}{BackgroundColors.GREEN} | Total deleted size: {BackgroundColors.CYAN}{convert_bytes_to_gb(DELETION_STATS['bytes_deleted']):.2f}GB{Style.RESET_ALL}"
+    )  # Output aggregated deletion statistics
     
     print(
         f"{BackgroundColors.BOLD}{BackgroundColors.GREEN}Program finished.{Style.RESET_ALL}"
