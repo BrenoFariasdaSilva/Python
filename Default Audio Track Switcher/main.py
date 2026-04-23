@@ -501,6 +501,7 @@ def get_audio_tracks(video_path):
             tags = stream.get("tags", {}) or {}  # Get tags dict for language/title metadata
             raw_lang = tags.get("language") or tags.get("LANGUAGE") or tags.get("lang") or ""  # Extract raw language tag with fallbacks
             raw_title = tags.get("title") or ""  # Extract raw title tag with fallback
+            track_name = tags.get("track") or tags.get("TRACK") or ""  # Extract track name tag if present for additional metadata
             detected_language = detect_language(raw_lang, raw_title, "audio")  # Detect canonical language from normalized metadata
             disposition = stream.get("disposition", {}) or {}  # Get disposition dict if present
             tracks.append({  # Append detailed audio track info for classification
@@ -510,6 +511,7 @@ def get_audio_tracks(video_path):
                 "language": detected_language,  # Canonical detected language key or None
                 "raw_language": raw_lang,  # Raw language metadata text
                 "raw_title": raw_title,  # Raw title metadata text
+                "track_name": track_name,  # Track name from tags if present
                 "codec": codec_name,  # Audio codec name
                 "channels": channels,  # Audio channel count
                 "tags": tags,  # Raw tags mapping
@@ -551,6 +553,7 @@ def get_subtitle_tracks(video_path):
             tags = stream.get("tags", {}) or {}  # Get tags dict for language/title metadata
             raw_lang = tags.get("language") or tags.get("LANGUAGE") or tags.get("lang") or ""  # Extract raw language tag with fallbacks
             raw_title = tags.get("title") or ""  # Extract raw title tag with fallback
+            track_name = tags.get("track") or tags.get("TRACK") or ""  # Extract track name tag if present for additional metadata
             detected_language = detect_language(raw_lang, raw_title, "subtitle")  # Detect canonical language from normalized metadata
             disposition = stream.get("disposition", {}) or {}  # Get disposition dict if present
             subs.append({  # Append detailed subtitle track info for classification
@@ -560,13 +563,14 @@ def get_subtitle_tracks(video_path):
                 "language": detected_language,  # Canonical detected language key or None
                 "raw_language": raw_lang,  # Raw language metadata text
                 "raw_title": raw_title,  # Raw title metadata text
+                "track_name": track_name,  # Track name from tags if present
                 "codec": codec_name,  # Subtitle codec name
                 "channels": channels,  # Subtitle channels value for structural parity
                 "tags": tags,  # Raw tags mapping
                 "title": raw_title,  # Title metadata preserved for compatibility
                 "disposition": disposition,  # Disposition flags
             })
-            verbose_output(f"[DEBUG] Subtitle Stream {sub_count}: detected_lang={detected_language} raw=\"{raw_title}\" codec={codec_name}")  # Output per-subtitle debug log with normalized detection
+            verbose_output(f"[DEBUG] Subtitle Stream {sub_count}: detected_lang={detected_language} raw=\"{raw_title}\" track=\"{track_name}\" codec={codec_name}")  # Output per-subtitle debug log with normalized detection
             sub_count += 1  # Increment physical subtitle position counter
 
     return subs  # Return the list of detailed subtitle tracks
