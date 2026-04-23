@@ -587,17 +587,17 @@ def classify_streams(video_path):
     audio_streams = get_audio_tracks(video_path)  # Get detailed audio streams for the file
     subtitle_streams = get_subtitle_tracks(video_path)  # Get detailed subtitle streams for the file
 
-    for a in audio_streams:  # Classify each audio stream
-        if a.get("language") in DESIRED_LANGUAGES:  # Verify detected canonical language belongs to desired set
-            a["classification"] = "desired"  # Label the audio stream as desired
+    for audio_stream in audio_streams:  # Classify each audio stream
+        if any(val in DESIRED_LANGUAGES for val in (audio_stream.get("language"), audio_stream.get("title"))):  # Verify detected canonical language belongs to desired set
+            audio_stream["classification"] = "desired"  # Label the audio stream as desired
         else:  # Otherwise classify as undesired per strict mode
-            a["classification"] = "undesired"  # Label the audio stream as undesired
+            audio_stream["classification"] = "undesired"  # Label the audio stream as undesired
 
-    for s in subtitle_streams:  # Classify each subtitle stream
-        if s.get("language") in DESIRED_LANGUAGES:  # Verify detected canonical language belongs to desired set
-            s["classification"] = "desired"  # Label the subtitle stream as desired
+    for subtitle_stream in subtitle_streams:  # Classify each subtitle stream
+        if any(val in DESIRED_LANGUAGES for val in (subtitle_stream.get("language"), subtitle_stream.get("title"))):  # True if language or title is in DESIRED_LANGUAGES
+            subtitle_stream["classification"] = "desired"  # Label the subtitle stream as desired
         else:  # Otherwise classify as undesired per strict mode
-            s["classification"] = "undesired"  # Label the subtitle stream as undesired
+            subtitle_stream["classification"] = "undesired"  # Label the subtitle stream as undesired
 
     return audio_streams, subtitle_streams  # Return classified audio and subtitle stream lists
 
