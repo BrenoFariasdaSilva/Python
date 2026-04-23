@@ -587,14 +587,24 @@ def classify_streams(video_path):
     audio_streams = get_audio_tracks(video_path)  # Get detailed audio streams for the file
     subtitle_streams = get_subtitle_tracks(video_path)  # Get detailed subtitle streams for the file
 
+    desired_set = set()  # Initialize set to hold all desired language keys and aliases for quick membership testing
+    for key, aliases in DESIRED_LANGUAGES.items():  # Iterate each canonical language and its aliases
+        desired_set.add(str(key).lower())  # Add canonical key
+        for alias in aliases:  # Iterate each alias for this canonical language
+            desired_set.add(str(alias).lower())  # Add all aliases
+
     for audio_stream in audio_streams:  # Classify each audio stream
-        if any(val in DESIRED_LANGUAGES for val in (audio_stream.get("language"), audio_stream.get("title"))):  # Verify detected canonical language belongs to desired set
+        lang = str(audio_stream.get("language") or "").lower()  # Normalize language
+        title = str(audio_stream.get("title") or "").lower()  # Normalize title
+        if lang in desired_set or title in desired_set:  # Check if either matches desired set
             audio_stream["classification"] = "desired"  # Label the audio stream as desired
         else:  # Otherwise classify as undesired per strict mode
             audio_stream["classification"] = "undesired"  # Label the audio stream as undesired
 
     for subtitle_stream in subtitle_streams:  # Classify each subtitle stream
-        if any(val in DESIRED_LANGUAGES for val in (subtitle_stream.get("language"), subtitle_stream.get("title"))):  # True if language or title is in DESIRED_LANGUAGES
+        lang = str(subtitle_stream.get("language") or "").lower()  # Normalize language
+        title = str(subtitle_stream.get("title") or "").lower()  # Normalize title
+        if lang in desired_set or title in desired_set:  # Check if either matches desired set
             subtitle_stream["classification"] = "desired"  # Label the subtitle stream as desired
         else:  # Otherwise classify as undesired per strict mode
             subtitle_stream["classification"] = "undesired"  # Label the subtitle stream as undesired
