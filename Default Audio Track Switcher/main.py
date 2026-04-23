@@ -137,6 +137,7 @@ UNDESIRED_LANGUAGES = {  # Dictionary of undesired languages with their correspo
     "Slovenian": ["slovenian", "slv", "sl", "sl-si", "slovenščina"],
     "Spanish": ["spanish", "spa", "es", "es-es", "es-la", "latam", "castellano", "español"],
     "Swedish": ["swedish", "swe", "sv", "sv-se", "svenska"],
+    "Svenska": ["svenska", "sv", "sv-se", "swedish (sv)"],
     "Thai": ["thai", "tha", "th", "th-th", "ไทย"],
     "Turkish": ["turkish", "tur", "tr", "tr-tr", "türkçe"],
     "Ukrainian": ["ukrainian", "ukraine", "ukr", "ua", "uk", "uk-ua", "українська"],
