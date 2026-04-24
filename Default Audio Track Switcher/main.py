@@ -243,26 +243,46 @@ def detect_language(raw_lang, raw_title, stream_type):
 
     normalized_lang = normalize_text(raw_lang)  # Normalize raw language text
     normalized_title = normalize_text(raw_title)  # Normalize raw title text
-    values = [normalized_lang, normalized_title]  # Build candidate normalized values list
-    normalized_aliases = get_normalized_desired_language_aliases()  # Build normalized desired language aliases
-    priority_names = resolve_priority_list(stream_type)  # Resolve configured priority names for stream type
-    ordered_languages = []  # Initialize ordered canonical language list
-    for language_name in priority_names:  # Iterate language names in configured priority order
-        if language_name in DESIRED_LANGUAGES and language_name not in ordered_languages:  # Verify canonical priority language exists and is unique
-            ordered_languages.append(language_name)  # Add priority language to ordered scan list
-    for language_name in DESIRED_LANGUAGES.keys():  # Iterate remaining canonical desired languages
-        if language_name not in ordered_languages:  # Verify language was not already inserted by priority
-            ordered_languages.append(language_name)  # Add remaining language after priority languages
-    for language_name in ordered_languages:  # Iterate canonical language names in deterministic order
-        aliases = normalized_aliases.get(language_name, [])  # Get normalized aliases for current language
-        for alias in aliases:  # Iterate aliases for this canonical language
-            if alias == "":  # Verify alias is not empty
-                continue  # Continue to next alias if empty
-            for value in values:  # Iterate normalized metadata values
-                if value == "":  # Verify current value has content
-                    continue  # Continue to next value when empty
-                if alias in value:  # Verify alias appears in normalized metadata
-                    return language_name  # Return detected canonical language immediately
+
+    # Step 1: Prefer explicit raw_lang exact match in DESIRED_LANGUAGES
+    for canonical, aliases in DESIRED_LANGUAGES.items():  # Iterate desired language groups
+        for alias in aliases:  # Iterate aliases
+            if normalized_lang == normalize_text(alias):  # Verify normalized raw_lang matches alias
+                return canonical  # Return canonical desired language
+
+    # Step 2: Prefer explicit raw_lang exact match in UNDESIRED_LANGUAGES
+    for canonical, aliases in UNDESIRED_LANGUAGES.items():  # Iterate undesired language groups
+        for alias in aliases:  # Iterate aliases
+            if normalized_lang == normalize_text(alias):  # Verify normalized raw_lang matches alias
+                return None  # Return None for undesired language
+
+    # Step 3: Alias match in DESIRED_LANGUAGES using raw_title
+    for canonical, aliases in DESIRED_LANGUAGES.items():  # Iterate desired language groups
+        for alias in aliases:  # Iterate aliases
+            if normalized_title == normalize_text(alias):  # Verify normalized raw_title matches alias
+                return canonical  # Return canonical desired language
+
+    # Step 4: Alias match in UNDESIRED_LANGUAGES using raw_title
+    for canonical, aliases in UNDESIRED_LANGUAGES.items():  # Iterate undesired language groups
+        for alias in aliases:  # Iterate aliases
+            if normalized_title == normalize_text(alias):  # Verify normalized raw_title matches alias
+                return None  # Return None for undesired language
+
+    # Step 5: Fuzzy substring match for desired (raw_lang and raw_title)
+    for canonical, aliases in DESIRED_LANGUAGES.items():  # Iterate desired language groups
+        for alias in aliases:  # Iterate aliases
+            norm_alias = normalize_text(alias)  # Normalize alias
+            if norm_alias in normalized_lang or norm_alias in normalized_title:  # Verify substring presence
+                return canonical  # Return canonical desired language
+
+    # Step 6: Fuzzy substring match for undesired (raw_lang and raw_title)
+    for canonical, aliases in UNDESIRED_LANGUAGES.items():  # Iterate undesired language groups
+        for alias in aliases:  # Iterate aliases
+            norm_alias = normalize_text(alias)  # Normalize alias
+            if norm_alias in normalized_lang or norm_alias in normalized_title:  # Verify substring presence
+                return None  # Return None for undesired language
+
+    # Step 7: Never default to English unless explicit match
     return None  # Return None when no canonical language match is found
 
 
@@ -551,8 +571,8 @@ def get_subtitle_tracks(video_path):
             codec_name = stream.get("codec_name", "")  # Get subtitle codec name for structured output
             channels = stream.get("channels")  # Get subtitle channels value if provided
             tags = stream.get("tags", {}) or {}  # Get tags dict for language/title metadata
-            raw_lang = tags.get("language") or tags.get("LANGUAGE") or tags.get("lang") or ""  # Extract raw language tag with fallbacks
             raw_title = tags.get("title") or ""  # Extract raw title tag with fallback
+            raw_lang = tags.get("language") or tags.get("LANGUAGE") or tags.get("lang") or ""  # Extract raw language tag with fallbacks
             track_name = tags.get("track") or tags.get("TRACK") or ""  # Extract track name tag if present for additional metadata
             detected_language = detect_language(raw_lang, raw_title, "subtitle")  # Detect canonical language from normalized metadata
             disposition = stream.get("disposition", {}) or {}  # Get disposition dict if present
