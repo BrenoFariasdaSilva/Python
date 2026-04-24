@@ -1159,34 +1159,60 @@ def should_skip_processing_for_correct_defaults(video_path, audio_streams, subti
     :return: True when both default audio and subtitle streams already match highest priority
     """
 
-    verbose_output(f"{BackgroundColors.CYAN}Evaluating whether to skip remuxing for: {os.path.basename(video_path)}{Style.RESET_ALL}")  # Output evaluation header for debugging.
+    verbose_output(f"{BackgroundColors.GREEN}Evaluating whether to skip remuxing for: {BackgroundColors.CYAN}{os.path.basename(video_path)}{Style.RESET_ALL}")  # Output evaluation header for debugging.
 
     default_audio_stream = find_current_default_stream(audio_streams)  # Resolve currently flagged default audio stream.
     default_subtitle_stream = find_current_default_stream(subtitle_streams)  # Resolve currently flagged default subtitle stream.
     desired_audio_language = resolve_priority_canonical_language_from_streams("audio", audio_streams)  # Resolve canonical top-priority audio language present in streams.
     desired_subtitle_language = resolve_priority_canonical_language_from_streams("subtitle", subtitle_streams)  # Resolve canonical top-priority subtitle language present in streams.
 
-    if default_audio_stream is None or default_subtitle_stream is None:  # Verify both default streams exist before skip decision.
-        return False  # Return False when one of the default streams is missing.
-    if desired_audio_language is None or desired_subtitle_language is None:  # Verify top-priority canonical languages were resolved from configuration.
-        return False  # Return False when priority canonical languages cannot be resolved.
+    if default_audio_stream is None:  # Verify default audio stream exists before skip decision
+        verbose_output(f"{BackgroundColors.RED}[Debug] Skip Blocked: Missing Default Stream | Stream_Type=Audio | Current=None | Expected=Present | Reason=Audio Stream With Disposition=Default Is Required For Skip Decision{Style.RESET_ALL}")  # Log missing default audio stream with structured diagnostics
+        return False  # Return False when default audio stream is missing
 
-    if not all_streams_require_no_removal(audio_streams, subtitle_streams):  # Verify no streams require removal before evaluating default stream compliance.
-        return False  # Return False when the prune pipeline would still remove streams from this file.
+    if default_subtitle_stream is None:  # Verify default subtitle stream exists before skip decision
+        verbose_output(f"{BackgroundColors.RED}[Debug] Skip Blocked: Missing Default Stream | Stream_Type=Subtitle | Current=None | Expected=Present | Reason=Subtitle Stream With Disposition=Default Is Required For Skip Decision{Style.RESET_ALL}")  # Log missing default subtitle stream with structured diagnostics
+        return False  # Return False when default subtitle stream is missing
 
-    current_audio_language = detect_stream_language_for_validation(default_audio_stream, "audio")  # Detect canonical language for current default audio stream.
-    current_subtitle_language = detect_stream_language_for_validation(default_subtitle_stream, "subtitle")  # Detect canonical language for current default subtitle stream.
-    filtered_subtitle_streams = filter_undesired_streams(subtitle_streams)  # Remove descriptive/forced subtitles before position extraction.
-    desired_subtitle_positions = [s.get("sub_pos") for s in filtered_subtitle_streams if s.get("classification") == "desired"]  # Compute desired subtitle positions from filtered streams.
-    subtitle_priorities = resolve_priority_list("subtitle")  # Resolve configured subtitle priorities for strict default verification.
-    expected_subtitle_pos = select_best_subtitle_stream(subtitle_streams, desired_subtitle_positions, subtitle_priorities, "sub_pos")  # Resolve expected default subtitle position using strict intra-language priority.
-    current_default_subtitle_pos = default_subtitle_stream.get("sub_pos")  # Resolve current default subtitle position for equality verification.
+    if desired_audio_language is None:  # Verify top-priority canonical audio language was resolved from configuration
+        verbose_output(f"{BackgroundColors.RED}[Debug] Skip Blocked: Canonical Language Resolution Failed | Stream_Type=Audio | Current=None | Expected=From Desired_Languages | Reason=No Canonical Audio Language Could Be Resolved From Config Or Aliases{Style.RESET_ALL}")  # Log missing canonical audio language with structured diagnostics
+        return False  # Return False when canonical audio language cannot be resolved
 
-    if current_audio_language == desired_audio_language and current_subtitle_language == desired_subtitle_language and expected_subtitle_pos == current_default_subtitle_pos:  # Verify both defaults match priority language and subtitle variant priority.
-        verbose_output(f"[DEBUG] Skipping file as default streams already match desired priority: {os.path.basename(video_path)}")  # Output debug skip log in the existing format.
-        return True  # Return True to skip remuxing for this file.
+    if desired_subtitle_language is None:  # Verify top-priority canonical subtitle language was resolved from configuration
+        verbose_output(f"{BackgroundColors.RED}[Debug] Skip Blocked: Canonical Language Resolution Failed | Stream_Type=Subtitle | Current=None | Expected=From Desired_Languages | Reason=No Canonical Subtitle Language Could Be Resolved From Config Or Aliases{Style.RESET_ALL}")  # Log missing canonical subtitle language with structured diagnostics
+        return False  # Return False when canonical subtitle language cannot be resolved
 
-    return False  # Return False when at least one default stream does not match configured priority.
+    if not all_streams_require_no_removal(audio_streams, subtitle_streams):  # Verify no streams require removal before evaluating default stream compliance
+        audio_undesired = any(a.get("classification") != "desired" for a in audio_streams)  # Determine if any audio stream is undesired
+        subtitle_undesired = any(s.get("classification") != "desired" for s in subtitle_streams)  # Determine if any subtitle stream is undesired
+        if audio_undesired:  # Verify if undesired audio streams are present
+            verbose_output(f"{BackgroundColors.RED}[Debug] Skip Blocked: Undesired Streams Present | Stream_Type=Audio | Current=Undesired Audio Present | Expected=All Desired | Reason=Audio Streams Require Pruning To Remove Undesired Or Forced Tracks{Style.RESET_ALL}")  # Log audio stream cleanup requirement
+        if subtitle_undesired:  # Verify if undesired subtitle streams are present
+            verbose_output(f"{BackgroundColors.RED}[Debug] Skip Blocked: Undesired Streams Present | Stream_Type=Subtitle | Current=Undesired Subtitle Present | Expected=All Desired | Reason=Subtitle Streams Require Pruning To Remove Undesired Or Forced Tracks{Style.RESET_ALL}")  # Log subtitle stream cleanup requirement
+        return False  # Return False when the prune pipeline would still remove streams from this file
+
+    current_audio_language = detect_stream_language_for_validation(default_audio_stream, "audio")  # Detect canonical language for current default audio stream
+    current_subtitle_language = detect_stream_language_for_validation(default_subtitle_stream, "subtitle")  # Detect canonical language for current default subtitle stream
+    filtered_subtitle_streams = filter_undesired_streams(subtitle_streams)  # Remove descriptive/forced subtitles before position extraction
+    desired_subtitle_positions = [s.get("sub_pos") for s in filtered_subtitle_streams if s.get("classification") == "desired"]  # Compute desired subtitle positions from filtered streams
+    subtitle_priorities = resolve_priority_list("subtitle")  # Resolve configured subtitle priorities for strict default verification
+    expected_subtitle_pos = select_best_subtitle_stream(subtitle_streams, desired_subtitle_positions, subtitle_priorities, "sub_pos")  # Resolve expected default subtitle position using strict intra-language priority
+    current_default_subtitle_pos = default_subtitle_stream.get("sub_pos")  # Resolve current default subtitle position for equality verification
+
+    if current_audio_language != desired_audio_language:  # Verify current default audio language matches desired
+        verbose_output(f"{BackgroundColors.RED}[Debug] Skip Blocked: Language Mismatch | Stream_Type=Audio | Current={current_audio_language} | Expected={desired_audio_language} | Reason=Default Audio Stream Language Does Not Match Canonical Priority Language{Style.RESET_ALL}")  # Log audio language mismatch with structured diagnostics
+        return False  # Return False when default audio language does not match desired
+
+    if current_subtitle_language != desired_subtitle_language:  # Verify current default subtitle language matches desired
+        verbose_output(f"{BackgroundColors.RED}[Debug] Skip Blocked: Language Mismatch | Stream_Type=Subtitle | Current={current_subtitle_language} | Expected={desired_subtitle_language} | Reason=Default Subtitle Stream Language Does Not Match Canonical Priority Language{Style.RESET_ALL}")  # Log subtitle language mismatch with structured diagnostics
+        return False  # Return False when default subtitle language does not match desired
+
+    if expected_subtitle_pos != current_default_subtitle_pos:  # Verify current default subtitle position matches expected
+        verbose_output(f"{BackgroundColors.RED}[Debug] Skip Blocked: Subtitle Position Mismatch | Stream_Type=Subtitle | Current={current_default_subtitle_pos} | Expected={expected_subtitle_pos} | Reason=Default Subtitle Stream Position Does Not Match Expected Position From Priority List {subtitle_priorities}{Style.RESET_ALL}")  # Log subtitle position mismatch with structured diagnostics
+        return False  # Return False when default subtitle position does not match expected
+
+    verbose_output(f"{BackgroundColors.GREEN}[Debug] Skip Approved: All Conditions Satisfied | Audio={current_audio_language} | Subtitle={current_subtitle_language} | Subtitle_Pos={current_default_subtitle_pos}{Style.RESET_ALL}")  # Output structured skip approval log
+    return True  # Return True to skip remuxing for this file
 
 
 def apply_prune_and_set_defaults(video_path, audio_streams, subtitle_streams):
