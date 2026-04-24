@@ -74,6 +74,7 @@ class BackgroundColors:  # Colors for the terminal
 # Execution Constants:
 VERBOSE = False  # Set to True to output verbose messages
 INPUT_PATH = r"D:/Sem Backup/Download/Temp/TeraBox/"  # Set the default input path for first-level directory processing
+IGNORE_DIRS = {"System Volume Information", "$RECYCLE.BIN", "Config.Msi", "MSOCache"}  # Set of directory names to ignore during processing
 
 # Logger Setup:
 logger = Logger(f"./Logs/{Path(__file__).stem}.log", clean=True)  # Create a Logger instance
@@ -312,6 +313,9 @@ def get_directories_in_path(path: str) -> list:
 
     for entry in entries:  # Iterate through first-level entries
         entry_path = os.path.join(path, entry)  # Build the absolute entry path
+        
+        if entry in IGNORE_DIRS:  # Verify if the entry is in the ignore list
+            continue  # Skip ignored directories
 
         if os.path.isdir(entry_path):  # Verify if the current entry is a directory
             directories.append(entry_path)  # Store the first-level directory path
