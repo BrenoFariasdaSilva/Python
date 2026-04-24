@@ -1114,6 +1114,30 @@ def detect_stream_language_for_validation(stream, stream_type):
     return None  # Return None when language detection cannot resolve a canonical desired language.
 
 
+def all_streams_require_no_removal(audio_streams: list, subtitle_streams: list) -> bool:
+    """
+    Verify whether all current streams would survive the prune pipeline without removal.
+
+    :param audio_streams: List of classified audio stream dicts.
+    :param subtitle_streams: List of classified subtitle stream dicts.
+    :return: True when no audio or subtitle streams would be removed by the prune pipeline.
+    """
+
+    filtered_audio = filter_undesired_streams(audio_streams)  # Apply descriptive and forced stream filter to audio streams.
+    kept_audio_count = len([a for a in filtered_audio if a.get("classification") == "desired"])  # Count audio streams surviving the full prune pipeline.
+
+    filtered_subtitle = filter_undesired_streams(subtitle_streams)  # Apply descriptive and forced stream filter to subtitle streams.
+    kept_subtitle_count = len([s for s in filtered_subtitle if s.get("classification") == "desired"])  # Count subtitle streams surviving the full prune pipeline.
+
+    if kept_audio_count != len(audio_streams):  # Verify audio stream count would remain unchanged after pruning.
+        return False  # Return False when audio streams would be removed by the prune pipeline.
+
+    if kept_subtitle_count != len(subtitle_streams):  # Verify subtitle stream count would remain unchanged after pruning.
+        return False  # Return False when subtitle streams would be removed by the prune pipeline.
+
+    return True  # Return True when all streams survive the prune pipeline without any removal.
+
+
 def should_skip_processing_for_correct_defaults(video_path, audio_streams, subtitle_streams):
     """
     Determine whether processing can be skipped when default streams already match priority.
@@ -1133,6 +1157,9 @@ def should_skip_processing_for_correct_defaults(video_path, audio_streams, subti
         return False  # Return False when one of the default streams is missing.
     if desired_audio_language is None or desired_subtitle_language is None:  # Verify top-priority canonical languages were resolved from configuration.
         return False  # Return False when priority canonical languages cannot be resolved.
+
+    if not all_streams_require_no_removal(audio_streams, subtitle_streams):  # Verify no streams require removal before evaluating default stream compliance.
+        return False  # Return False when the prune pipeline would still remove streams from this file.
 
     current_audio_language = detect_stream_language_for_validation(default_audio_stream, "audio")  # Detect canonical language for current default audio stream.
     current_subtitle_language = detect_stream_language_for_validation(default_subtitle_stream, "subtitle")  # Detect canonical language for current default subtitle stream.
