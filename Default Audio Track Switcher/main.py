@@ -60,6 +60,7 @@ import subprocess  # For running terminal commands
 import unicodedata  # For removing accents during normalization
 from colorama import Style  # For coloring the terminal
 from tqdm import tqdm  # For displaying a progress bar
+from typing import Optional  # For type hinting Optional return values
 
 
 # Macros:
@@ -1039,33 +1040,43 @@ def find_current_default_stream(streams):
     return None  # Return None when no default stream is marked.
 
 
-def resolve_priority_canonical_language(stream_type):
+def resolve_priority_canonical_language_from_streams(stream_type: str, streams: list) -> Optional[str]:
     """
-    Resolve the highest-priority configured language to a canonical desired key.
+    Resolve the highest-priority available canonical language for a stream type using actual streams.
 
-    :param stream_type: Stream type key ('audio' or 'subtitle')
-    :return: Canonical language key from DESIRED_LANGUAGES or None
+    :param stream_type: Stream type key ('audio' or 'subtitle').
+    :param streams: List of stream dicts (audio or subtitle).
+    :return: Canonical language key from DESIRED_LANGUAGES or None.
     """
 
-    priority_names = resolve_priority_list(stream_type)  # Resolve ordered priority names for the requested stream type.
-    if len(priority_names) == 0:  # Verify at least one configured priority exists.
+    priority_languages = resolve_priority_list(stream_type)  # Resolve ordered priority display names for the requested stream type.
+    
+    if len(priority_languages) == 0:  # Verify at least one configured priority exists.
         return None  # Return None when no priority language is configured.
 
-    top_priority_name = priority_names[0]  # Read the highest-priority display name from configuration.
-    if top_priority_name in DESIRED_LANGUAGES:  # Verify top priority already matches a canonical desired language key.
-        return top_priority_name  # Return canonical key directly when an exact key match exists.
-
-    normalized_priority = normalize_text(top_priority_name)  # Normalize top priority text for robust alias comparison.
     normalized_aliases = get_normalized_desired_language_aliases()  # Build normalized alias map for desired languages.
 
-    for language_name, aliases in normalized_aliases.items():  # Iterate canonical language aliases for fuzzy canonical resolution.
-        for alias in aliases:  # Iterate each normalized alias for the current canonical language.
-            if alias == "":  # Verify alias has meaningful content before comparison.
-                continue  # Continue to next alias when normalized alias is empty.
-            if alias == normalized_priority or normalized_priority in alias or alias in normalized_priority:  # Verify alias relation between priority value and canonical aliases.
-                return language_name  # Return canonical language key when alias relation matches.
+    available_languages = set()  # Initialize set for canonical languages present in streams.
+    for stream in streams:  # Iterate all streams to collect available canonical languages.
+        lang = stream.get("language")  # Get canonical language from stream.
+        if lang is not None:  # Verify language is present in stream metadata before adding to available set.
+            available_languages.add(lang)  # Add canonical language to set if present.
 
-    return None  # Return None when no canonical desired language can be resolved.
+    for display_name in priority_languages:  # Iterate priority display names in order.
+        if display_name in DESIRED_LANGUAGES and display_name in available_languages:  # Verify direct canonical key match for priority name exists in both config and stream languages.
+            return display_name  # Return canonical key if present in both config and streams.
+
+        normalized_display = normalize_text(display_name)  # Normalize display name for alias matching.
+        for canonical, aliases in normalized_aliases.items():  # Iterate canonical language keys and aliases.
+            if canonical not in available_languages:  # Verify canonical language is present in streams before evaluating aliases for this language.
+                continue  # Skip if canonical not present in streams.
+            for alias in aliases:  # Iterate aliases for current canonical language.
+                if alias == "":  # Verify alias has content before matching.
+                    continue  # Continue to next alias when current alias is empty.
+                if alias == normalized_display or normalized_display in alias or alias in normalized_display:  # Verify alias relation between priority display name and canonical alias for flexible matching.
+                    return canonical  # Return canonical key if alias matches and is present in streams.
+
+    return None  # Return None if no priority language is available in streams.
 
 
 def detect_stream_language_for_validation(stream, stream_type):
@@ -1148,10 +1159,12 @@ def should_skip_processing_for_correct_defaults(video_path, audio_streams, subti
     :return: True when both default audio and subtitle streams already match highest priority
     """
 
+    verbose_output(f"{BackgroundColors.CYAN}Evaluating whether to skip remuxing for: {os.path.basename(video_path)}{Style.RESET_ALL}")  # Output evaluation header for debugging.
+
     default_audio_stream = find_current_default_stream(audio_streams)  # Resolve currently flagged default audio stream.
     default_subtitle_stream = find_current_default_stream(subtitle_streams)  # Resolve currently flagged default subtitle stream.
-    desired_audio_language = resolve_priority_canonical_language("audio")  # Resolve canonical top-priority audio language from configuration.
-    desired_subtitle_language = resolve_priority_canonical_language("subtitle")  # Resolve canonical top-priority subtitle language from configuration.
+    desired_audio_language = resolve_priority_canonical_language_from_streams("audio", audio_streams)  # Resolve canonical top-priority audio language present in streams.
+    desired_subtitle_language = resolve_priority_canonical_language_from_streams("subtitle", subtitle_streams)  # Resolve canonical top-priority subtitle language present in streams.
 
     if default_audio_stream is None or default_subtitle_stream is None:  # Verify both default streams exist before skip decision.
         return False  # Return False when one of the default streams is missing.
@@ -1500,6 +1513,7 @@ def swap_audio_tracks(video_path):
             return  # Skip this file
 
         if should_skip_processing_for_correct_defaults(video_path, audio_streams, subtitle_streams):  # Verify whether both current defaults already match highest-priority desired languages.
+            verbose_output(f"{BackgroundColors.GREEN}Default streams already match desired priority. Skipping remux for: {BackgroundColors.CYAN}{video_path}{Style.RESET_ALL}")
             return  # Skip remuxing when default streams already match configured priority.
 
         apply_prune_and_set_defaults(video_path, audio_streams, subtitle_streams)  # Prune non-desired and set defaults
