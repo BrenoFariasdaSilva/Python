@@ -231,58 +231,81 @@ def get_normalized_desired_language_aliases():
     return normalized_aliases  # Return normalized alias mapping
 
 
-def detect_language(raw_lang, raw_title, stream_type):
+def match_language_by_rules(normalized_lang: str, normalized_title: str, language_dict: dict, return_value, match_mode: str) -> object:
+    """
+    Match language using a unified rule-based strategy over language dictionaries.
+
+    :param normalized_lang: Normalized raw language metadata.
+    :param normalized_title: Normalized raw title metadata.
+    :param language_dict: Dictionary of canonical languages and aliases.
+    :param return_value: Value returned when a match is found.
+    :param match_mode: Matching mode ('exact_lang', 'exact_title', 'fuzzy').
+    :return: Canonical language or fallback return_value when matched.
+    """
+
+    for canonical, aliases in language_dict.items():  # Iterate language groups
+        for alias in aliases:  # Iterate aliases
+
+            norm_alias = normalize_text(alias)  # Normalize alias for comparison
+
+            if match_mode == "exact_lang":  # Verify exact language match mode
+                if normalized_lang == norm_alias:  # Verify raw language exact match
+                    return canonical if return_value is None else return_value  # Return mapped result
+
+            elif match_mode == "exact_title":  # Verify exact title match mode
+                if normalized_title == norm_alias:  # Verify raw title exact match
+                    return canonical if return_value is None else return_value  # Return mapped result
+
+            elif match_mode == "fuzzy":  # Verify fuzzy substring match mode
+                if norm_alias in normalized_lang or norm_alias in normalized_title:  # Verify substring match
+                    return canonical if return_value is None else return_value  # Return mapped result
+
+    return None  # Return None when no match is found
+
+
+def detect_language(raw_lang: str, raw_title: str, stream_type: str):
     """
     Detect canonical language name from raw language/title metadata.
 
-    :param raw_lang: Raw language metadata from tags
-    :param raw_title: Raw title metadata from tags
-    :param stream_type: Stream type key ('audio' or 'subtitle')
-    :return: Canonical language key from DESIRED_LANGUAGES or None
+    :param raw_lang: Raw language metadata from tags.
+    :param raw_title: Raw title metadata from tags.
+    :param stream_type: Stream type key ('audio' or 'subtitle').
+    :return: Canonical language key from DESIRED_LANGUAGES or None.
     """
 
     normalized_lang = normalize_text(raw_lang)  # Normalize raw language text
     normalized_title = normalize_text(raw_title)  # Normalize raw title text
 
     # Step 1: Prefer explicit raw_lang exact match in DESIRED_LANGUAGES
-    for canonical, aliases in DESIRED_LANGUAGES.items():  # Iterate desired language groups
-        for alias in aliases:  # Iterate aliases
-            if normalized_lang == normalize_text(alias):  # Verify normalized raw_lang matches alias
-                return canonical  # Return canonical desired language
+    result = match_language_by_rules(normalized_lang, normalized_title, DESIRED_LANGUAGES, None, "exact_lang")  # Verify desired exact lang match
+    if result is not None:  # Verify match found in desired languages
+        return result  # Return canonical desired language
 
     # Step 2: Prefer explicit raw_lang exact match in UNDESIRED_LANGUAGES
-    for canonical, aliases in UNDESIRED_LANGUAGES.items():  # Iterate undesired language groups
-        for alias in aliases:  # Iterate aliases
-            if normalized_lang == normalize_text(alias):  # Verify normalized raw_lang matches alias
-                return None  # Return None for undesired language
+    result = match_language_by_rules(normalized_lang, normalized_title, UNDESIRED_LANGUAGES, None, "exact_lang")  # Verify undesired exact lang match
+    if result is not None:  # Verify undesired language match found
+        return None  # Return None for undesired language
 
     # Step 3: Alias match in DESIRED_LANGUAGES using raw_title
-    for canonical, aliases in DESIRED_LANGUAGES.items():  # Iterate desired language groups
-        for alias in aliases:  # Iterate aliases
-            if normalized_title == normalize_text(alias):  # Verify normalized raw_title matches alias
-                return canonical  # Return canonical desired language
+    result = match_language_by_rules(normalized_lang, normalized_title, DESIRED_LANGUAGES, None, "exact_title")  # Verify desired title match
+    if result is not None:  # Verify match found in desired languages
+        return result  # Return canonical desired language
 
     # Step 4: Alias match in UNDESIRED_LANGUAGES using raw_title
-    for canonical, aliases in UNDESIRED_LANGUAGES.items():  # Iterate undesired language groups
-        for alias in aliases:  # Iterate aliases
-            if normalized_title == normalize_text(alias):  # Verify normalized raw_title matches alias
-                return None  # Return None for undesired language
+    result = match_language_by_rules(normalized_lang, normalized_title, UNDESIRED_LANGUAGES, None, "exact_title")  # Verify undesired title match
+    if result is not None:  # Verify undesired match found
+        return None  # Return None for undesired language
 
-    # Step 5: Fuzzy substring match for desired (raw_lang and raw_title)
-    for canonical, aliases in DESIRED_LANGUAGES.items():  # Iterate desired language groups
-        for alias in aliases:  # Iterate aliases
-            norm_alias = normalize_text(alias)  # Normalize alias
-            if norm_alias in normalized_lang or norm_alias in normalized_title:  # Verify substring presence
-                return canonical  # Return canonical desired language
+    # Step 5: Fuzzy substring match for desired languages
+    result = match_language_by_rules(normalized_lang, normalized_title, DESIRED_LANGUAGES, None, "fuzzy")  # Verify fuzzy desired match
+    if result is not None:  # Verify fuzzy match found
+        return result  # Return canonical desired language
 
-    # Step 6: Fuzzy substring match for undesired (raw_lang and raw_title)
-    for canonical, aliases in UNDESIRED_LANGUAGES.items():  # Iterate undesired language groups
-        for alias in aliases:  # Iterate aliases
-            norm_alias = normalize_text(alias)  # Normalize alias
-            if norm_alias in normalized_lang or norm_alias in normalized_title:  # Verify substring presence
-                return None  # Return None for undesired language
+    # Step 6: Fuzzy substring match for undesired languages
+    result = match_language_by_rules(normalized_lang, normalized_title, UNDESIRED_LANGUAGES, None, "fuzzy")  # Verify fuzzy undesired match
+    if result is not None:  # Verify undesired fuzzy match found
+        return None  # Return None for undesired language
 
-    # Step 7: Never default to English unless explicit match
     return None  # Return None when no canonical language match is found
 
 
