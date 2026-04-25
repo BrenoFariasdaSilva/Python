@@ -677,7 +677,7 @@ def get_audio_tracks(video_path):
     )  # Output the verbose message
 
     cmd = ["ffprobe", "-v", "error", "-show_streams", "-of", "json", video_path]  # Build ffprobe command to list all streams
-    result = subprocess.run(cmd, capture_output=True, text=True)  # Run ffprobe and capture JSON output
+    result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")  # Run ffprobe and capture JSON output
     data = json.loads(result.stdout) if result.stdout else {}  # Parse ffprobe JSON output
     streams = data.get("streams", [])  # Extract streams list from ffprobe output
 
@@ -729,7 +729,7 @@ def get_subtitle_tracks(video_path):
     """
 
     cmd = ["ffprobe", "-v", "error", "-show_streams", "-of", "json", video_path]  # Build ffprobe command to list all streams
-    result = subprocess.run(cmd, capture_output=True, text=True)  # Run ffprobe and capture JSON output
+    result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")  # Run ffprobe and capture JSON output
     data = json.loads(result.stdout) if result.stdout else {}  # Parse ffprobe JSON output
     streams = data.get("streams", [])  # Extract streams list from ffprobe output
 
@@ -1433,7 +1433,7 @@ def apply_prune_and_set_defaults(video_path, audio_streams, subtitle_streams):
 
     verbose_output(f"{BackgroundColors.GREEN}Executing ffmpeg prune command:{BackgroundColors.CYAN} {' '.join(cmd)}{Style.RESET_ALL}")  # Verbose output of ffmpeg command
 
-    subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)  # Execute ffmpeg silently
+    subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, text=True, encoding="utf-8", errors="replace")  # Execute ffmpeg silently
 
     if not verify_filepath_exists(temp_file):  # If temporary file creation failed then report and retry with output
         print(f"{BackgroundColors.RED}Failed to create temporary file for: {BackgroundColors.CYAN}{video_path}{Style.RESET_ALL}")  # Report error
@@ -1489,7 +1489,7 @@ def get_audio_track_info(video_path):
         video_path,  # Video file path
     ]
 
-    result = subprocess.run(probe_cmd, capture_output=True, text=True)  # Run ffprobe and capture output
+    result = subprocess.run(probe_cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")  # Run ffprobe and capture output
     return result.stdout.strip().splitlines()  # Get audio track info
 
 
