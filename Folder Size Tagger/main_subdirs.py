@@ -421,7 +421,7 @@ def move_video_contents_to_parent(path: str) -> None:
 
 def delete_image_files_in_directory(path: str) -> None:
     """
-    Delete image files in a directory non-recursively.
+    Delete image files in a directory recursively.
 
     :param path: Directory path to inspect for image files.
     :return: None.
@@ -429,13 +429,18 @@ def delete_image_files_in_directory(path: str) -> None:
 
     image_exts = {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".tiff"}  # Define image extensions set.
 
-    try:  # Protect directory listing operation
-        entries = os.listdir(path)  # Read first-level entries from the directory.
+    try:  # Protect directory traversal operation
+        entries = os.listdir(path)  # Read entries from the directory.
     except (PermissionError, OSError):  # Handle inaccessible directory listing
         return  # Exit when listing fails.
 
-    for entry in entries:  # Iterate through first-level entries
-        file_path = os.path.join(path, entry)  # Build absolute file path.
+    for entry in entries:  # Iterate through entries
+        file_path = os.path.join(path, entry)  # Build absolute path.
+
+        if os.path.isdir(file_path):  # Verify current entry is a directory
+            delete_image_files_in_directory(file_path)  # Recursively process subdirectory
+            continue  # Continue to next entry after recursion
+
         if not os.path.isfile(file_path):  # Verify current entry is a file.
             continue  # Skip non-file entries.
         _, ext = os.path.splitext(entry)  # Split filename to get extension.
