@@ -35,6 +35,7 @@ Feel free to contribute and send suggestions.
 ## Table of Contents
 - [Python. ](#python-)
 	- [Table of Contents](#table-of-contents)
+	- [Introduction](#introduction)
 	- [Setup](#setup)
 		- [Clone without Submodules](#clone-without-submodules)
 		- [Clone with Submodules](#clone-with-submodules)
@@ -45,6 +46,24 @@ Feel free to contribute and send suggestions.
 	- [Contributing](#contributing)
 	- [License](#license)
 		- [Creative Commons Zero v1.0 Universal](#creative-commons-zero-v10-universal)
+
+## Introduction
+
+Python codebase containing a large collection of automation scripts, utilities, tools, and experimental projects developed for practical tasks in software engineering, data processing, media manipulation, Git/GitHub workflows, and system automation.
+
+This repository is organized as a modular toolbox rather than a single application, with each directory representing an independent script or utility. Examples include file system automation, dataset processing, media (audio/video/subtitle) tooling, repository analysis, and developer productivity scripts.
+
+The codebase emphasizes:
+- Automation of repetitive development and system tasks
+- Data processing and file manipulation utilities
+- Git and repository analysis tools
+- Media processing pipelines (audio, video, subtitles)
+- Experimental and research-oriented scripts
+- Continuous refactoring and incremental code quality improvements
+
+Most components are standalone and can be reused independently.
+
+Contributions and suggestions are welcome, especially improvements in structure, performance, and generalization of existing utilities.
 
 ## Setup
 
