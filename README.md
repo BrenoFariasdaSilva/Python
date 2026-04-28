@@ -8,9 +8,8 @@
   
 ---
 
-This repo is made with the objective of showing the Python related codes i have written. \
-Feel free to contribute and send suggestions.
-  
+A curated collection of Python scripts and utilities developed for automation, data processing, system tooling, and applied problem-solving across different domains. The repository is continuously maintained and refactored, serving both as a personal engineering workspace and a structured showcase of practical Python implementations.
+
 ---
 
 </div>
