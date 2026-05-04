@@ -235,8 +235,9 @@ def remove_rows(df):
     verbose_output(true_string=f"{BackgroundColors.GREEN}Removing specified rows from the DataFrame.{Style.RESET_ALL}")
 
     df_filtered = df[
-        df["Estabelecimento"] != "Pagamentos Validos Normais"
-    ].copy()  # Remove rows where "Estabelecimento" column contains "Pagamentos Validos Normais"
+        (df["Estabelecimento"] != "Pagamentos Validos Normais") &
+        (df["Estabelecimento"] != "Pagamento de fatura")
+    ].copy()  # Remove rows where "Estabelecimento" column contains "Pagamentos Validos Normais" or "Pagamento de fatura"
 
     return df_filtered  # Return the filtered DataFrame
 
