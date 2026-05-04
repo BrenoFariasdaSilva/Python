@@ -533,7 +533,7 @@ def main():
         reais_to_float
     )  # Apply the function that converts the "Valor" column to a float
 
-    filtered_df.to_csv(f"{OUTPUT_CSV_FILE}", sep=",", index=False)  # Write it to the CSV file using the comma separator
+    filtered_df.to_csv(f"{OUTPUT_CSV_FILE}", sep=";", index=False)  # Write it to the CSV file using the ";" separator
 
     sorted_df = process_dates(filtered_df, "Data", "%d/%m/%Y")  # Process the dates and sort the DataFrame
 
@@ -541,7 +541,7 @@ def main():
         sorted_df["Valor"].cumsum().round(2)
     )  # Calculate the cumulative sum of the "Valor" column and round it to 2 decimal places
 
-    sorted_df.to_csv(f"{OUTPUT_CSV_FILE}", sep=",", index=False)  # Write the DataFrame with comma separator
+    sorted_df.to_csv(f"{OUTPUT_CSV_FILE}", sep=";", index=False)  # Write the DataFrame with ";" separator
 
     cash_payments, credit_payments = get_cash_and_credit_payments(
         sorted_df
