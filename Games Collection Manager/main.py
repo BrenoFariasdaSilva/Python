@@ -358,6 +358,23 @@ def calculate_execution_time(start_time, finish_time=None):
     return f"{seconds}s"  # Fallback: only seconds
 
 
+def compute_console_counters(games: list) -> tuple:
+    """
+    Compute owned and total counters for a list of normalized game lines.
+
+    Owned count includes both ICON_OWNED (✅) and ICON_MAYBE (❓) entries.
+    Total count equals the number of valid game lines.
+
+    :param games: List of normalized game line strings for a single console section.
+    :return: Tuple of (owned_count, total_count) integers.
+    """
+
+    total = len(games)  # Total is the count of all valid game entries
+    owned = sum(1 for line in games if parse_game_icon(line) in VALID_ICONS)  # Count lines carrying any valid ownership icon
+
+    return owned, total  # Return computed counters as a tuple
+
+
 def format_txt_output(sections: list) -> str:
     """
     Format a list of parsed console sections into the canonical TXT output string.
