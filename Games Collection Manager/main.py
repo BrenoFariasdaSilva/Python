@@ -358,6 +358,49 @@ def calculate_execution_time(start_time, finish_time=None):
     return f"{seconds}s"  # Fallback: only seconds
 
 
+def process_txt_file(filepath: str) -> None:
+    """
+    Process a single TXT game-collection file end-to-end.
+
+    Reads the file, parses all console sections and game entries, normalizes
+    formatting, sorts games alphabetically, recalculates all counters, and
+    overwrites the file with the canonical deterministic output.
+
+    :param filepath: Absolute path to the TXT file to process.
+    :return: None
+    """
+
+    try:  # Wrap full file processing for safe execution
+        print(f"{BackgroundColors.GREEN}Processing file: {BackgroundColors.CYAN}{filepath}{Style.RESET_ALL}")  # Log processing start
+
+        lines = read_txt_file(filepath)  # Read all lines from the target file
+
+        if not lines:  # Skip files that could not be read or are empty
+            print(f"{BackgroundColors.YELLOW}Warning: File is empty or unreadable — skipping. File: {BackgroundColors.CYAN}{filepath}{Style.RESET_ALL}")  # Log warning
+            return  # Exit early for empty or unreadable files
+
+        sections = parse_console_sections(lines, filepath)  # Parse all console sections and games from file lines
+
+        if not sections:  # Skip files that produced no valid console sections
+            print(f"{BackgroundColors.YELLOW}Warning: No valid console sections found — skipping. File: {BackgroundColors.CYAN}{filepath}{Style.RESET_ALL}")  # Log warning
+            return  # Exit early when no sections were parsed
+
+        formatted_content = format_txt_output(sections)  # Format all sections into canonical TXT string
+
+        if not formatted_content:  # Skip files where formatting produced empty output
+            print(f"{BackgroundColors.YELLOW}Warning: Formatted output is empty — skipping write. File: {BackgroundColors.CYAN}{filepath}{Style.RESET_ALL}")  # Log warning
+            return  # Exit early when formatting fails
+
+        success = write_txt_file(filepath, formatted_content)  # Overwrite file with normalized canonical content
+
+        if success:  # Log successful completion
+            total_games = sum(len(s["games"]) for s in sections)  # Compute total valid game count for summary
+            print(f"{BackgroundColors.GREEN}Finished processing: {BackgroundColors.CYAN}{filepath}{BackgroundColors.GREEN} — {BackgroundColors.CYAN}{len(sections)}{BackgroundColors.GREEN} console(s), {BackgroundColors.CYAN}{total_games}{BackgroundColors.GREEN} game(s).{Style.RESET_ALL}")  # Log file summary
+
+    except Exception as e:  # Catch unexpected errors during full file processing
+        print(f"{BackgroundColors.RED}Error processing file {BackgroundColors.CYAN}{filepath}{BackgroundColors.RED}: {e}{Style.RESET_ALL}")  # Log error
+
+
 def process_all_txt_files() -> None:
     """
     Discover and process all TXT files found in the INPUTS_DIR directory.
