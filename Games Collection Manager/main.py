@@ -89,6 +89,18 @@ RUN_FUNCTIONS = {
     "Play Sound": True,  # Set to True to play a sound when the program finishes
 }
 
+# Path Constants:
+INPUTS_DIR = "./Inputs"  # Directory containing TXT game-collection files to process
+
+# Icon Constants:
+ICON_OWNED = "✅"  # Icon representing a confirmed owned game
+ICON_MAYBE = "❓"  # Icon representing a maybe-owned game
+VALID_ICONS = (ICON_OWNED, ICON_MAYBE)  # Tuple of all recognized ownership icons
+
+# Regex Constants:
+GAME_LINE_REGEX = re.compile(r"^-\s+(.+?)\s+(\d{4})\.\s*(✅|❓)?$")  # Pattern matching a valid normalized game line
+YEAR_EXTRACT_REGEX = re.compile(r"(\d{4})")  # Pattern extracting a 4-digit year from raw text
+
 # Functions Definitions:
 
 
