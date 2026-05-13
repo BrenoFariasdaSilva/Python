@@ -95,10 +95,11 @@ INPUTS_DIR = "./Inputs"  # Directory containing TXT game-collection files to pro
 # Icon Constants:
 ICON_OWNED = "✅"  # Icon representing a confirmed owned game
 ICON_MAYBE = "❓"  # Icon representing a maybe-owned game
-VALID_ICONS = (ICON_OWNED, ICON_MAYBE)  # Tuple of all recognized ownership icons
+ICON_DAMAGED = "🛠️"  # Icon representing an owned game with damaged/needs fixing box
+VALID_ICONS = (ICON_OWNED, ICON_MAYBE, ICON_DAMAGED)  # Tuple of all recognized ownership icons
 
 # Regex Constants:
-GAME_LINE_REGEX = re.compile(r"^-\s+(.+?)\s+(\d{4})\.\s*(✅|❓)?$")  # Pattern matching a valid normalized game line
+GAME_LINE_REGEX = re.compile(r"^-\s+(.+?)\s+(\d{4})\.\s*(✅|❓|🛠️)?$")  # Pattern matching a valid normalized game line
 YEAR_EXTRACT_REGEX = re.compile(r"(\d{4})")  # Pattern extracting a 4-digit year from raw text
 
 # Functions Definitions:
@@ -437,14 +438,17 @@ def normalize_game_line(raw_line: str, filepath: str, console_name: str) -> str:
         elif body.startswith("-"):  # Handle prefix missing its space separator
             body = body[1:].strip()  # Remove "-" prefix and trim
 
-        icon = ""  # Initialize icon as absent
 
+        icon = ""  # Initialize icon as absent
         if body.endswith(ICON_OWNED):  # Detect trailing owned icon
             icon = ICON_OWNED  # Record owned icon
             body = body[: -len(ICON_OWNED)].strip()  # Strip icon from body and trim
         elif body.endswith(ICON_MAYBE):  # Detect trailing maybe icon
             icon = ICON_MAYBE  # Record maybe icon
             body = body[: -len(ICON_MAYBE)].strip()  # Strip icon from body and trim
+        elif body.endswith(ICON_DAMAGED):  # Detect trailing damaged icon
+            icon = ICON_DAMAGED  # Record damaged icon
+            body = body[: -len(ICON_DAMAGED)].strip()  # Strip icon from body and trim
 
         if body.endswith("."):  # Strip trailing period to isolate name+year region
             body = body[:-1].strip()  # Remove period and trim
@@ -485,6 +489,8 @@ def parse_game_icon(normalized_line: str) -> str:
         return ICON_OWNED  # Return owned icon
     if normalized_line.endswith(ICON_MAYBE):  # Detect maybe icon at line end
         return ICON_MAYBE  # Return maybe icon
+    if normalized_line.endswith(ICON_DAMAGED):  # Detect damaged/needs fixing icon at line end
+        return ICON_DAMAGED  # Return damaged icon
     return ""  # Return empty when no icon is present
 
 
@@ -603,7 +609,7 @@ def format_txt_output(sections: list) -> str:
         output_lines.append(title_line)
         output_lines.append(f"-- Owned: {total_owned} ({owned_breakdown}).")
         output_lines.append(f"-- Total: {total_games} ({total_breakdown}).")
-        output_lines.append(f"-- Icons: {ICON_OWNED} {ICON_MAYBE}")
+        output_lines.append(f"-- Icons: {ICON_OWNED} {ICON_MAYBE} {ICON_DAMAGED}")
 
         output_lines.append("")
 
