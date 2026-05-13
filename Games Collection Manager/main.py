@@ -358,6 +358,35 @@ def calculate_execution_time(start_time, finish_time=None):
     return f"{seconds}s"  # Fallback: only seconds
 
 
+def collect_txt_files(directory: str) -> list:
+    """
+    Collect all TXT file paths found directly inside the given directory.
+
+    :param directory: Path to the directory to scan for TXT files.
+    :return: Sorted list of absolute TXT file path strings found in the directory.
+    """
+
+    try:  # Wrap logic to ensure safe directory scanning
+        if not verify_filepath_exists(directory):  # Verify the directory exists before scanning
+            print(f"{BackgroundColors.RED}Inputs directory not found: {BackgroundColors.CYAN}{directory}{Style.RESET_ALL}")  # Log missing directory
+            return []  # Return empty list when directory is absent
+
+        txt_files = []  # Initialize result list
+
+        for entry in sorted(os.listdir(directory)):  # Iterate directory entries in sorted order
+            full_path = os.path.join(directory, entry)  # Build full path for each entry
+            if os.path.isfile(full_path) and entry.lower().endswith(".txt"):  # Verify entry is a TXT file
+                txt_files.append(full_path)  # Append valid TXT path to result list
+
+        verbose_output(true_string=f"{BackgroundColors.GREEN}Found {BackgroundColors.CYAN}{len(txt_files)}{BackgroundColors.GREEN} TXT file(s) in {BackgroundColors.CYAN}{directory}{Style.RESET_ALL}")  # Log file count
+
+        return txt_files  # Return collected TXT file paths
+
+    except Exception as e:  # Catch unexpected errors during directory scan
+        print(f"{BackgroundColors.RED}Error scanning directory {BackgroundColors.CYAN}{directory}{BackgroundColors.RED}: {e}{Style.RESET_ALL}")  # Log error
+        return []  # Return empty list on failure
+
+
 def read_txt_file(filepath: str) -> list:
     """
     Read a TXT file and return its lines stripped of trailing newlines.
