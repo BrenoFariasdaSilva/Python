@@ -358,6 +358,67 @@ def calculate_execution_time(start_time, finish_time=None):
     return f"{seconds}s"  # Fallback: only seconds
 
 
+def format_txt_output(sections: list) -> str:
+    """
+    Format a list of parsed console sections into the canonical TXT output string.
+
+    Produces the exact header block and per-console section layout as required.
+
+    :param sections: List of console section dictionaries with "name" and "games" keys.
+    :return: Fully formatted TXT string ready for file writing.
+    """
+
+    try:  # Wrap formatting to ensure safe execution
+        # Sort sections alphabetically by console name (case-insensitive)
+        sorted_sections = sorted(sections, key=lambda s: s['name'].lower())
+
+        total_owned = 0  # Initialize global owned counter
+        total_games = 0  # Initialize global total counter
+
+        for section in sorted_sections:  # Accumulate global counters from all sections
+            owned, total = compute_console_counters(section["games"])
+            total_owned += owned
+            total_games += total
+
+        output_lines = []  # Initialize output line accumulator
+
+        # Header block with title and counters
+        owned_breakdown = " + ".join(f"{section['name']} {compute_console_counters(section['games'])[0]}" for section in sorted_sections)
+        total_breakdown = " + ".join(f"{section['name']} {compute_console_counters(section['games'])[1]}" for section in sorted_sections)
+
+        percent_owned = int(round((total_owned / total_games) * 100)) if total_games > 0 else 0
+        title_line = f"-- Games Collection: {total_owned} / {total_games} - {percent_owned}%."
+
+        output_lines.append(title_line)
+        output_lines.append(f"-- Owned: {total_owned} ({owned_breakdown}).")
+        output_lines.append(f"-- Total: {total_games} ({total_breakdown}).")
+        output_lines.append(f"-- Icons: {ICON_OWNED} {ICON_MAYBE}")
+
+        output_lines.append("")
+
+        for section in sorted_sections:
+            owned, total = compute_console_counters(section["games"])
+            percent = int(round((owned / total) * 100)) if total > 0 else 0
+            section_line = f"-- {section['name']}: {owned} / {total} - {percent}%."
+            section_line = re.sub(r"\.+$", ".", section_line)
+            output_lines.append(section_line)
+
+            for game_line in section["games"]:
+                output_lines.append(game_line)
+
+            output_lines.append("")
+
+        if output_lines and output_lines[-1] == "":
+            output_lines = output_lines[:-1]
+
+        cleaned_lines = [re.sub(r"[ ]{2,}", " ", re.sub(r"\.\.+", ".", line)) for line in output_lines]
+        return "\n".join(cleaned_lines) + "\n"
+
+    except Exception as e:  # Catch unexpected formatting errors
+        print(f"{BackgroundColors.RED}Error formatting TXT output: {e}{Style.RESET_ALL}")  # Log error
+        return ""  # Return empty string on failure
+
+
 def write_txt_file(filepath: str, content: str) -> bool:
     """
     Overwrite a TXT file with the given content string using UTF-8 encoding.
