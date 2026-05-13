@@ -358,6 +358,70 @@ def calculate_execution_time(start_time, finish_time=None):
     return f"{seconds}s"  # Fallback: only seconds
 
 
+def parse_console_sections(lines: list, filepath: str) -> list:
+    """
+    Parse raw TXT file lines into a list of console section dictionaries.
+
+    Each dictionary contains keys:
+      - "name": console name string
+      - "games": list of normalized game line strings (sorted alphabetically)
+
+    :param lines: List of raw line strings from the TXT file.
+    :param filepath: Source file path used for warning messages during parsing.
+    :return: List of console section dictionaries with normalized and sorted game entries.
+    """
+
+    try:  # Wrap parsing logic for safe execution
+        sections = []  # Initialize list of parsed console sections
+        current_console = None  # Track currently active console name
+        current_games = []  # Accumulate game lines for the current console
+
+        header_titles = [
+            "-- Games Collection:",
+            "-- Owned:",
+            "-- Total:",
+            "-- Icons:"
+        ]
+
+        for raw_line in lines:  # Iterate all raw lines from the file
+            stripped = raw_line.strip()  # Normalize whitespace for pattern matching
+
+            # Skip global header lines
+            if any(stripped.startswith(title) for title in header_titles):
+                continue  # Skip header block lines
+
+            if stripped.startswith("-- ") and ":" in stripped:  # Detect console section header line
+                if current_console is not None:  # Flush previous console section before starting new one
+                    sections.append({"name": current_console, "games": current_games})  # Append completed section
+                    current_games = []  # Reset game accumulator for the next section
+
+                header_body = stripped[3:].strip()  # Extract body after "-- " prefix
+                console_name = header_body.split(":")[0].strip()  # Extract console name before the colon
+                current_console = console_name  # Set active console to parsed name
+
+            elif stripped.startswith("- ") or (stripped.startswith("-") and not stripped.startswith("--")):  # Detect game entry line
+                if current_console is None:  # Skip orphaned game lines without a parent console section
+                    print(f"{BackgroundColors.YELLOW}Warning: Game line found before any console section — skipping. File: {BackgroundColors.CYAN}{filepath}{BackgroundColors.YELLOW}, Line: {BackgroundColors.CYAN}{stripped}{Style.RESET_ALL}")  # Log warning
+                    continue  # Skip orphaned line
+
+                normalized = normalize_game_line(stripped, filepath, current_console)  # Normalize and validate game line
+
+                if normalized:  # Append only valid normalized game lines
+                    current_games.append(normalized)  # Accumulate valid game line
+
+        if current_console is not None:  # Flush final console section after loop ends
+            sections.append({"name": current_console, "games": current_games})  # Append last section
+
+        for section in sections:  # Sort games alphabetically within each console section
+            section["games"] = sorted(section["games"], key=lambda line: line[2:].lower())  # Sort by game name case-insensitively
+
+        return sections  # Return fully parsed and sorted sections
+
+    except Exception as e:  # Catch unexpected parsing errors
+        print(f"{BackgroundColors.RED}Error parsing console sections in {BackgroundColors.CYAN}{filepath}{BackgroundColors.RED}: {e}{Style.RESET_ALL}")  # Log error
+        return []  # Return empty list on failure
+
+
 def compute_console_counters(games: list) -> tuple:
     """
     Compute owned and total counters for a list of normalized game lines.
