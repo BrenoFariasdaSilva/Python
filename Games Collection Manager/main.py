@@ -358,6 +358,28 @@ def calculate_execution_time(start_time, finish_time=None):
     return f"{seconds}s"  # Fallback: only seconds
 
 
+def write_txt_file(filepath: str, content: str) -> bool:
+    """
+    Overwrite a TXT file with the given content string using UTF-8 encoding.
+
+    :param filepath: Absolute path to the TXT file to overwrite.
+    :param content: Full content string to write into the file.
+    :return: True on successful write, False on failure.
+    """
+
+    try:  # Wrap file writing for safe execution
+        with open(filepath, "w", encoding="utf-8") as file_handle:  # Open file in write mode with UTF-8 encoding
+            file_handle.write(content)  # Write full formatted content to file
+
+        verbose_output(true_string=f"{BackgroundColors.GREEN}Successfully wrote normalized output to: {BackgroundColors.CYAN}{filepath}{Style.RESET_ALL}")  # Log success
+
+        return True  # Signal successful write
+
+    except Exception as e:  # Catch file write errors
+        print(f"{BackgroundColors.RED}Error writing file {BackgroundColors.CYAN}{filepath}{BackgroundColors.RED}: {e}{Style.RESET_ALL}")  # Log error
+        return False  # Signal write failure
+
+
 def process_txt_file(filepath: str) -> None:
     """
     Process a single TXT game-collection file end-to-end.
