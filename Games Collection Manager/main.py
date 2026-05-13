@@ -358,6 +358,71 @@ def calculate_execution_time(start_time, finish_time=None):
     return f"{seconds}s"  # Fallback: only seconds
 
 
+def normalize_game_line(raw_line: str, filepath: str, console_name: str) -> str:
+    """
+    Normalize and validate a single raw game line into the strict canonical format.
+
+    Attempts auto-correction of spacing, prefixes, and icon positioning.
+    Returns the normalized string on success, or empty string if the line is invalid.
+
+    :param raw_line: Raw line string extracted from the TXT file.
+    :param filepath: Source file path used for warning context in log messages.
+    :param console_name: Console section name used for warning context in log messages.
+    :return: Normalized game line string on success, or empty string on validation failure.
+    """
+
+    try:  # Wrap normalization logic to ensure safe execution
+        stripped = raw_line.strip()  # Remove surrounding whitespace from raw line
+
+        if not stripped:  # Skip completely empty lines
+            return ""  # Return empty to signal skip
+
+        if stripped.startswith("--"):  # Reject header lines passed by mistake
+            return ""  # Return empty to signal skip
+
+        body = stripped  # Initialize working body as the stripped line
+
+        if body.startswith("- "):  # Strip existing game prefix to isolate body content
+            body = body[2:].strip()  # Remove "- " prefix and trim
+        elif body.startswith("-"):  # Handle prefix missing its space separator
+            body = body[1:].strip()  # Remove "-" prefix and trim
+
+        icon = ""  # Initialize icon as absent
+
+        if body.endswith(ICON_OWNED):  # Detect trailing owned icon
+            icon = ICON_OWNED  # Record owned icon
+            body = body[: -len(ICON_OWNED)].strip()  # Strip icon from body and trim
+        elif body.endswith(ICON_MAYBE):  # Detect trailing maybe icon
+            icon = ICON_MAYBE  # Record maybe icon
+            body = body[: -len(ICON_MAYBE)].strip()  # Strip icon from body and trim
+
+        if body.endswith("."):  # Strip trailing period to isolate name+year region
+            body = body[:-1].strip()  # Remove period and trim
+
+        year_match = YEAR_EXTRACT_REGEX.search(body)  # Search for a 4-digit year in the remaining body
+
+        if not year_match:  # Reject lines with no detectable year
+            print(f"{BackgroundColors.YELLOW}Warning: Missing year in game entry — skipping. File: {BackgroundColors.CYAN}{filepath}{BackgroundColors.YELLOW}, Console: {BackgroundColors.CYAN}{console_name}{BackgroundColors.YELLOW}, Line: {BackgroundColors.CYAN}{raw_line.strip()}{Style.RESET_ALL}")  # Log warning with context
+            return ""  # Return empty to signal skip
+
+        year = year_match.group(1)  # Extract the matched 4-digit year string
+
+        year_start = body.rfind(year)  # Locate year position within body for name extraction
+        game_name = body[:year_start].strip()  # Extract game name as everything before the year
+
+        if not game_name:  # Reject lines where no game name could be extracted
+            print(f"{BackgroundColors.YELLOW}Warning: Missing game name in entry — skipping. File: {BackgroundColors.CYAN}{filepath}{BackgroundColors.YELLOW}, Console: {BackgroundColors.CYAN}{console_name}{BackgroundColors.YELLOW}, Line: {BackgroundColors.CYAN}{raw_line.strip()}{Style.RESET_ALL}")  # Log warning with context
+            return ""  # Return empty to signal skip
+
+        if icon:  # Build normalized line with icon when present
+            return f"- {game_name} {year}. {icon}"  # Return canonical format with icon
+        return f"- {game_name} {year}."  # Return canonical format without icon
+
+    except Exception as e:  # Catch unexpected errors during normalization
+        print(f"{BackgroundColors.RED}Error normalizing game line {BackgroundColors.CYAN}{raw_line.strip()}{BackgroundColors.RED}: {e}{Style.RESET_ALL}")  # Log error
+        return ""  # Return empty to signal skip
+
+
 def parse_game_icon(normalized_line: str) -> str:
     """
     Extract the icon from an already-normalized game line.
