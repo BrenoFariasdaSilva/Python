@@ -358,6 +358,27 @@ def calculate_execution_time(start_time, finish_time=None):
     return f"{seconds}s"  # Fallback: only seconds
 
 
+def read_txt_file(filepath: str) -> list:
+    """
+    Read a TXT file and return its lines stripped of trailing newlines.
+
+    :param filepath: Absolute path to the TXT file to read.
+    :return: List of raw line strings from the file, or empty list on failure.
+    """
+
+    try:  # Wrap file reading for safe execution
+        with open(filepath, "r", encoding="utf-8") as file_handle:  # Open file in read mode with UTF-8 encoding
+            lines = file_handle.read().splitlines()  # Read all lines without trailing newline characters
+
+        verbose_output(true_string=f"{BackgroundColors.GREEN}Read {BackgroundColors.CYAN}{len(lines)}{BackgroundColors.GREEN} lines from {BackgroundColors.CYAN}{filepath}{Style.RESET_ALL}")  # Log line count
+
+        return lines  # Return parsed lines
+
+    except Exception as e:  # Catch file read errors
+        print(f"{BackgroundColors.RED}Error reading file {BackgroundColors.CYAN}{filepath}{BackgroundColors.RED}: {e}{Style.RESET_ALL}")  # Log error
+        return []  # Return empty list on failure
+
+
 def normalize_game_line(raw_line: str, filepath: str, console_name: str) -> str:
     """
     Normalize and validate a single raw game line into the strict canonical format.
