@@ -358,6 +358,35 @@ def calculate_execution_time(start_time, finish_time=None):
     return f"{seconds}s"  # Fallback: only seconds
 
 
+def process_all_txt_files() -> None:
+    """
+    Discover and process all TXT files found in the INPUTS_DIR directory.
+
+    Iterates each discovered TXT file and delegates processing to process_txt_file.
+    Logs a summary upon completion of all files.
+
+    :param: None
+    :return: None
+    """
+
+    try:  # Wrap full multi-file processing for safe execution
+        txt_files = collect_txt_files(INPUTS_DIR)  # Discover all TXT files in the inputs directory
+
+        if not txt_files:  # Skip when no TXT files were found
+            print(f"{BackgroundColors.YELLOW}No TXT files found in {BackgroundColors.CYAN}{INPUTS_DIR}{BackgroundColors.YELLOW}. Nothing to process.{Style.RESET_ALL}")  # Log empty state
+            return  # Exit early when no files are available
+
+        print(f"{BackgroundColors.GREEN}Starting TXT processing for {BackgroundColors.CYAN}{len(txt_files)}{BackgroundColors.GREEN} file(s) in {BackgroundColors.CYAN}{INPUTS_DIR}{BackgroundColors.GREEN}.{Style.RESET_ALL}")  # Log processing start
+
+        for txt_filepath in txt_files:  # Iterate and process each discovered TXT file
+            process_txt_file(txt_filepath)  # Process individual TXT file end-to-end
+
+        print(f"{BackgroundColors.GREEN}All TXT files processed successfully.{Style.RESET_ALL}")  # Log global completion
+
+    except Exception as e:  # Catch unexpected errors during multi-file processing
+        print(f"{BackgroundColors.RED}Error during TXT file processing: {e}{Style.RESET_ALL}")  # Log error
+
+
 def play_sound():
     """
     Plays a sound when the program finishes and skips if the operating system is Windows.
