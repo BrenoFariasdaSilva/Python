@@ -606,10 +606,27 @@ def format_txt_output(sections: list) -> str:
         percent_owned = int(round((total_owned / total_games) * 100)) if total_games > 0 else 0
         title_line = f"-- Games Collection: {total_owned} / {total_games} - {percent_owned}%."
 
+        # Calculate per-icon totals
+        total_owned_icon = 0
+        total_damaged_icon = 0
+        total_unsure_icon = 0
+        for section in sorted_sections:
+            for line in section['games']:
+                icon = parse_game_icon(line)
+                if icon == ICON_OWNED:
+                    total_owned_icon += 1
+                elif icon == ICON_DAMAGED:
+                    total_damaged_icon += 1
+                elif icon == ICON_MAYBE:
+                    total_unsure_icon += 1
+
         output_lines.append(title_line)
         output_lines.append(f"-- Owned: {total_owned} ({owned_breakdown}).")
         output_lines.append(f"-- Total: {total_games} ({total_breakdown}).")
-        output_lines.append(f"-- Icons: {ICON_OWNED} {ICON_MAYBE} {ICON_DAMAGED}")
+        output_lines.append(f"-- Icons Distributions:")
+        output_lines.append(f"- Owned - {ICON_OWNED}: {total_owned_icon}.")
+        output_lines.append(f"- Owned Damaged - {ICON_DAMAGED}: {total_damaged_icon}.")
+        output_lines.append(f"- Unsure - {ICON_MAYBE}: {total_unsure_icon}.")
 
         output_lines.append("")
 
