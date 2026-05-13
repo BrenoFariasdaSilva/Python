@@ -358,6 +358,21 @@ def calculate_execution_time(start_time, finish_time=None):
     return f"{seconds}s"  # Fallback: only seconds
 
 
+def parse_game_icon(normalized_line: str) -> str:
+    """
+    Extract the icon from an already-normalized game line.
+
+    :param normalized_line: A normalized game line in canonical format.
+    :return: The icon string (ICON_OWNED or ICON_MAYBE) or empty string if absent.
+    """
+
+    if normalized_line.endswith(ICON_OWNED):  # Detect owned icon at line end
+        return ICON_OWNED  # Return owned icon
+    if normalized_line.endswith(ICON_MAYBE):  # Detect maybe icon at line end
+        return ICON_MAYBE  # Return maybe icon
+    return ""  # Return empty when no icon is present
+
+
 def parse_console_sections(lines: list, filepath: str) -> list:
     """
     Parse raw TXT file lines into a list of console section dictionaries.
