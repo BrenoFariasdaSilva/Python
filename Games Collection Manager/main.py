@@ -518,27 +518,36 @@ def parse_console_sections(lines: list, filepath: str) -> list:
         current_console = None  # Track currently active console name
         current_games = []  # Accumulate game lines for the current console
 
+
         header_titles = [
             "-- Games Collection:",
             "-- Owned:",
             "-- Total:",
-            "-- Icons:"
+            "-- Icons:",
+            "-- Icons Distributions:"
         ]
+
 
         for raw_line in lines:  # Iterate all raw lines from the file
             stripped = raw_line.strip()  # Normalize whitespace for pattern matching
 
-            # Skip global header lines
+            # Skip global header lines and any header that matches header_titles
             if any(stripped.startswith(title) for title in header_titles):
                 continue  # Skip header block lines
 
+            # Skip the special case where the section is exactly '-- Icons Distributions:'
+            if stripped == "-- Icons Distributions:":
+                continue
+
             if stripped.startswith("-- ") and ":" in stripped:  # Detect console section header line
+                # Prevent adding a section for '-- Icons Distributions:'
+                header_body = stripped[3:].strip()
+                console_name = header_body.split(":")[0].strip()
+                if console_name == "Icons Distributions":
+                    continue
                 if current_console is not None:  # Flush previous console section before starting new one
                     sections.append({"name": current_console, "games": current_games})  # Append completed section
                     current_games = []  # Reset game accumulator for the next section
-
-                header_body = stripped[3:].strip()  # Extract body after "-- " prefix
-                console_name = header_body.split(":")[0].strip()  # Extract console name before the colon
                 current_console = console_name  # Set active console to parsed name
 
             elif stripped.startswith("- ") or (stripped.startswith("-") and not stripped.startswith("--")):  # Detect game entry line
