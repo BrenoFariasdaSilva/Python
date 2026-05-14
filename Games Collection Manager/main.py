@@ -642,11 +642,13 @@ def format_txt_output(sections: list) -> str:
 
             output_lines.append("")
 
+        # Remove the last line if it's empty to avoid a trailing blank line in the output file
         if output_lines and output_lines[-1] == "":
             output_lines = output_lines[:-1]
 
         cleaned_lines = [re.sub(r"[ ]{2,}", " ", re.sub(r"\.\.+", ".", line)) for line in output_lines]
-        return "\n".join(cleaned_lines) + "\n"
+        # Only add a trailing newline if there is at least one line, and do not add an extra blank line at the end
+        return "\n".join(cleaned_lines)
 
     except Exception as e:  # Catch unexpected formatting errors
         print(f"{BackgroundColors.RED}Error formatting TXT output: {e}{Style.RESET_ALL}")  # Log error
