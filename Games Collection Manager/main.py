@@ -95,8 +95,9 @@ INPUTS_DIR = "./Inputs"  # Directory containing TXT game-collection files to pro
 # Icon Constants:
 ICON_OWNED = "✅"  # Icon representing a confirmed owned game
 ICON_MAYBE = "❓"  # Icon representing a maybe-owned game
+ICON_NEEDS_CLEANING = "🧹"  # Icon representing an owned game with box that needs cleaning
 ICON_DAMAGED = "🛠️"  # Icon representing an owned game with damaged/needs fixing box
-VALID_ICONS = (ICON_OWNED, ICON_MAYBE, ICON_DAMAGED)  # Tuple of all recognized ownership icons
+VALID_ICONS = (ICON_OWNED, ICON_MAYBE, ICON_DAMAGED, ICON_NEEDS_CLEANING)  # Tuple of all recognized ownership icons
 
 # Regex Constants:
 GAME_LINE_REGEX = re.compile(r"^-\s+(.+?)\s+(\d{4})\.\s*(✅|❓|🛠️)?$")  # Pattern matching a valid normalized game line
@@ -449,6 +450,9 @@ def normalize_game_line(raw_line: str, filepath: str, console_name: str) -> str:
         elif body.endswith(ICON_DAMAGED):  # Detect trailing damaged icon
             icon = ICON_DAMAGED  # Record damaged icon
             body = body[: -len(ICON_DAMAGED)].strip()  # Strip icon from body and trim
+        elif body.endswith(ICON_NEEDS_CLEANING):  # Detect trailing needs cleaning icon
+            icon = ICON_NEEDS_CLEANING  # Record needs cleaning icon
+            body = body[: -len(ICON_NEEDS_CLEANING)].strip()  # Strip icon from body and trim
 
         if body.endswith("."):  # Strip trailing period to isolate name+year region
             body = body[:-1].strip()  # Remove period and trim
@@ -491,6 +495,8 @@ def parse_game_icon(normalized_line: str) -> str:
         return ICON_MAYBE  # Return maybe icon
     if normalized_line.endswith(ICON_DAMAGED):  # Detect damaged/needs fixing icon at line end
         return ICON_DAMAGED  # Return damaged icon
+    if normalized_line.endswith(ICON_NEEDS_CLEANING):  # Detect needs cleaning icon at line end
+        return ICON_NEEDS_CLEANING  # Return needs cleaning icon
     return ""  # Return empty when no icon is present
 
 
@@ -570,8 +576,8 @@ def compute_console_counters(games: list) -> tuple:
     """
 
     total = len(games)  # Total is the count of all valid game entries
-    owned = sum(1 for line in games if parse_game_icon(line) in VALID_ICONS)  # Count lines carrying any valid ownership icon
-
+    # Only count as owned if the icon is ICON_OWNED, ICON_DAMAGED, or ICON_NEEDS_CLEANING
+    owned = sum(1 for line in games if parse_game_icon(line) in (ICON_OWNED, ICON_DAMAGED, ICON_NEEDS_CLEANING))
     return owned, total  # Return computed counters as a tuple
 
 
@@ -610,6 +616,7 @@ def format_txt_output(sections: list) -> str:
         total_owned_icon = 0
         total_damaged_icon = 0
         total_unsure_icon = 0
+        total_needs_cleaning_icon = 0
         for section in sorted_sections:
             for line in section['games']:
                 icon = parse_game_icon(line)
@@ -619,12 +626,15 @@ def format_txt_output(sections: list) -> str:
                     total_damaged_icon += 1
                 elif icon == ICON_MAYBE:
                     total_unsure_icon += 1
+                elif icon == ICON_NEEDS_CLEANING:
+                    total_needs_cleaning_icon += 1
 
         output_lines.append(title_line)
         output_lines.append(f"-- Owned: {total_owned} ({owned_breakdown}).")
         output_lines.append(f"-- Total: {total_games} ({total_breakdown}).")
         output_lines.append(f"-- Icons Distributions:")
         output_lines.append(f"- Owned - {ICON_OWNED}: {total_owned_icon}.")
+        output_lines.append(f"- Owned Cleaning - {ICON_NEEDS_CLEANING}: {total_needs_cleaning_icon}.")
         output_lines.append(f"- Owned Damaged - {ICON_DAMAGED}: {total_damaged_icon}.")
         output_lines.append(f"- Unsure - {ICON_MAYBE}: {total_unsure_icon}.")
 
