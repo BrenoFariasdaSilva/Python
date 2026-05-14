@@ -619,7 +619,7 @@ def format_txt_output(sections: list) -> str:
         total_breakdown = " + ".join(f"{section['name']} {compute_console_counters(section['games'])[1]}" for section in sorted_sections)
 
         percent_owned = int(round((total_owned / total_games) * 100)) if total_games > 0 else 0
-        title_line = f"-- Games Collection: {total_owned} / {total_games} - {percent_owned}%."
+        title_line = f"Games Collection: {total_owned} / {total_games} - {percent_owned}%."
 
         # Calculate per-icon totals
         total_owned_icon = 0
@@ -639,8 +639,8 @@ def format_txt_output(sections: list) -> str:
                     total_needs_cleaning_icon += 1
 
         output_lines.append(title_line)
-        output_lines.append(f"-- Owned: {total_owned} ({owned_breakdown}).")
-        output_lines.append(f"-- Total: {total_games} ({total_breakdown}).")
+        output_lines.append(f"- Owned: {total_owned} ({owned_breakdown}).")
+        output_lines.append(f"- Total: {total_games} ({total_breakdown}).")
         output_lines.append(f"-- Icons Distributions:")
         output_lines.append(f"- Owned - {ICON_OWNED}: {total_owned_icon}.")
         output_lines.append(f"- Owned Cleaning - {ICON_NEEDS_CLEANING}: {total_needs_cleaning_icon}.")
