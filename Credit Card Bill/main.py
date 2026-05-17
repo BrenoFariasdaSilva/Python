@@ -583,6 +583,8 @@ def main():
         sorted_df["Valor"].cumsum().round(2)
     )  # Calculate the cumulative sum of the "Valor" column and round it to 2 decimal places
 
+    sorted_df = calculate_cashback_columns(sorted_df)  # Add cashback percentage, cashback amount, and cumulative cashback columns
+
     sorted_df.to_csv(f"{OUTPUT_CSV_FILE}", sep=";", index=False)  # Write the DataFrame with ";" separator
 
     cash_payments, credit_payments = get_cash_and_credit_payments(
