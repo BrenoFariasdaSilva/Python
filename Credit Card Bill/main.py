@@ -600,7 +600,7 @@ def main():
     cashback_total = sorted_df["Cashback R$"].sum()  # Compute the total cashback as the sum of the Cashback R$ column
 
     print(
-        f"{BackgroundColors.GREEN}Total Purchases: {BackgroundColors.CYAN}{sorted_df.shape[0]}{BackgroundColors.GREEN}. Cash Payments: {BackgroundColors.CYAN}{cash_payments}{BackgroundColors.GREEN}. Credit Payments: {BackgroundColors.CYAN}{credit_payments}{BackgroundColors.GREEN}. Total Cashback: {BackgroundColors.CYAN}R$ {cashback_total:.2f}{BackgroundColors.GREEN}.{Style.RESET_ALL}",
+        f"{BackgroundColors.GREEN}Total Purchases: {BackgroundColors.CYAN}{sorted_df.shape[0]}{BackgroundColors.GREEN}. Cash Payments: {BackgroundColors.CYAN}{cash_payments}{BackgroundColors.GREEN}. Credit Payments: {BackgroundColors.CYAN}{credit_payments}{BackgroundColors.GREEN}.\nTotal Cashback: {BackgroundColors.CYAN}R$ {cashback_total:.2f}{BackgroundColors.GREEN}.{Style.RESET_ALL}",
         end="\n\n",
     )
     print(f"{BackgroundColors.BOLD}{BackgroundColors.GREEN}Execution finished.{Style.RESET_ALL}", end="\n\n")
