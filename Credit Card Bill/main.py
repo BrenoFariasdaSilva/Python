@@ -1,4 +1,5 @@
 import atexit  # For registering the play_sound function to be called when the program finishes
+import csv  # For CSV quoting and delimiter constants
 import glob  # For pattern matching files
 import os  # For checking if the file exists
 import pandas as pd  # Pandas is used to read and write the CSV files
@@ -575,7 +576,7 @@ def main():
         reais_to_float
     )  # Apply the function that converts the "Valor" column to a float
 
-    filtered_df.to_csv(f"{OUTPUT_CSV_FILE}", sep=";", index=False)  # Write it to the CSV file using the ";" separator
+    filtered_df.to_csv(f"{OUTPUT_CSV_FILE}", sep=";", index=False, encoding="utf-8", quoting=csv.QUOTE_MINIMAL)  # Write it to the CSV file using the ";" separator with explicit quoting and encoding
 
     sorted_df = process_dates(filtered_df, "Data", "%d/%m/%Y")  # Process the dates and sort the DataFrame
 
@@ -585,7 +586,7 @@ def main():
 
     sorted_df = calculate_cashback_columns(sorted_df)  # Add cashback percentage, cashback amount, and cumulative cashback columns
 
-    sorted_df.to_csv(f"{OUTPUT_CSV_FILE}", sep=";", index=False)  # Write the DataFrame with ";" separator
+    sorted_df.to_csv(f"{OUTPUT_CSV_FILE}", sep=";", index=False, encoding="utf-8", quoting=csv.QUOTE_MINIMAL)  # Write the DataFrame with ";" separator with explicit quoting and encoding
 
     cash_payments, credit_payments = get_cash_and_credit_payments(
         sorted_df
