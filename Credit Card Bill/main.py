@@ -313,6 +313,21 @@ def process_dates(df, date_column_name="Data", format="%d/%m/%Y"):
     return sorted_df  # Return the sorted DataFrame with formatted dates
 
 
+def get_cashback_rate(cumulative_sum: float) -> float:
+    """
+    Return the cashback rate for the given cumulative sum value.
+
+    :param cumulative_sum: The cumulative sum value at the current line.
+    :return: The cashback rate as a decimal fraction (e.g., 0.005 for 0.5%).
+    """
+
+    for threshold, rate in CASHBACK_THRESHOLDS:  # Iterate thresholds in ascending order
+        if cumulative_sum <= threshold:  # Verify if the cumulative sum falls within this threshold band
+            return rate  # Return the matched cashback rate
+
+    return CASHBACK_THRESHOLDS[-1][1]  # Return the highest rate as a safe fallback
+
+
 def resolve_entry_with_trailing_space(current_path: str, entry: str, stripped_part: str) -> str:
     """
     Resolve and optionally rename a directory entry with trailing spaces.
