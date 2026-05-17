@@ -43,6 +43,14 @@ RUN_FUNCTIONS = {
     "Play Sound": True,  # Set to True to play a sound when the program finishes
 }
 
+# Cashback Constants:
+CASHBACK_THRESHOLDS = [
+    (1500.0, 0.000),
+    (3000.0, 0.005),
+    (7500.0, 0.010),
+    (float("inf"), 0.011),
+]  # Cashback rate thresholds as (upper_bound, rate) tuples sorted ascending by upper bound
+
 
 def verbose_output(true_string="", false_string=""):
     """
