@@ -328,6 +328,24 @@ def get_cashback_rate(cumulative_sum: float) -> float:
     return CASHBACK_THRESHOLDS[-1][1]  # Return the highest rate as a safe fallback
 
 
+def calculate_cashback_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Add cashback columns to the DataFrame based on cumulative sum thresholds.
+
+    :param df: The DataFrame containing "Valor" and "Sum" columns.
+    :return: The DataFrame with "Cashback R$", "Cashback %", and "Cashback Sum R$" columns added.
+    """
+
+    cashback_rates = df["Sum"].apply(get_cashback_rate)  # Compute cashback rate per row based on cumulative sum threshold
+
+    df["Cashback R$"] = (df["Valor"] * cashback_rates).round(2)  # Calculate cashback amount per row rounded to 2 decimal places
+    df["Cashback %"] = cashback_rates  # Assign cashback rate column with the rate applied to each row
+
+    df["Cashback Sum R$"] = df["Cashback R$"].cumsum().round(2)  # Calculate cumulative cashback total rounded to 2 decimal places
+
+    return df  # Return the DataFrame with cashback columns appended
+
+
 def resolve_entry_with_trailing_space(current_path: str, entry: str, stripped_part: str) -> str:
     """
     Resolve and optionally rename a directory entry with trailing spaces.
