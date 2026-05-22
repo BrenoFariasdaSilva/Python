@@ -652,8 +652,10 @@ def format_txt_output(sections: list) -> str:
                     total_needs_cleaning_icon += 1
 
         output_lines.append(title_line)
+        output_lines.append("")  # Insert blank line between title and owned/total counters block
         output_lines.append(f"- Owned: {total_owned} ({owned_breakdown}).")
         output_lines.append(f"- Total: {total_games} ({total_breakdown}).")
+        output_lines.append("")  # Insert blank line between total counters and icon distribution block
         output_lines.append(f"-- Icons Distributions:")
         output_lines.append(f"- Owned - {ICON_OWNED}: {total_owned_icon}.")
         output_lines.append(f"- Owned Cleaning - {ICON_NEEDS_CLEANING}: {total_needs_cleaning_icon}.")
