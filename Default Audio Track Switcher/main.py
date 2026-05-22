@@ -5,46 +5,46 @@ Video Audio Track Switcher
 Author      : Breno Farias da Silva
 Created     : 2025-10-26
 Description :
-   This script recursively searches for video files in the specified input directory
-   and processes their audio tracks: keeps only tracks in desired languages (from DESIRED_LANGUAGES),
-   sets the default audio track to English if available, otherwise the first desired track.
-   Undesired audio tracks are automatically removed.
+    This script recursively searches for video files in the specified input directory
+    and processes their audio tracks: keeps only tracks in desired languages (from DESIRED_LANGUAGES),
+    sets the default audio track to English if available, otherwise the first desired track.
+    Undesired audio tracks are automatically removed.
 
-   Key features include:
-      - Recursive search for video files with specified extensions
-      - Automatic detection and filtering of audio tracks by desired languages
-      - Removal of undesired audio tracks
-      - Setting the default audio track to English if available
-      - Progress bar visualization for processing
-      - Integration with ffmpeg for audio track manipulation
+    Key features include:
+        - Recursive search for video files with specified extensions
+        - Automatic detection and filtering of audio tracks by desired languages
+        - Removal of undesired audio tracks
+        - Setting the default audio track to English if available
+        - Progress bar visualization for processing
+        - Integration with ffmpeg for audio track manipulation
 
 Usage:
-   1. Set the INPUT_DIR constant to the folder containing your video files.
-   2. Modify DESIRED_LANGUAGES to include the languages you want to keep.
-   3. Execute the script:
-         $ python main.py
-   4. The script will automatically keep only desired language tracks and set English as default if present.
+    1. Set the INPUT_DIR constant to the folder containing your video files.
+    2. Modify DESIRED_LANGUAGES to include the languages you want to keep.
+    3. Execute the script:
+            $ python main.py
+    4. The script will automatically keep only desired language tracks and set English as default if present.
 
 Outputs:
-   - Video files in the same directory with only desired language audio tracks, English set as default if present
+    - Video files in the same directory with only desired language audio tracks, English set as default if present
 
 TODOs:
-   - Add a dry-run mode to preview changes without modifying files
-   - Add logging of processed files and errors
-   - Allow customization of default language priority
-   - Optimize for batch operations
+    - Add a dry-run mode to preview changes without modifying files
+    - Add logging of processed files and errors
+    - Allow customization of default language priority
+    - Optimize for batch operations
 
 Dependencies:
-   - Python >= 3.9
-   - colorama
-   - tqdm
-   - ffmpeg and ffprobe installed and available in PATH
+    - Python >= 3.9
+    - colorama
+    - tqdm
+    - ffmpeg and ffprobe installed and available in PATH
 
 Assumptions & Notes:
-   - Each video file has at least one audio track
-   - Videos are writable in-place
-   - Tested on macOS, Linux, and Windows with ffmpeg/ffprobe available
-   - Original file is replaced by the processed file
+    - Each video file has at least one audio track
+    - Videos are writable in-place
+    - Tested on macOS, Linux, and Windows with ffmpeg/ffprobe available
+    - Original file is replaced by the processed file
 """
 
 
