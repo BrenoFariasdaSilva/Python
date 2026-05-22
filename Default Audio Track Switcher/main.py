@@ -22,7 +22,7 @@ Usage:
     1. Set the INPUT_DIR constant to the folder containing your video files.
     2. Modify DESIRED_LANGUAGES to include the languages you want to keep.
     3. Execute the script:
-            $ python main.py
+        $ python main.py
     4. The script will automatically keep only desired language tracks and set English as default if present.
 
 Outputs:
