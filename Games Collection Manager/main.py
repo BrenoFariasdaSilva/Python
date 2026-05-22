@@ -99,6 +99,15 @@ ICON_NEEDS_CLEANING = "🧹"  # Icon representing an owned game with box that ne
 ICON_DAMAGED = "🛠️"  # Icon representing an owned game with damaged/needs fixing box
 VALID_ICONS = (ICON_OWNED, ICON_MAYBE, ICON_DAMAGED, ICON_NEEDS_CLEANING)  # Tuple of all recognized ownership icons
 
+# Fixed Metadata Constants:
+FIXED_METADATA_BLOCK = [
+    "-- DVD Cover Dimensions:",
+    "- PS2: 27.2 Largura x 18.3 Altura ",
+    "- PS3: 27.2 Largura x 15.0 Altura",
+    "- PS4/PS5: 27.2 Largura  x 16.0 Altura",
+]  # Constant non-console metadata block to keep deterministic and unchanged
+FIXED_METADATA_BLOCK_STRIPPED = tuple(line.strip() for line in FIXED_METADATA_BLOCK)  # Stripped version for safe parser comparisons
+
 # Regex Constants:
 GAME_LINE_REGEX = re.compile(r"^-\s+(.+?)\s+(\d{4})\.\s*(✅|❓|🛠️)?$")  # Pattern matching a valid normalized game line
 YEAR_EXTRACT_REGEX = re.compile(r"(\d{4})")  # Pattern extracting a 4-digit year from raw text
@@ -524,7 +533,8 @@ def parse_console_sections(lines: list, filepath: str) -> list:
             "-- Owned:",
             "-- Total:",
             "-- Icons:",
-            "-- Icons Distributions:"
+            "-- Icons Distributions:",
+            "-- DVD Cover Dimensions:",
         ]
 
 
@@ -539,11 +549,14 @@ def parse_console_sections(lines: list, filepath: str) -> list:
             if stripped == "-- Icons Distributions:":
                 continue
 
+            if stripped in FIXED_METADATA_BLOCK_STRIPPED:  # Skip fixed metadata lines that must not be parsed as consoles or games
+                continue  # Skip fixed metadata block line
+
             if stripped.startswith("-- ") and ":" in stripped:  # Detect console section header line
                 # Prevent adding a section for '-- Icons Distributions:'
                 header_body = stripped[3:].strip()
                 console_name = header_body.split(":")[0].strip()
-                if console_name == "Icons Distributions":
+                if console_name in ("Icons Distributions", "DVD Cover Dimensions"):
                     continue
                 if current_console is not None:  # Flush previous console section before starting new one
                     sections.append({"name": current_console, "games": current_games})  # Append completed section
@@ -648,6 +661,8 @@ def format_txt_output(sections: list) -> str:
         output_lines.append(f"- Unsure - {ICON_MAYBE}: {total_unsure_icon}.")
 
         output_lines.append("")
+        output_lines.extend(FIXED_METADATA_BLOCK)  # Append fixed non-console metadata block in deterministic order
+        output_lines.append("")  # Insert blank line after fixed metadata block
 
         for section in sorted_sections:
             owned, total = compute_console_counters(section["games"])
@@ -665,7 +680,12 @@ def format_txt_output(sections: list) -> str:
         if output_lines and output_lines[-1] == "":
             output_lines = output_lines[:-1]
 
-        cleaned_lines = [re.sub(r"[ ]{2,}", " ", re.sub(r"\.\.+", ".", line)) for line in output_lines]
+        cleaned_lines = []  # Initialize cleaned line accumulator
+        for line in output_lines:  # Iterate all output lines in order
+            if line.strip() in FIXED_METADATA_BLOCK_STRIPPED:  # Preserve fixed metadata lines exactly as declared
+                cleaned_lines.append(line)  # Keep exact spacing and trailing spaces in metadata block
+            else:  # Apply canonical cleanup rules to regular lines
+                cleaned_lines.append(re.sub(r"[ ]{2,}", " ", re.sub(r"\.\.+", ".", line)))  # Normalize repeated spaces and periods
         # Only add a trailing newline if there is at least one line, and do not add an extra blank line at the end
         return "\n".join(cleaned_lines)
 
