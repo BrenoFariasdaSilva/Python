@@ -102,9 +102,9 @@ VALID_ICONS = (ICON_OWNED, ICON_MAYBE, ICON_DAMAGED, ICON_NEEDS_CLEANING)  # Tup
 # Fixed Metadata Constants:
 FIXED_METADATA_BLOCK = [
     "-- DVD Cover Dimensions:",
-    "- PS2: 27.2 Largura x 18.3 Altura ",
-    "- PS3: 27.2 Largura x 15.0 Altura",
-    "- PS4/PS5: 27.2 Largura  x 16.0 Altura",
+    "- PS2: 27.2 Largura x 18.3 Altura.",
+    "- PS3: 27.2 Largura x 15.0 Altura.",
+    "- PS4/PS5: 27.2 Largura  x 16.0 Altura.",
 ]  # Constant non-console metadata block to keep deterministic and unchanged
 FIXED_METADATA_BLOCK_STRIPPED = tuple(line.strip() for line in FIXED_METADATA_BLOCK)  # Stripped version for safe parser comparisons
 
