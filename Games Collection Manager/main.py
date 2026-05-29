@@ -667,10 +667,10 @@ def format_txt_output(sections: list) -> str:
         output_lines.append("")  # Insert blank line between total counters and icon distribution block
         output_lines.append(f"-- Icons Distributions:")
         output_lines.append(f"- Owned - {ICON_OWNED}: {total_owned_icon}.")
-        output_lines.append(f"- Owned Cleaning - {ICON_NEEDS_CLEANING}: {total_needs_cleaning_icon}.")
-        output_lines.append(f"- Owned Damaged - {ICON_DAMAGED}: {total_damaged_icon}.")
-        output_lines.append(f"- Box Damaged - {ICON_BOX_DAMAGED}: {total_box_damaged_icon}.")
-        output_lines.append(f"- Unsure - {ICON_MAYBE}: {total_unsure_icon}.")
+        output_lines.append(f"- Owned - DVD Box Cleaning - {ICON_NEEDS_CLEANING}: {total_needs_cleaning_icon}.")
+        output_lines.append(f"- Owned - DVD Box Cover - {ICON_DAMAGED}: {total_damaged_icon}.")
+        output_lines.append(f"- Owned - Box Damaged - {ICON_BOX_DAMAGED}: {total_box_damaged_icon}.")
+        output_lines.append(f"- Unsure is Owned - {ICON_MAYBE}: {total_unsure_icon}.")
 
         output_lines.append("")
         output_lines.extend(FIXED_METADATA_BLOCK)  # Append fixed non-console metadata block in deterministic order
