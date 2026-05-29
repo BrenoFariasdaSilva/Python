@@ -97,7 +97,8 @@ ICON_OWNED = "✅"  # Icon representing a confirmed owned game
 ICON_MAYBE = "❓"  # Icon representing a maybe-owned game
 ICON_NEEDS_CLEANING = "🧹"  # Icon representing an owned game with box that needs cleaning
 ICON_DAMAGED = "🛠️"  # Icon representing an owned game with damaged/needs fixing box
-VALID_ICONS = (ICON_OWNED, ICON_MAYBE, ICON_DAMAGED, ICON_NEEDS_CLEANING)  # Tuple of all recognized ownership icons
+ICON_BOX_DAMAGED = "📦"  # Icon representing an owned game with damaged box
+VALID_ICONS = (ICON_OWNED, ICON_MAYBE, ICON_DAMAGED, ICON_NEEDS_CLEANING, ICON_BOX_DAMAGED)  # Tuple of all recognized ownership icons
 
 # Fixed Metadata Constants:
 FIXED_METADATA_BLOCK = [
@@ -109,7 +110,7 @@ FIXED_METADATA_BLOCK = [
 FIXED_METADATA_BLOCK_STRIPPED = tuple(line.strip() for line in FIXED_METADATA_BLOCK)  # Stripped version for safe parser comparisons
 
 # Regex Constants:
-GAME_LINE_REGEX = re.compile(r"^-\s+(.+?)\s+(\d{4})\.\s*(✅|❓|🛠️)?$")  # Pattern matching a valid normalized game line
+GAME_LINE_REGEX = re.compile(r"^-\s+(.+?)\s+(\d{4})\.\s*(✅|❓|🛠️|📦)?$")  # Pattern matching a valid normalized game line
 YEAR_EXTRACT_REGEX = re.compile(r"(\d{4})")  # Pattern extracting a 4-digit year from raw text
 
 # Functions Definitions:
@@ -459,6 +460,9 @@ def normalize_game_line(raw_line: str, filepath: str, console_name: str) -> str:
         elif body.endswith(ICON_DAMAGED):  # Detect trailing damaged icon
             icon = ICON_DAMAGED  # Record damaged icon
             body = body[: -len(ICON_DAMAGED)].strip()  # Strip icon from body and trim
+        elif body.endswith(ICON_BOX_DAMAGED):  # Detect trailing box damaged icon
+            icon = ICON_BOX_DAMAGED  # Record box damaged icon
+            body = body[: -len(ICON_BOX_DAMAGED)].strip()  # Strip icon from body and trim
         elif body.endswith(ICON_NEEDS_CLEANING):  # Detect trailing needs cleaning icon
             icon = ICON_NEEDS_CLEANING  # Record needs cleaning icon
             body = body[: -len(ICON_NEEDS_CLEANING)].strip()  # Strip icon from body and trim
@@ -504,6 +508,8 @@ def parse_game_icon(normalized_line: str) -> str:
         return ICON_MAYBE  # Return maybe icon
     if normalized_line.endswith(ICON_DAMAGED):  # Detect damaged/needs fixing icon at line end
         return ICON_DAMAGED  # Return damaged icon
+    if normalized_line.endswith(ICON_BOX_DAMAGED):  # Detect box damaged icon at line end
+        return ICON_BOX_DAMAGED  # Return box damaged icon
     if normalized_line.endswith(ICON_NEEDS_CLEANING):  # Detect needs cleaning icon at line end
         return ICON_NEEDS_CLEANING  # Return needs cleaning icon
     return ""  # Return empty when no icon is present
@@ -598,8 +604,8 @@ def compute_console_counters(games: list) -> tuple:
     """
 
     total = len(games)  # Total is the count of all valid game entries
-    # Only count as owned if the icon is ICON_OWNED, ICON_DAMAGED, or ICON_NEEDS_CLEANING
-    owned = sum(1 for line in games if parse_game_icon(line) in (ICON_OWNED, ICON_DAMAGED, ICON_NEEDS_CLEANING))
+    # Only count as owned if the icon is ICON_OWNED, ICON_DAMAGED, ICON_NEEDS_CLEANING, or ICON_BOX_DAMAGED
+    owned = sum(1 for line in games if parse_game_icon(line) in (ICON_OWNED, ICON_DAMAGED, ICON_NEEDS_CLEANING, ICON_BOX_DAMAGED))
     return owned, total  # Return computed counters as a tuple
 
 
@@ -637,6 +643,7 @@ def format_txt_output(sections: list) -> str:
         # Calculate per-icon totals
         total_owned_icon = 0
         total_damaged_icon = 0
+        total_box_damaged_icon = 0
         total_unsure_icon = 0
         total_needs_cleaning_icon = 0
         for section in sorted_sections:
@@ -646,6 +653,8 @@ def format_txt_output(sections: list) -> str:
                     total_owned_icon += 1
                 elif icon == ICON_DAMAGED:
                     total_damaged_icon += 1
+                elif icon == ICON_BOX_DAMAGED:
+                    total_box_damaged_icon += 1
                 elif icon == ICON_MAYBE:
                     total_unsure_icon += 1
                 elif icon == ICON_NEEDS_CLEANING:
@@ -660,6 +669,7 @@ def format_txt_output(sections: list) -> str:
         output_lines.append(f"- Owned - {ICON_OWNED}: {total_owned_icon}.")
         output_lines.append(f"- Owned Cleaning - {ICON_NEEDS_CLEANING}: {total_needs_cleaning_icon}.")
         output_lines.append(f"- Owned Damaged - {ICON_DAMAGED}: {total_damaged_icon}.")
+        output_lines.append(f"- Box Damaged - {ICON_BOX_DAMAGED}: {total_box_damaged_icon}.")
         output_lines.append(f"- Unsure - {ICON_MAYBE}: {total_unsure_icon}.")
 
         output_lines.append("")
