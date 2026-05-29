@@ -96,7 +96,7 @@ INPUTS_DIR = "./Inputs"  # Directory containing TXT game-collection files to pro
 ICON_OWNED = "✅"  # Icon representing a confirmed owned game
 ICON_MAYBE = "❓"  # Icon representing a maybe-owned game
 ICON_NEEDS_CLEANING = "🧹"  # Icon representing an owned game with box that needs cleaning
-ICON_DAMAGED = "🛠️"  # Icon representing an owned game with damaged/needs fixing box
+ICON_DAMAGED = "📀"  # Icon representing an owned game with damaged/needs fixing box
 ICON_BOX_DAMAGED = "📦"  # Icon representing an owned game with damaged box
 VALID_ICONS = (ICON_OWNED, ICON_MAYBE, ICON_DAMAGED, ICON_NEEDS_CLEANING, ICON_BOX_DAMAGED)  # Tuple of all recognized ownership icons
 
@@ -110,7 +110,7 @@ FIXED_METADATA_BLOCK = [
 FIXED_METADATA_BLOCK_STRIPPED = tuple(line.strip() for line in FIXED_METADATA_BLOCK)  # Stripped version for safe parser comparisons
 
 # Regex Constants:
-GAME_LINE_REGEX = re.compile(r"^-\s+(.+?)\s+(\d{4})\.\s*(✅|❓|🛠️|📦)?$")  # Pattern matching a valid normalized game line
+GAME_LINE_REGEX = re.compile(r"^-\s+(.+?)\s+(\d{4})\.\s*(✅|❓|📀|📦)?$")  # Pattern matching a valid normalized game line
 YEAR_EXTRACT_REGEX = re.compile(r"(\d{4})")  # Pattern extracting a 4-digit year from raw text
 
 # Functions Definitions:
