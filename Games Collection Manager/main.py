@@ -106,6 +106,7 @@ FIXED_METADATA_BLOCK = [
     "- PS2: 27.2 Largura x 18.3 Altura.",
     "- PS3: 27.2 Largura x 15.0 Altura.",
     "- PS4/PS5: 27.2 Largura  x 16.0 Altura.",
+    "- Xbox One/Xbox Series: 26.7 Largura x 14.9 Altura."
 ]  # Constant non-console metadata block to keep deterministic and unchanged
 FIXED_METADATA_BLOCK_STRIPPED = tuple(line.strip() for line in FIXED_METADATA_BLOCK)  # Stripped version for safe parser comparisons
 
