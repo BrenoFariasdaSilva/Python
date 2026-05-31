@@ -626,6 +626,32 @@ def compute_console_counters(games: list) -> tuple:
     return owned, total  # Return computed counters as a tuple
 
 
+def build_icon_platform_breakdown(sections: list, icon: str) -> str:
+    """
+    Build a platform breakdown string for a specific icon.
+
+    :param sections: List of console section dictionaries with game lists.
+    :param icon: Icon string to count across sections.
+    :return: Formatted breakdown string, or empty string when no matches exist.
+    """
+
+    try:  # Wrap breakdown formatting to ensure safe execution
+        platform_parts = []  # Collect non-zero platform counts in display order
+
+        for section in sections:  # Iterate each console section in sorted order
+            icon_count = sum(1 for line in section["games"] if icon in parse_game_icons(line))  # Count matching icon occurrences in the current section
+            if icon_count > 0:  # Include only platforms with a non-zero count
+                platform_parts.append(f"{section['name']} {icon_count}")  # Record platform name and count
+
+        if not platform_parts:  # Return empty string when the icon is not present anywhere
+            return ""  # No breakdown needed for zero-count lines
+
+        return f" ({' + '.join(platform_parts)})"  # Return formatted platform breakdown
+
+    except Exception:  # Catch unexpected formatting errors
+        return ""  # Return empty string on failure
+
+
 def format_txt_output(sections: list) -> str:
     """
     Format a list of parsed console sections into the canonical TXT output string.
@@ -684,10 +710,14 @@ def format_txt_output(sections: list) -> str:
         output_lines.append("")  # Insert blank line between total counters and icon distribution block
         output_lines.append(f"-- Icons Distributions:")
         output_lines.append(f"- Owned - {ICON_OWNED}: {total_owned_icon}.")
-        output_lines.append(f"- Owned - DVD Box Cleaning - {ICON_NEEDS_CLEANING}: {total_needs_cleaning_icon}.")
-        output_lines.append(f"- Owned - DVD Box Cover - {ICON_DAMAGED}: {total_damaged_icon}.")
-        output_lines.append(f"- Owned - Box Damaged - {ICON_BOX_DAMAGED}: {total_box_damaged_icon}.")
-        output_lines.append(f"- Unsure is Owned - {ICON_MAYBE}: {total_unsure_icon}.")
+        cleaning_breakdown = build_icon_platform_breakdown(sorted_sections, ICON_NEEDS_CLEANING)  # Build platform breakdown for cleaning icon
+        damaged_breakdown = build_icon_platform_breakdown(sorted_sections, ICON_DAMAGED)  # Build platform breakdown for damaged cover icon
+        box_damaged_breakdown = build_icon_platform_breakdown(sorted_sections, ICON_BOX_DAMAGED)  # Build platform breakdown for damaged box icon
+        unsure_breakdown = build_icon_platform_breakdown(sorted_sections, ICON_MAYBE)  # Build platform breakdown for unsure-owned icon
+        output_lines.append(f"- Owned - DVD Box Cleaning - {ICON_NEEDS_CLEANING}: {total_needs_cleaning_icon}{cleaning_breakdown}.")
+        output_lines.append(f"- Owned - DVD Box Cover - {ICON_DAMAGED}: {total_damaged_icon}{damaged_breakdown}.")
+        output_lines.append(f"- Owned - Box Damaged - {ICON_BOX_DAMAGED}: {total_box_damaged_icon}{box_damaged_breakdown}.")
+        output_lines.append(f"- Unsure is Owned - {ICON_MAYBE}: {total_unsure_icon}{unsure_breakdown}.")
 
         output_lines.append("")
         output_lines.extend(FIXED_METADATA_BLOCK)  # Append fixed non-console metadata block in deterministic order
