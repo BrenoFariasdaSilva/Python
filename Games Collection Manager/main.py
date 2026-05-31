@@ -110,7 +110,7 @@ FIXED_METADATA_BLOCK = [
 FIXED_METADATA_BLOCK_STRIPPED = tuple(line.strip() for line in FIXED_METADATA_BLOCK)  # Stripped version for safe parser comparisons
 
 # Regex Constants:
-GAME_LINE_REGEX = re.compile(r"^-\s+(.+?)\s+(\d{4})\.\s*(✅|❓|📀|📦)?$")  # Pattern matching a valid normalized game line
+GAME_LINE_REGEX = re.compile(r"^-\s+(.+?)\s+(\d{4})\.\s*((?:✅|❓|📀|🧹|📦)(?:\s+(?:✅|❓|📀|🧹|📦))*)?$")  # Pattern matching a valid normalized game line with optional multi-icon suffix
 YEAR_EXTRACT_REGEX = re.compile(r"(\d{4})")  # Pattern extracting a 4-digit year from raw text
 
 # Functions Definitions:
@@ -450,22 +450,23 @@ def normalize_game_line(raw_line: str, filepath: str, console_name: str) -> str:
             body = body[1:].strip()  # Remove "-" prefix and trim
 
 
-        icon = ""  # Initialize icon as absent
-        if body.endswith(ICON_OWNED):  # Detect trailing owned icon
-            icon = ICON_OWNED  # Record owned icon
-            body = body[: -len(ICON_OWNED)].strip()  # Strip icon from body and trim
-        elif body.endswith(ICON_MAYBE):  # Detect trailing maybe icon
-            icon = ICON_MAYBE  # Record maybe icon
-            body = body[: -len(ICON_MAYBE)].strip()  # Strip icon from body and trim
-        elif body.endswith(ICON_DAMAGED):  # Detect trailing damaged icon
-            icon = ICON_DAMAGED  # Record damaged icon
-            body = body[: -len(ICON_DAMAGED)].strip()  # Strip icon from body and trim
-        elif body.endswith(ICON_BOX_DAMAGED):  # Detect trailing box damaged icon
-            icon = ICON_BOX_DAMAGED  # Record box damaged icon
-            body = body[: -len(ICON_BOX_DAMAGED)].strip()  # Strip icon from body and trim
-        elif body.endswith(ICON_NEEDS_CLEANING):  # Detect trailing needs cleaning icon
-            icon = ICON_NEEDS_CLEANING  # Record needs cleaning icon
-            body = body[: -len(ICON_NEEDS_CLEANING)].strip()  # Strip icon from body and trim
+        reversed_icons = []  # Collect detected trailing icons from right to left
+        while True:  # Keep peeling recognized trailing icons until none remain
+            matched_icon = None  # Track whether the current pass found a trailing icon
+
+            for icon in VALID_ICONS:  # Try each supported icon as a trailing suffix
+                if body.endswith(icon):  # Verify icon appears at the current line tail
+                    prefix = body[: -len(icon)]  # Extract content before the candidate icon
+                    if prefix == "" or prefix.endswith(" "):  # Verify icon token is separated from previous text
+                        matched_icon = icon  # Record matched trailing icon token
+                        body = prefix.strip()  # Remove matched icon token and trim remaining body
+                        reversed_icons.append(icon)  # Store icon in reverse order as extracted
+                        break  # Stop current icon scan after first valid match
+
+            if matched_icon is None:  # Stop when no additional trailing icon is found
+                break  # Exit peel loop
+
+        icons = list(reversed(reversed_icons))  # Restore left-to-right icon order
 
         if body.endswith("."):  # Strip trailing period to isolate name+year region
             body = body[:-1].strip()  # Remove period and trim
@@ -485,8 +486,8 @@ def normalize_game_line(raw_line: str, filepath: str, console_name: str) -> str:
             print(f"{BackgroundColors.YELLOW}Warning: Missing game name in entry — skipping. File: {BackgroundColors.CYAN}{filepath}{BackgroundColors.YELLOW}, Console: {BackgroundColors.CYAN}{console_name}{BackgroundColors.YELLOW}, Line: {BackgroundColors.CYAN}{raw_line.strip()}{Style.RESET_ALL}")  # Log warning with context
             return ""  # Return empty to signal skip
 
-        if icon:  # Build normalized line with icon when present
-            return f"- {game_name} {year}. {icon}"  # Return canonical format with icon
+        if icons:  # Build normalized line with icon suffix when present
+            return f"- {game_name} {year}. {' '.join(icons)}"  # Return canonical format with multi-icon suffix
         return f"- {game_name} {year}."  # Return canonical format without icon
 
     except Exception as e:  # Catch unexpected errors during normalization
@@ -494,25 +495,40 @@ def normalize_game_line(raw_line: str, filepath: str, console_name: str) -> str:
         return ""  # Return empty to signal skip
 
 
-def parse_game_icon(normalized_line: str) -> str:
+def parse_game_icons(normalized_line: str) -> list:
     """
-    Extract the icon from an already-normalized game line.
+    Extract all icons from an already-normalized game line.
 
     :param normalized_line: A normalized game line in canonical format.
-    :return: The icon string (ICON_OWNED or ICON_MAYBE) or empty string if absent.
+    :return: List of icon strings in appearance order, or empty list if absent.
     """
 
-    if normalized_line.endswith(ICON_OWNED):  # Detect owned icon at line end
-        return ICON_OWNED  # Return owned icon
-    if normalized_line.endswith(ICON_MAYBE):  # Detect maybe icon at line end
-        return ICON_MAYBE  # Return maybe icon
-    if normalized_line.endswith(ICON_DAMAGED):  # Detect damaged/needs fixing icon at line end
-        return ICON_DAMAGED  # Return damaged icon
-    if normalized_line.endswith(ICON_BOX_DAMAGED):  # Detect box damaged icon at line end
-        return ICON_BOX_DAMAGED  # Return box damaged icon
-    if normalized_line.endswith(ICON_NEEDS_CLEANING):  # Detect needs cleaning icon at line end
-        return ICON_NEEDS_CLEANING  # Return needs cleaning icon
-    return ""  # Return empty when no icon is present
+    try:  # Wrap extraction logic to ensure safe parsing behavior
+        if "." not in normalized_line:  # Verify canonical delimiter exists before parsing tail tokens
+            return []  # Return empty when no canonical suffix can exist
+
+        suffix = normalized_line.split(".", 1)[1].strip()  # Extract suffix region after canonical year delimiter
+
+        if suffix == "":  # Verify suffix contains at least one token
+            return []  # Return empty when no icon suffix is present
+
+        tokens = suffix.split()  # Split suffix into whitespace-separated tokens
+        return [token for token in tokens if token in VALID_ICONS]  # Return all valid icon tokens preserving order
+
+    except Exception:  # Catch unexpected parsing errors
+        return []  # Return empty list on failure
+
+
+def parse_game_icon(normalized_line: str) -> str:
+    """
+    Extract the last icon from an already-normalized game line.
+
+    :param normalized_line: A normalized game line in canonical format.
+    :return: The last icon string if present, otherwise empty string.
+    """
+
+    icons = parse_game_icons(normalized_line)  # Parse all icon tokens for this normalized line
+    return icons[-1] if icons else ""  # Return last icon when present
 
 
 def parse_console_sections(lines: list, filepath: str) -> list:
@@ -604,8 +620,8 @@ def compute_console_counters(games: list) -> tuple:
     """
 
     total = len(games)  # Total is the count of all valid game entries
-    # Only count as owned if the icon is ICON_OWNED, ICON_DAMAGED, ICON_NEEDS_CLEANING, or ICON_BOX_DAMAGED
-    owned = sum(1 for line in games if parse_game_icon(line) in (ICON_OWNED, ICON_DAMAGED, ICON_NEEDS_CLEANING, ICON_BOX_DAMAGED))
+    owned_icons = (ICON_OWNED, ICON_DAMAGED, ICON_NEEDS_CLEANING, ICON_BOX_DAMAGED)  # Define icon set that marks a game as owned
+    owned = sum(1 for line in games if any(icon in owned_icons for icon in parse_game_icons(line)))  # Count a game as owned when any ownership icon exists
     return owned, total  # Return computed counters as a tuple
 
 
@@ -648,17 +664,17 @@ def format_txt_output(sections: list) -> str:
         total_needs_cleaning_icon = 0
         for section in sorted_sections:
             for line in section['games']:
-                icon = parse_game_icon(line)
-                if icon == ICON_OWNED:
-                    total_owned_icon += 1
-                elif icon == ICON_DAMAGED:
-                    total_damaged_icon += 1
-                elif icon == ICON_BOX_DAMAGED:
-                    total_box_damaged_icon += 1
-                elif icon == ICON_MAYBE:
-                    total_unsure_icon += 1
-                elif icon == ICON_NEEDS_CLEANING:
-                    total_needs_cleaning_icon += 1
+                for icon in parse_game_icons(line):  # Count every icon token found on the game line
+                    if icon == ICON_OWNED:
+                        total_owned_icon += 1
+                    elif icon == ICON_DAMAGED:
+                        total_damaged_icon += 1
+                    elif icon == ICON_BOX_DAMAGED:
+                        total_box_damaged_icon += 1
+                    elif icon == ICON_MAYBE:
+                        total_unsure_icon += 1
+                    elif icon == ICON_NEEDS_CLEANING:
+                        total_needs_cleaning_icon += 1
 
         output_lines.append(title_line)
         output_lines.append("")  # Insert blank line between title and owned/total counters block
