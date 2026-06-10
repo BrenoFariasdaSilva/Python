@@ -344,7 +344,9 @@ def delete_listed_directories(path: str) -> None:
         if not os.path.isdir(entry_path):  # Verify if current entry is not a directory
             continue  # Skip non-directory entries
 
-        if entry.lower() not in target_names:  # Verify if directory name is not a Foto target
+        normalized_entry = entry.casefold().strip()  # Normalize entry name for case-insensitive comparison and trim surrounding whitespace
+
+        if normalized_entry not in target_names:  # Verify if normalized directory name is not a Foto target
             continue  # Skip non-target directories
 
         try:  # Protect recursive directory deletion
@@ -380,7 +382,9 @@ def move_video_contents_to_parent(path: str) -> None:
         if not os.path.isdir(source_directory_path):  # Verify if current entry is not a directory
             continue  # Skip non-directory entries
 
-        if entry.lower() not in target_names:  # Verify if directory name is not a Video target
+        normalized_entry = entry.casefold().strip()  # Normalize entry name for case-insensitive comparison and trim surrounding whitespace
+
+        if normalized_entry not in target_names:  # Verify if normalized directory name is not a Video target
             continue  # Skip non-target directories
 
         try:  # Protect source directory content listing
