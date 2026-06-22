@@ -526,7 +526,6 @@ def process_directory(directory):
             sync_subtitle(video_file, srt_file)  # Synchronize the subtitle
 
     cleanup_subtitles(directory)  # Cleanup the subtitles
-    os.chdir("..")  # Change back to the parent directory
 
 
 def process_all_directories(directories):
