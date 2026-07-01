@@ -443,6 +443,7 @@ def delete_image_files_in_directory(path: str) -> None:
 
         if os.path.isdir(file_path):  # Verify current entry is a directory
             delete_image_files_in_directory(file_path)  # Recursively process subdirectory
+            remove_empty_directory(file_path)  # Remove the subdirectory if deletions left it empty
             continue  # Continue to next entry after recursion
 
         if not os.path.isfile(file_path):  # Verify current entry is a file.
@@ -456,6 +457,28 @@ def delete_image_files_in_directory(path: str) -> None:
             update_deletion_stats(1, size_bytes)  # Aggregate deletion stats for the removed file
         except (PermissionError, OSError):  # Handle deletion access failures
             continue  # Skip files that cannot be removed.
+
+
+def remove_empty_directory(path: str) -> bool:
+    """
+    Remove a directory only when it has no remaining entries.
+
+    :param path: Directory path to remove when empty.
+    :return: True when the directory was removed, False otherwise.
+    """
+
+    try:  # Protect directory validation and listing
+        if not os.path.isdir(path):  # Verify if the path is not an existing directory
+            return False  # Nothing was removed
+
+        if os.listdir(path):  # Verify if the directory still contains entries
+            return False  # Keep non-empty directories untouched
+
+        os.rmdir(path)  # Remove the empty directory
+        DELETION_STATS["dirs_deleted"] += 1  # Increment deleted directories counter for empty dir
+        return True  # Report successful removal
+    except (PermissionError, OSError):  # Handle deletion access failures
+        return False  # Report that the directory was not removed
 
 
 def calculate_directory_size_bytes(path: str) -> int:
