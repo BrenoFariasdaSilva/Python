@@ -200,3 +200,5 @@ Magnet\ Links\ from\ URL/*.csv
 **/Output/**
 
 !**/requirements.txt
+/Folder Size Tagger/Private/
+/Folder Size Tagger/Public/
