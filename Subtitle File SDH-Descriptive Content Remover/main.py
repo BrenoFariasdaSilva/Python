@@ -70,6 +70,8 @@ class BackgroundColors:  # Colors for the terminal
 VERBOSE = False  # Set to True to output verbose messages
 INPUT_DIR = Path("./Input")  # Directory searched recursively for source SRT files
 SRT_TIMESTAMP_PATTERN = re.compile(r"^\d{2}:\d{2}:\d{2},\d{3}\s+-->\s+\d{2}:\d{2}:\d{2},\d{3}(?:\s+.*)?$")  # SRT timestamp validation pattern
+SUBTITLE_FORMATTING_TAG_PATTERN = re.compile(r"</?(?:i|b|u|font)(?:\s+[^<>]*)?>", re.IGNORECASE)  # Recognized SRT formatting tag pattern
+EMPTY_SUBTITLE_FORMATTING_TAG_PATTERN = re.compile(r"<(i|b|u|font)(?:\s+[^<>]*)?>\s*</\1>", re.IGNORECASE)  # Recognized empty SRT formatting tag pattern
 DESCRIPTIVE_PHRASES = frozenset(("music", "door closes", "applause", "speaking indistinctly", "laughing", "laughs", "sighs", "sigh", "whispers", "whispering", "inaudible", "indistinct chatter", "chuckles", "gasps", "coughs", "sobs", "crying", "screaming", "phone ringing", "knocking", "footsteps", "thunder", "alarm", "silence"))  # Conservative complete SDH fragments
 DESCRIPTIVE_KEYWORDS = frozenset(("music", "applause", "laughing", "laughs", "sighs", "sigh", "whispers", "whispering", "inaudible", "indistinctly", "chatter", "chuckles", "gasps", "coughs", "sobs", "crying", "screaming", "ringing", "knocking", "footsteps", "thunder", "alarm", "silence"))  # SDH indicator words
 DESCRIPTIVE_WORDS = frozenset(("music", "door", "doors", "closes", "close", "closing", "opens", "opening", "applause", "speaking", "indistinctly", "indistinct", "laughing", "laughs", "sighs", "sigh", "whispers", "whispering", "inaudible", "chatter", "crowd", "chuckles", "softly", "gasps", "coughs", "sobs", "crying", "screaming", "phone", "ringing", "knocking", "knocks", "footsteps", "thunder", "alarm", "silence", "dramatic"))  # Allowed words inside SDH fragments
@@ -469,7 +471,7 @@ def normalize_phrase(value: str) -> str:
     :return: Normalized phrase.
     """
 
-    plain_value = re.sub(r"<[^>]+>", " ", value)  # Remove HTML tags for classification
+    plain_value = remove_subtitle_formatting_tags(value)  # Remove recognized SRT formatting tags for classification
     plain_value = plain_value.replace("♪", " ")  # Ignore music note markers for classification
     plain_value = re.sub(r"[^A-Za-z\s-]", " ", plain_value)  # Remove punctuation except word separators
     plain_value = re.sub(r"\s+", " ", plain_value).strip().lower()  # Normalize whitespace and case
@@ -520,6 +522,17 @@ def is_music_only_line(value: str) -> bool:
     return is_descriptive_phrase(value)  # Reuse conservative phrase classification
 
 
+def remove_subtitle_formatting_tags(value: str) -> str:
+    """
+    Remove recognized SRT formatting tags while preserving enclosed dialogue.
+
+    :param value: Subtitle line.
+    :return: Subtitle line without recognized SRT formatting tags.
+    """
+
+    return SUBTITLE_FORMATTING_TAG_PATTERN.sub("", value)  # Remove opening, closing, and orphan formatting tags
+
+
 def remove_empty_html_tags(value: str) -> str:
     """
     Remove empty HTML tags left after SDH removal.
@@ -532,7 +545,7 @@ def remove_empty_html_tags(value: str) -> str:
 
     while previous_value != value:  # Repeat until nested empty tags are gone
         previous_value = value  # Store value before replacement
-        value = re.sub(r"<([A-Za-z][A-Za-z0-9]*)(?:\s[^>]*)?>\s*</\1>", " ", value)  # Remove empty matching tags
+        value = EMPTY_SUBTITLE_FORMATTING_TAG_PATTERN.sub(" ", value)  # Remove empty recognized formatting tags
 
     return value  # Return cleaned line
 
@@ -557,7 +570,8 @@ def clean_subtitle_line(line: str) -> str:
         inner_text = fragment[1:-1]  # Extract fragment text without brackets
         return " " if is_descriptive_phrase(inner_text) else fragment  # Remove descriptor or preserve text
 
-    cleaned_line = re.sub(r"\[[^\[\]\n]{1,80}\]|\([^\(\)\n]{1,80}\)", replace_fragment, line)  # Remove conservative bracket fragments
+    cleaned_line = remove_subtitle_formatting_tags(line)  # Remove formatting tags before SDH cue removal
+    cleaned_line = re.sub(r"\[[^\[\]\n]{1,80}\]|\([^\(\)\n]{1,80}\)", replace_fragment, cleaned_line)  # Remove conservative bracket fragments
     cleaned_line = remove_empty_html_tags(cleaned_line)  # Remove tags emptied by fragment removal
 
     if is_music_only_line(cleaned_line):  # Remove music-only descriptor lines
@@ -610,7 +624,7 @@ def clean_subtitle_entries(entries: list[tuple[int, str, list[str]]]) -> tuple[l
 
         if not cleaned_lines:  # Remove entry when no dialogue remains
             removed_count += 1  # Count removed entry
-            changes.append((index, timestamp, original_text, "<REMOVED>", True))  # Store removed-entry diff
+            changes.append((index, timestamp, original_text, "", True))  # Store removed-entry diff with empty cleaned text
             continue  # Skip removed entry
 
         cleaned_entries.append((index, timestamp, cleaned_lines))  # Preserve cleaned entry
