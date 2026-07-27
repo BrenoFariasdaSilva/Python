@@ -67,7 +67,7 @@ from lingua import LanguageDetectorBuilder  # For offline language detection bef
 from Logger import Logger  # For logging output to both terminal and file
 from pathlib import Path  # For handling file paths
 from shutil import copyfile  # For copying files
-from typing import Dict, List, Set, Tuple  # For typed account and subtitle structures
+from typing import Dict, List, Tuple  # For typed account and subtitle structures
 
 
 # Macros:
@@ -792,90 +792,119 @@ def create_deepl_client(account_name: str, api_key: str) -> deepl.DeepLClient:
     return deepl.DeepLClient(auth_key=api_key)  # Create client without exposing the API key
 
 
-def translate_text_block(text_block: str, account_items: List[Tuple[str, str]], active_account_index: int, exhausted_accounts: Set[str], translators: Dict[str, deepl.DeepLClient]) -> Tuple[List[str], int]:
+def translate_text_block(text_block: str, account_items: List[Tuple[str, str]], active_account_index: int, translators: Dict[str, deepl.DeepLClient]) -> Tuple[List[str], int]:
     """
     Translates a block of text using the DeepL API, respecting remaining characters limit.
 
     :param text_block: String containing multiple lines to translate
     :param account_items: Ordered list of DeepL account names and API keys.
     :param active_account_index: Index for the currently active account.
-    :param exhausted_accounts: Set of account names already exhausted during this execution.
     :param translators: DeepL clients already created for this execution.
     :return: Tuple containing translated lines and active account index.
     """
 
     verbose_output(f"{BackgroundColors.GREEN}Translating text block...{Style.RESET_ALL}")  # Output the verbose message
 
-    for account_offset in range(len(account_items)):  # Try each configured account at most once for this block
-        account_index = (active_account_index + account_offset) % len(account_items)  # Rotate in configured order
-        account_name, api_key = account_items[account_index]  # Select account tuple
+    attempt_counts = {account_name: 0 for account_name, _ in account_items}  # Track quota attempts for this pending block only
+    total_quota_attempts = 0  # Count quota attempts for this pending block
+    maximum_quota_attempts = len(account_items) * 2  # Require two quota attempts per account before stopping
+    second_cycle_logged = False  # Log second circular pass once per pending block
 
-        if account_name in exhausted_accounts:  # Avoid accounts already proven unusable
-            continue  # Continue with next account
-
-        if account_index != active_account_index:  # Detect quota-driven account rotation
-            previous_account_name = account_items[active_account_index][0]  # Read previous account name for logging
-            print(
-                f"{BackgroundColors.YELLOW}Switching DeepL account from {BackgroundColors.CYAN}{previous_account_name}{BackgroundColors.YELLOW} to {BackgroundColors.CYAN}{account_name}{Style.RESET_ALL}"
-            )  # Log rotation without exposing API keys
-
+    while total_quota_attempts < maximum_quota_attempts:  # Retry same block circularly until translated or safely exhausted
+        account_name, api_key = account_items[active_account_index]  # Select current active account
         if account_name not in translators:  # Reuse existing client per account
             translators[account_name] = create_deepl_client(account_name, api_key)  # Create client for selected account
         translator = translators[account_name]  # Select cached client for usage and translation
+
+        quota_failed = False  # Track one quota attempt without double-counting
         try:
             remaining_chars = get_remaining_characters(translator)  # Read remaining characters
         except deepl.QuotaExceededException:
-            exhausted_accounts.add(account_name)  # Mark account exhausted after SDK usage response
+            quota_failed = True  # Count this verified quota failure once
             print(
                 f"{BackgroundColors.YELLOW}DeepL account {BackgroundColors.CYAN}{account_name}{BackgroundColors.YELLOW} quota exhausted. Trying next account.{Style.RESET_ALL}"
             )  # Log quota-only rotation
-            continue  # Continue with next account
+            remaining_chars = 0  # Keep variable defined after quota failure
 
-        if remaining_chars is not None and len(text_block) > remaining_chars:  # Detect insufficient allowance before translation
-            if remaining_chars <= 0:
-                exhausted_accounts.add(account_name)  # Mark account exhausted for this execution
+        if not quota_failed and remaining_chars is not None and len(text_block) > remaining_chars:  # Detect insufficient allowance before translation
+            quota_failed = True  # Count this verified quota failure once
             print(
                 f"{BackgroundColors.YELLOW}DeepL account {BackgroundColors.CYAN}{account_name}{BackgroundColors.YELLOW} has insufficient quota for block size {BackgroundColors.CYAN}{len(text_block)}{BackgroundColors.YELLOW}. Trying next account.{Style.RESET_ALL}"
             )  # Log quota-only account skip
-            continue  # Continue with next account
+
+        if quota_failed:
+            attempt_counts[account_name] += 1  # Count this account's quota attempt for the pending block
+            total_quota_attempts += 1  # Count one verified quota attempt
+            if all(attempt_count >= 1 for attempt_count in attempt_counts.values()) and not second_cycle_logged and total_quota_attempts < maximum_quota_attempts:
+                print(f"{BackgroundColors.YELLOW}All DeepL accounts were attempted once for the current block. Starting the second circular attempt.{Style.RESET_ALL}")  # Log second cycle
+                second_cycle_logged = True  # Avoid duplicate second-cycle log
+            if total_quota_attempts >= maximum_quota_attempts:
+                break  # Stop after two quota attempts per account
+
+            previous_account_name = account_name  # Store account before circular advancement
+            active_account_index = (active_account_index + 1) % len(account_items)  # Advance circularly to next account
+            next_account_name = account_items[active_account_index][0]  # Read next account name for logging
+            if len(account_items) == 1:
+                print(f"{BackgroundColors.YELLOW}Retrying DeepL account {BackgroundColors.CYAN}{next_account_name}{BackgroundColors.YELLOW} for the second quota attempt.{Style.RESET_ALL}")  # Log single-account retry
+            elif previous_account_name != next_account_name:
+                print(
+                    f"{BackgroundColors.YELLOW}Switching DeepL account from {BackgroundColors.CYAN}{previous_account_name}{BackgroundColors.YELLOW} to {BackgroundColors.CYAN}{next_account_name}{Style.RESET_ALL}"
+                )  # Log circular account switch
+            continue  # Retry exact same untranslated block with next account
 
         try:  # Perform translation
             result = translator.translate_text(text_block, source_lang=SOURCE_LANG, target_lang=TARGET_LANG)  # Translate text block
             if result is not None and hasattr(result, "text") and result.text:  # Ensure result is valid
-                return result.text.split("\n"), account_index  # Return translated lines and current account
+                return result.text.split("\n"), active_account_index  # Return translated lines and current account
             else:
-                return text_block.split("\n"), account_index  # Fallback to original lines
+                return text_block.split("\n"), active_account_index  # Fallback to original lines
         except deepl.QuotaExceededException:
-            exhausted_accounts.add(account_name)  # Mark account exhausted after SDK quota response
+            attempt_counts[account_name] += 1  # Count this verified quota failure once
+            total_quota_attempts += 1  # Count one verified quota attempt
             print(
                 f"{BackgroundColors.YELLOW}DeepL account {BackgroundColors.CYAN}{account_name}{BackgroundColors.YELLOW} quota exhausted. Trying next account.{Style.RESET_ALL}"
             )  # Log quota-only rotation
+            if all(attempt_count >= 1 for attempt_count in attempt_counts.values()) and not second_cycle_logged and total_quota_attempts < maximum_quota_attempts:
+                print(f"{BackgroundColors.YELLOW}All DeepL accounts were attempted once for the current block. Starting the second circular attempt.{Style.RESET_ALL}")  # Log second cycle
+                second_cycle_logged = True  # Avoid duplicate second-cycle log
+            if total_quota_attempts >= maximum_quota_attempts:
+                break  # Stop after two quota attempts per account
+
+            previous_account_name = account_name  # Store account before circular advancement
+            active_account_index = (active_account_index + 1) % len(account_items)  # Advance circularly to next account
+            next_account_name = account_items[active_account_index][0]  # Read next account name for logging
+            if len(account_items) == 1:
+                print(f"{BackgroundColors.YELLOW}Retrying DeepL account {BackgroundColors.CYAN}{next_account_name}{BackgroundColors.YELLOW} for the second quota attempt.{Style.RESET_ALL}")  # Log single-account retry
+            elif previous_account_name != next_account_name:
+                print(
+                    f"{BackgroundColors.YELLOW}Switching DeepL account from {BackgroundColors.CYAN}{previous_account_name}{BackgroundColors.YELLOW} to {BackgroundColors.CYAN}{next_account_name}{Style.RESET_ALL}"
+                )  # Log circular account switch
             continue  # Continue with next account
         except Exception as e:  # Handle any non-quota translation error
             print(f"{BackgroundColors.RED}Translation failed: {e}. Returning original lines.{Style.RESET_ALL}")
-            return text_block.split("\n"), account_index  # Return original lines on failure
+            return text_block.split("\n"), active_account_index  # Return original lines on failure
 
-    raise RuntimeError("All configured DeepL accounts have insufficient quota for the pending subtitle block")
+    attempted_accounts = ", ".join(account_name for account_name, _ in account_items)  # Build safe account-name summary
+    raise RuntimeError(f"All configured DeepL accounts were attempted at least twice and none has sufficient quota for pending block size {len(text_block)}. Accounts attempted: {attempted_accounts}")
 
 
-def translate_srt_lines(srt_file, lines, translatable_character_count: int):
+def translate_srt_lines(srt_file, lines, translatable_character_count: int, account_items: List[Tuple[str, str]], active_account_index: int, translators: Dict[str, deepl.DeepLClient]) -> Tuple[List[str], int]:
     """
     Translates lines from an SRT file using DeepL API, keeping timing and index lines unchanged.
 
     :param srt_file: Path to the SRT file (for logging purposes).
     :param lines: List of SRT lines.
     :param translatable_character_count: Total cleaned characters eligible for DeepL translation.
-    :return: List of translated lines.
+    :param account_items: Ordered list of DeepL account names and API keys.
+    :param active_account_index: Process-wide active account index.
+    :param translators: DeepL clients reused across files.
+    :return: Tuple containing translated lines and active account index.
     """
 
     verbose_output(
         f"{BackgroundColors.GREEN}Translating SRT lines from file: {BackgroundColors.CYAN}{srt_file}{Style.RESET_ALL}"
     )  # Output verbose message for translating SRT lines
 
-    account_items = list(DEEPL_API_KEYS.items())  # Preserve configured account order for deterministic rotation
-    active_account_index = 0  # Start with the first configured account
-    exhausted_accounts = set()  # Track accounts with insufficient quota during this execution
-    translators = {}  # Reuse DeepL clients by account during this execution
     translated_lines = []  # Initialize empty list for storing translated lines
     buffer = []  # Initialize empty buffer for batching subtitle text lines
     translated_character_count = 0  # Track completed translation workload
@@ -894,10 +923,10 @@ def translate_srt_lines(srt_file, lines, translatable_character_count: int):
             if buffer:  # Verify if the translation buffer contains pending text lines
                 text_block = "\n".join(buffer)  # Build exact text block for DeepL
                 try:
-                    translated, active_account_index = translate_text_block(text_block, account_items, active_account_index, exhausted_accounts, translators)  # Translate buffered text lines as one block
-                except RuntimeError:
+                    translated, active_account_index = translate_text_block(text_block, account_items, active_account_index, translators)  # Translate buffered text lines as one block
+                except RuntimeError as e:
                     remaining_characters = translatable_character_count - translated_character_count  # Count untranslated workload
-                    raise RuntimeError(f"Error: All configured DeepL accounts have insufficient quota to finish {filename}. Remaining: {remaining_characters:,} characters.") from None
+                    raise RuntimeError(f"Error: {e}. File: {filename}. Remaining: {remaining_characters:,} characters.") from None
                 if translated is None:  # Verify if translation returned None instead of a result
                     translated = buffer  # Fall back to the original buffer lines on failed translation
                 translated_lines.extend(translated)  # Append translated lines to the result list
@@ -917,10 +946,10 @@ def translate_srt_lines(srt_file, lines, translatable_character_count: int):
     if buffer:  # Verify if the buffer still contains unprocessed text lines after the loop
         text_block = "\n".join(buffer)  # Build exact final text block for DeepL
         try:
-            translated, active_account_index = translate_text_block(text_block, account_items, active_account_index, exhausted_accounts, translators)  # Translate the remaining buffered text lines
-        except RuntimeError:
+            translated, active_account_index = translate_text_block(text_block, account_items, active_account_index, translators)  # Translate the remaining buffered text lines
+        except RuntimeError as e:
             remaining_characters = translatable_character_count - translated_character_count  # Count untranslated workload
-            raise RuntimeError(f"Error: All configured DeepL accounts have insufficient quota to finish {filename}. Remaining: {remaining_characters:,} characters.") from None
+            raise RuntimeError(f"Error: {e}. File: {filename}. Remaining: {remaining_characters:,} characters.") from None
         if translated is None:  # Verify if translation returned None for the remaining block
             translated = buffer  # Fall back to the original buffer lines on failed translation
         translated_lines.extend(translated)  # Append the remaining translated lines to the result list
@@ -929,7 +958,7 @@ def translate_srt_lines(srt_file, lines, translatable_character_count: int):
     real_stderr.write("\n")  # Advance the terminal cursor to a new line after progress finishes
     real_stderr.flush()  # Flush original stderr to finalize the progress output
 
-    return translated_lines  # Return the complete list of translated lines
+    return translated_lines, active_account_index  # Return translated lines and preserved active account index
 
 
 def parse_srt_entries(lines: List[str]) -> List[Tuple[str, str, str]]:
@@ -1053,6 +1082,9 @@ def main():
     ensure_env_file()  # Ensure .env file exists
 
     api_keys_loaded = False  # Load DeepL API keys only for files that require translation
+    account_items = []  # Process-wide ordered DeepL account collection
+    active_account_index = 0  # Process-wide active account index
+    translators = {}  # Process-wide DeepL clients reused across files
 
     input_dir = resolve_from_script_dir(INPUT_DIR)  # Resolve configured input from script location
     output_dir = resolve_from_script_dir(OUTPUT_DIR)  # Resolve configured output from script location
@@ -1129,9 +1161,11 @@ def main():
             return  # Exit the program
 
         api_keys_loaded = True  # Mark DeepL API keys as available for subsequent translation files
+        if not account_items:
+            account_items = list(DEEPL_API_KEYS.items())  # Preserve configured account order across files
 
         try:
-            translated_lines = translate_srt_lines(current_srt_path, srt_lines, translatable_character_count)  # Translate SRT lines using DeepL API
+            translated_lines, active_account_index = translate_srt_lines(current_srt_path, srt_lines, translatable_character_count, account_items, active_account_index, translators)  # Translate SRT lines using DeepL API
         except RuntimeError as e:
             print(f"{BackgroundColors.RED}{e}{Style.RESET_ALL}")  # Log fatal quota exhaustion
             return  # Stop without saving an incomplete output
