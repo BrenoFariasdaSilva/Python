@@ -5,7 +5,7 @@ Subtitle (SRT) Translation using DeepL API
 Author      : Breno Farias da Silva
 Created     : 2025-12-13
 Description :
-   This script translates subtitle files (SRT) from English to Brazilian Portuguese
+   This script translates subtitle files (SRT) from any DeepL-detected source language to Brazilian Portuguese
    using the DeepL API. It processes all .srt files in the specified input directory,
    respecting API usage limits, and saves the translated files with a '_ptBR' suffix.
 
@@ -90,7 +90,6 @@ DESCRIPTIVE_SUBTITLES_REMOVAL = (
 DEEPL_API_KEYS = {}  # DeepL API accounts (will be loaded in load_dotenv function)
 INPUT_DIR = f"F:/Torrent/Completed/Dexter.All.Seasons/"  # Directory containing the input SRT files
 OUTPUT_DIR = Path("./Output")  # Base output directory
-SOURCE_LANG = "EN"  # DeepL source language code
 TARGET_LANG = "PT-BR"  # DeepL target language code
 SCRIPT_DIR = Path(__file__).resolve().parent  # Directory containing this script
 LANGUAGE_DETECTION_MIN_LETTERS = 80  # Avoid classifying tiny or numeric-only subtitles
@@ -1289,7 +1288,7 @@ def translate_text_block(text_block: str, account_items: List[Tuple[str, str]], 
             continue  # Retry exact same untranslated block with next account
 
         try:  # Perform translation
-            result = translator.translate_text(text_block, source_lang=SOURCE_LANG, target_lang=TARGET_LANG)  # Translate text block
+            result = translator.translate_text(text_block, target_lang=TARGET_LANG)  # Let DeepL auto-detect the source language
             if result is not None and hasattr(result, "text") and result.text:  # Ensure result is valid
                 return result.text.split("\n"), active_account_index  # Return translated lines and current account
             else:
@@ -1490,7 +1489,7 @@ def main():
     Main function.
 
     Processes all .srt files in the INPUT_DIR. Each file is translated using DeepL API
-    from English to Brazilian Portuguese. Translated files are saved in the same directory
+    from DeepL-detected source language to Brazilian Portuguese. Translated files are saved in the same directory
     with '_ptBR' appended to the filename.
 
     :param: None
@@ -1557,7 +1556,7 @@ def main():
                 print(f"{BackgroundColors.YELLOW}SDH cleanup: {BackgroundColors.CYAN}{filename}{BackgroundColors.YELLOW} removed {BackgroundColors.CYAN}{planned_file['removed_entries']}{BackgroundColors.YELLOW} entries, cleaned {BackgroundColors.CYAN}{planned_file['mixed_cleaned_entries']}{BackgroundColors.YELLOW} mixed entries.{Style.RESET_ALL}")  # Log cleanup summary
 
             if not planned_file["detection_conclusive"]:  # Continue normally when language detection is not reliable
-                print(f"{BackgroundColors.YELLOW}Language detection was inconclusive for {BackgroundColors.CYAN}{filename}{BackgroundColors.YELLOW}. Continuing with translation.{Style.RESET_ALL}")  # Log inconclusive detection
+                print(f"{BackgroundColors.YELLOW}Source language detection was inconclusive for {BackgroundColors.CYAN}{filename}{BackgroundColors.YELLOW}. DeepL will determine the source language during translation.{Style.RESET_ALL}")  # Log inconclusive detection
 
             output_file.parent.mkdir(parents=True, exist_ok=True)  # Ensure output directory exists for this file
             progress_state.update({"file_total_characters": translatable_character_count, "file_translated_characters": 0, "file_start_time": time.monotonic(), "progress_visible": False, "last_snapshot_time": 0.0})  # Reset file progress only
