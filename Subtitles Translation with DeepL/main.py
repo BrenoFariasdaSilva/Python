@@ -88,7 +88,7 @@ DESCRIPTIVE_SUBTITLES_REMOVAL = (
     True  # Set to True to remove descriptive lines (e.g., [music], (laughs)) from SRT before translation
 )
 DEEPL_API_KEYS = {}  # DeepL API accounts (will be loaded in load_dotenv function)
-INPUT_DIR = f"F:/Torrent/Completed/Dexter.All.Seasons/"  # Directory containing the input SRT files
+INPUT_DIR = f"./Input/"  # Directory containing the input SRT files
 OUTPUT_DIR = Path("./Output")  # Base output directory
 TARGET_LANG = "PT-BR"  # DeepL target language code
 SCRIPT_DIR = Path(__file__).resolve().parent  # Directory containing this script
