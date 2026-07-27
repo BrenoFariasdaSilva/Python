@@ -952,6 +952,9 @@ def get_translated_output_file(current_srt_path: Path, input_dir: Path, output_d
     :return: Resolved translated output file path.
     """
 
+    if has_generated_filename_marker(current_srt_path):
+        return current_srt_path.resolve()  # Mislabeled generated-looking sources are replaced in place, not chained
+
     if use_configured_output:
         relative_path = current_srt_path.relative_to(input_dir).parent  # Extract relative path from input directory
         output_subdir = output_dir / relative_path  # Build configured output subdirectory
@@ -961,18 +964,87 @@ def get_translated_output_file(current_srt_path: Path, input_dir: Path, output_d
     return (output_subdir / f"{current_srt_path.stem}_ptBR.srt").resolve()  # Build target filename
 
 
-def is_generated_srt_file(srt_file: Path) -> bool:
+def get_target_filename_suffix() -> str:
     """
-    Identifies generated subtitle outputs that must not be source candidates.
+    Gets the target-language suffix used in generated subtitle filenames.
+
+    :return: Target-language filename suffix.
+    """
+
+    return "ptBR" if TARGET_LANG.upper() == "PT-BR" else TARGET_LANG.replace("-", "_").replace(" ", "")  # Preserve existing ptBR naming
+
+
+def has_generated_filename_marker(srt_file: Path) -> bool:
+    """
+    Determines whether an SRT filename contains generated-output markers.
 
     :param srt_file: SRT path.
-    :return: True when file is generated output, otherwise False.
+    :return: True when the filename looks generated, otherwise False.
+    """
+
+    lower_stem = srt_file.stem.lower()  # Normalize stem only
+    target_suffix = get_target_filename_suffix().lower()  # Normalize configured suffix
+    return lower_stem.endswith(f"_{target_suffix}") or lower_stem.endswith(".cleaned")  # Marker alone does not prove translated content
+
+
+def get_srt_family_key(srt_file: Path) -> Tuple[str, str]:
+    """
+    Builds a source/output family key by stripping generated filename markers.
+
+    :param srt_file: SRT path.
+    :return: Tuple containing parent path and normalized source stem.
+    """
+
+    stem = srt_file.stem  # Start with filename stem
+    target_suffix = get_target_filename_suffix().lower()  # Normalize configured suffix
+
+    while True:
+        lower_stem = stem.lower()  # Normalize current stem
+        if lower_stem.endswith(f"_{target_suffix}"):
+            stem = stem[: -len(target_suffix) - 1]  # Strip trailing target suffix
+            continue
+        if lower_stem.endswith(".cleaned"):
+            stem = stem[:-8]  # Strip trailing cleaned marker
+            continue
+        break
+
+    return str(srt_file.parent.resolve()).lower(), stem.lower()  # Keep families scoped to their directory
+
+
+def is_generated_srt_file(srt_file: Path) -> bool:
+    """
+    Identifies internal subtitle files that must not be source candidates.
+
+    :param srt_file: SRT path.
+    :return: True when file is temporary or backup output, otherwise False.
     """
 
     lower_name = srt_file.name.lower()  # Normalize filename
-    target_suffix = normalize_language_code(TARGET_LANG).lower() + "br" if TARGET_LANG.upper() == "PT-BR" else TARGET_LANG.replace("-", "_").replace(" ", "").lower()  # Match existing ptBR suffix
-    generated_suffix = f"_{target_suffix}.srt"  # Existing translated-output suffix
-    return lower_name.endswith(generated_suffix) or lower_name.endswith(".cleaned.srt") or lower_name.endswith(".tmp.srt") or lower_name.endswith(".bak.srt") or lower_name.endswith(".backup.srt")  # Exclude generated or non-source SRTs
+    return lower_name.endswith(".tmp.srt") or lower_name.endswith(".bak.srt") or lower_name.endswith(".backup.srt")  # Filename-only exclusion is safe only for internal files
+
+
+def is_complete_target_language_output(source_lines: List[str], output_file: Path) -> Tuple[bool, bool, str]:
+    """
+    Validates an existing translated output structurally and by cleaned dialogue language.
+
+    :param source_lines: Cleaned source SRT lines.
+    :param output_file: Expected translated output path.
+    :return: Tuple of valid target output, conclusive detection, and detected language label.
+    """
+
+    if not is_translated_output_complete(source_lines, output_file):
+        return False, False, ""  # Missing, malformed, or structurally incomplete output is invalid
+
+    try:
+        output_lines = output_file.read_text(encoding="utf-8").splitlines()  # Read output for content language validation
+    except Exception:
+        return False, False, ""  # Unreadable output is invalid
+
+    if DESCRIPTIVE_SUBTITLES_REMOVAL:
+        output_lines, _, _ = clean_descriptive_subtitle_lines(output_lines)  # Detect language from meaningful dialogue only
+
+    is_target_language, detection_conclusive, detected_language_label = detect_cleaned_subtitle_language(output_lines, TARGET_LANG)  # Validate content, not filename
+    return is_target_language, detection_conclusive, detected_language_label  # Return validation result
 
 
 def build_translation_plan(srt_files: List[Path], input_dir: Path, output_dir: Path, use_configured_output: bool) -> Tuple[List[Dict[str, Any]], Dict[str, int]]:
@@ -987,18 +1059,17 @@ def build_translation_plan(srt_files: List[Path], input_dir: Path, output_dir: P
     """
 
     plan = []  # Store pending translation work
-    summary = {"discovered": len(srt_files), "source_candidates": 0, "generated_skipped": 0, "existing_skipped": 0, "target_language_skipped": 0, "empty_skipped": 0, "invalid": 0, "total_characters": 0}  # Store preflight counts
+    records = []  # Store valid discovered SRT metadata before source/output dedupe
+    records_by_path = {}  # Map resolved paths to discovered records
+    summary = {"discovered": len(srt_files), "source_candidates": 0, "generated_skipped": 0, "existing_skipped": 0, "target_language_skipped": 0, "empty_skipped": 0, "invalid": 0, "invalid_language_outputs": 0, "mislabeled_source_files": 0, "other_skipped": 0, "total_characters": 0}  # Store preflight counts
 
     for srt_file in srt_files:  # Analyze each discovered SRT
         current_srt_path = srt_file.resolve()  # Resolve source path
         if is_generated_srt_file(current_srt_path):
-            summary["generated_skipped"] += 1  # Count generated SRT output separately from sources
-            continue  # Generated outputs are not source candidates
+            summary["other_skipped"] += 1  # Count internal files separately from generated outputs
+            continue  # Internal temporary or backup files are not source candidates
 
-        summary["source_candidates"] += 1  # Count discovered source candidates
-        output_file = get_translated_output_file(current_srt_path, input_dir, output_dir, use_configured_output)  # Resolve expected output
-        if output_file == current_srt_path:
-            raise RuntimeError(f"Refusing to overwrite source subtitle: {current_srt_path}")  # Preserve safety check
+        output_file = get_translated_output_file(current_srt_path, input_dir, output_dir, use_configured_output)  # Resolve expected output without chaining target suffixes
 
         try:
             source_lines = read_srt(current_srt_path)  # Read source SRT
@@ -1021,21 +1092,80 @@ def build_translation_plan(srt_files: List[Path], input_dir: Path, output_dir: P
                 continue
 
             is_target_language, detection_conclusive, detected_language_label = detect_cleaned_subtitle_language(srt_lines, TARGET_LANG)  # Offline language detection
-            if is_target_language:
-                summary["target_language_skipped"] += 1  # Target-language source does not require DeepL
-                print(f"{BackgroundColors.YELLOW}Skipping translation: {BackgroundColors.CYAN}{current_srt_path.name}{BackgroundColors.YELLOW} is already in the target language ({BackgroundColors.CYAN}{get_language_display_name(normalize_language_code(TARGET_LANG))}{BackgroundColors.YELLOW}; detected {BackgroundColors.CYAN}{detected_language_label}{BackgroundColors.YELLOW}).{Style.RESET_ALL}")  # Log target skip
-                continue
-
-            if is_translated_output_complete(srt_lines, output_file):
-                summary["existing_skipped"] += 1  # Existing complete output does not need translation
-                print(f"{BackgroundColors.YELLOW}Skipping already complete translation: {BackgroundColors.CYAN}{output_file}{Style.RESET_ALL}")  # Log complete skip
-                continue
-
-            plan.append({"source_path": current_srt_path, "output_file": output_file, "lines": srt_lines, "characters": translatable_character_count, "removed_entries": removed_entry_count, "mixed_cleaned_entries": mixed_cleaned_entry_count, "detection_conclusive": detection_conclusive, "detected_language_label": detected_language_label})  # Add pending translation work
-            summary["total_characters"] += translatable_character_count  # Add only planned translation characters
+            record = {"source_path": current_srt_path, "output_file": output_file, "lines": srt_lines, "characters": translatable_character_count, "removed_entries": removed_entry_count, "mixed_cleaned_entries": mixed_cleaned_entry_count, "detection_conclusive": detection_conclusive, "detected_language_label": detected_language_label, "is_target_language": is_target_language, "filename_has_generated_marker": has_generated_filename_marker(current_srt_path), "family_key": get_srt_family_key(current_srt_path)}  # Store content-based classification record
+            records.append(record)  # Keep record for family dedupe
+            records_by_path[current_srt_path] = record  # Map by resolved path
         except Exception as e:
             summary["invalid"] += 1  # Count unreadable or invalid preflight file
             print(f"{BackgroundColors.RED}Invalid preflight file: {BackgroundColors.CYAN}{current_srt_path}{BackgroundColors.RED} - {e}{Style.RESET_ALL}")  # Log preflight failure
+
+    records_by_family = {}  # Group source/output family members
+    for record in records:
+        records_by_family.setdefault(record["family_key"], []).append(record)  # Group related filenames together
+
+    for family_records in records_by_family.values():  # Build one translation decision per source/output family
+        family_records.sort(key=lambda record: str(record["source_path"]).lower())  # Keep deterministic selection
+        source_records = [record for record in family_records if not record["filename_has_generated_marker"]]  # Prefer clean source filenames
+        source_record = source_records[0] if source_records else None  # Pick unique source candidate when present
+
+        if source_record:
+            summary["source_candidates"] += 1  # Count unique source family
+            output_file = source_record["output_file"]  # Expected translated output
+            output_record = records_by_path.get(output_file)  # Existing output if found in discovery snapshot
+            extra_records = [record for record in family_records if record is not source_record and record is not output_record]  # Avoid duplicate family work
+
+            if source_record["is_target_language"]:
+                summary["target_language_skipped"] += 1  # Source already target language
+                summary["generated_skipped"] += sum(1 for record in extra_records if record["is_target_language"])  # Count valid generated companions
+                continue
+
+            if output_record and output_record is not source_record:
+                if output_record["is_target_language"] and is_translated_output_complete(source_record["lines"], output_file):
+                    summary["existing_skipped"] += 1  # Valid generated output completes this source
+                    summary["generated_skipped"] += 1  # Existing generated file excluded from independent work
+                    summary["generated_skipped"] += sum(1 for record in extra_records if record["is_target_language"])  # Count valid generated companions
+                    print(f"{BackgroundColors.YELLOW}Skipping already complete translation: {BackgroundColors.CYAN}{output_file}{Style.RESET_ALL}")  # Log complete skip
+                    continue
+
+                summary["invalid_language_outputs"] += 1  # Existing output is present but not valid target-language content
+                print(f"{BackgroundColors.YELLOW}Existing target output is not in {BackgroundColors.CYAN}{TARGET_LANG}{BackgroundColors.YELLOW} and will be regenerated:{Style.RESET_ALL}\n{BackgroundColors.CYAN}{output_file}{Style.RESET_ALL}")  # Log regeneration
+            elif is_complete_target_language_output(source_record["lines"], output_file)[0]:
+                summary["existing_skipped"] += 1  # Output outside discovery snapshot still completes source
+                print(f"{BackgroundColors.YELLOW}Skipping already complete translation: {BackgroundColors.CYAN}{output_file}{Style.RESET_ALL}")  # Log complete skip
+                continue
+
+            summary["generated_skipped"] += sum(1 for record in extra_records if record["is_target_language"])  # Count valid generated companions without planning them
+            summary["invalid_language_outputs"] += sum(1 for record in extra_records if not record["is_target_language"])  # Track invalid generated companions
+            plan.append(source_record)  # Add pending translation work
+            summary["total_characters"] += source_record["characters"]  # Add only planned translation characters
+            continue
+
+        target_language_records = [record for record in family_records if record["is_target_language"]]  # Generated-looking files already in target language
+        non_target_records = [record for record in family_records if not record["is_target_language"]]  # Generated-looking files requiring translation or regeneration
+
+        if not non_target_records:
+            summary["target_language_skipped"] += len(target_language_records)  # Valid target-language SRTs consume no quota
+            summary["generated_skipped"] += len(target_language_records)  # Generated-looking files excluded from independent translation
+            continue
+
+        source_record = non_target_records[0]  # Treat misleading target-looking file as source when no real source exists
+        summary["source_candidates"] += 1  # Count unique mislabeled source
+        summary["mislabeled_source_files"] += 1  # Track misleading filename
+        if source_record["detection_conclusive"]:
+            print(f"{BackgroundColors.YELLOW}Filename indicates {BackgroundColors.CYAN}{TARGET_LANG}{BackgroundColors.YELLOW}, but cleaned content was detected as {BackgroundColors.CYAN}{source_record['detected_language_label']}{BackgroundColors.YELLOW}. Scheduling translation:{Style.RESET_ALL}\n{BackgroundColors.CYAN}{source_record['source_path']}{Style.RESET_ALL}")  # Log mislabeled source
+        else:
+            print(f"{BackgroundColors.YELLOW}Language detection was inconclusive despite the target-language filename. Keeping file eligible for translation:{Style.RESET_ALL}\n{BackgroundColors.CYAN}{source_record['source_path']}{Style.RESET_ALL}")  # Log conservative classification
+
+        plan.append(source_record)  # Add pending translation work
+        summary["total_characters"] += source_record["characters"]  # Add only planned translation characters
+        for record in family_records:
+            if record is source_record:
+                continue
+            if record["is_target_language"]:
+                summary["target_language_skipped"] += 1  # Valid generated companion
+                summary["generated_skipped"] += 1  # Excluded from independent translation
+            else:
+                summary["invalid_language_outputs"] += 1  # Non-target generated-looking duplicate in same family
 
     return plan, summary  # Return plan and counts
 
@@ -1052,16 +1182,19 @@ def get_zero_plan_message(input_dir: Path, preflight_summary: Dict[str, int]) ->
     discovered = preflight_summary["discovered"]  # Count all discovered SRT files
     generated = preflight_summary["generated_skipped"]  # Count generated files
     existing = preflight_summary["existing_skipped"]  # Count source files with complete outputs
+    target_language = preflight_summary["target_language_skipped"]  # Count files confirmed as target language by content
     source_candidates = preflight_summary["source_candidates"]  # Count source candidates
 
     if discovered == 0:
         return f"No SRT files were found in the input directory or any of its subdirectories: {input_dir}"  # No recursive matches
+    if target_language == discovered:
+        return f"No files require translation. Found {discovered} SRT files already in {TARGET_LANG} based on cleaned subtitle content."  # All files already target language
     if generated == discovered:
-        return f"No source SRT files require translation. Found {discovered} SRT files, but all were classified as translated, cleaned, temporary, backup, or generated outputs."  # Only generated files
+        return f"No source SRT files require translation. Found {discovered} SRT files, but all generated-looking files were confirmed as {TARGET_LANG} from cleaned subtitle content."  # Only valid generated files
     if source_candidates and existing == source_candidates:
         return f"No files require translation. Valid target-language outputs already exist for all {source_candidates} source SRT files."  # All sources complete
-    if generated or existing:
-        return f"No files require translation. Found {discovered} SRT files: {generated} generated files were ignored and {existing} source files already have valid target-language outputs."  # Mixed no-op
+    if generated or existing or target_language:
+        return f"No files require translation. Found {discovered} SRT files: {generated} generated files were ignored, {target_language} files were already {TARGET_LANG} by content, and {existing} source files already have valid target-language outputs."  # Mixed no-op
 
     return "No files require translation. Source files were skipped during preflight classification."  # Fallback for target-language, empty, or invalid-only sources
 
@@ -1307,8 +1440,7 @@ def save_srt(lines, output_file, success_message: str = "Translated SRT saved as
     :return: None
     """
 
-    with open(output_file, "w", encoding="utf-8") as f:  # Open the output SRT file for writing
-        f.write("\n".join(lines))  # Write translated lines to the file
+    write_srt_lines_atomic(Path(output_file), lines)  # Write complete output atomically, including safe in-place replacements
 
     print(
         f"{BackgroundColors.GREEN}{success_message}:{Style.RESET_ALL}\n{BackgroundColors.CYAN}{output_file}{Style.RESET_ALL}"
@@ -1389,8 +1521,8 @@ def main():
     translation_plan, preflight_summary = build_translation_plan(srt_files, input_dir, output_dir, use_configured_output)  # Build non-destructive plan before DeepL
     planned_files = len(translation_plan)  # Count pending files
     total_planned_characters = preflight_summary["total_characters"]  # Count pending characters only
-    other_skipped_files = preflight_summary["target_language_skipped"] + preflight_summary["empty_skipped"]  # Count other skipped source files
-    print(f"{BackgroundColors.GREEN}Translation plan: {BackgroundColors.CYAN}{planned_files}{BackgroundColors.GREEN} files | {BackgroundColors.CYAN}{total_planned_characters:,}{BackgroundColors.GREEN} characters | {BackgroundColors.CYAN}{preflight_summary['existing_skipped']}{BackgroundColors.GREEN} existing translations skipped | {BackgroundColors.CYAN}{preflight_summary['generated_skipped']}{BackgroundColors.GREEN} generated files skipped | {BackgroundColors.CYAN}{preflight_summary['invalid']}{BackgroundColors.GREEN} invalid files{Style.RESET_ALL}")  # Print preflight summary
+    other_skipped_files = preflight_summary["empty_skipped"] + preflight_summary["other_skipped"]  # Count non-language skipped files
+    print(f"{BackgroundColors.GREEN}Translation plan: {BackgroundColors.CYAN}{planned_files}{BackgroundColors.GREEN} files | {BackgroundColors.CYAN}{total_planned_characters:,}{BackgroundColors.GREEN} characters | {BackgroundColors.CYAN}{preflight_summary['existing_skipped']}{BackgroundColors.GREEN} existing translations skipped | {BackgroundColors.CYAN}{preflight_summary['target_language_skipped']}{BackgroundColors.GREEN} target-language files skipped | {BackgroundColors.CYAN}{preflight_summary['invalid_language_outputs']}{BackgroundColors.GREEN} invalid-language outputs | {BackgroundColors.CYAN}{preflight_summary['invalid']}{BackgroundColors.GREEN} invalid files{Style.RESET_ALL}")  # Print preflight summary
 
     translated_files = 0  # Count files translated in this run
     failed_files = 0  # Count failed planned files
@@ -1455,7 +1587,10 @@ def main():
         f"{BackgroundColors.GREEN}Files translated: {BackgroundColors.CYAN}{translated_files}{Style.RESET_ALL}\n"
         f"{BackgroundColors.GREEN}Source candidates: {BackgroundColors.CYAN}{preflight_summary['source_candidates']}{Style.RESET_ALL}\n"
         f"{BackgroundColors.GREEN}Existing translations skipped: {BackgroundColors.CYAN}{preflight_summary['existing_skipped']}{Style.RESET_ALL}\n"
+        f"{BackgroundColors.GREEN}Target-language files skipped: {BackgroundColors.CYAN}{preflight_summary['target_language_skipped']}{Style.RESET_ALL}\n"
         f"{BackgroundColors.GREEN}Generated files skipped: {BackgroundColors.CYAN}{preflight_summary['generated_skipped']}{Style.RESET_ALL}\n"
+        f"{BackgroundColors.GREEN}Invalid-language outputs: {BackgroundColors.CYAN}{preflight_summary['invalid_language_outputs']}{Style.RESET_ALL}\n"
+        f"{BackgroundColors.GREEN}Mislabeled source files: {BackgroundColors.CYAN}{preflight_summary['mislabeled_source_files']}{Style.RESET_ALL}\n"
         f"{BackgroundColors.GREEN}Other files skipped: {BackgroundColors.CYAN}{other_skipped_files}{Style.RESET_ALL}\n"
         f"{BackgroundColors.GREEN}Invalid files: {BackgroundColors.CYAN}{preflight_summary['invalid']}{Style.RESET_ALL}\n"
         f"{BackgroundColors.GREEN}Files failed: {BackgroundColors.CYAN}{failed_files}{Style.RESET_ALL}\n"
