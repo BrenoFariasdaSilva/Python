@@ -50,10 +50,31 @@ import atexit  # For playing a sound when the program finishes
 import datetime  # For getting the current date and time
 import os  # For running a command in the terminal
 import platform  # For getting the operating system name
+import re  # For matching SRT timestamps and SDH fragments
 import sys  # For system-specific parameters and functions
 from colorama import Style  # For coloring the terminal
-from Logger import Logger  # For logging output to both terminal and file
 from pathlib import Path  # For handling file paths
+
+try:  # Attempt to use the template logger when it is available
+    from Logger import Logger  # For logging output to both terminal and file
+except ModuleNotFoundError:  # Provide the same logging surface when the external module is absent
+    class Logger:  # Minimal logger compatible with the template redirection
+        def __init__(self, filename: str, clean: bool = False) -> None:  # Initialize terminal and file output
+            self.terminal = sys.__stdout__  # Preserve original stdout
+            Path(filename).parent.mkdir(parents=True, exist_ok=True)  # Create log directory
+            mode = "w" if clean else "a"  # Select log write mode
+            self.log = open(filename, mode, encoding="utf-8")  # Open UTF-8 log file
+
+        def write(self, message: str) -> None:  # Write message to terminal and log file
+            self.terminal.write(message)  # Write to terminal stream
+            self.log.write(message)  # Write to log stream
+
+        def flush(self) -> None:  # Flush both output streams
+            self.terminal.flush()  # Flush terminal stream
+            self.log.flush()  # Flush log stream
+
+        def close(self) -> None:  # Close the log stream
+            self.log.close()  # Close log file
 
 
 # Macros:
@@ -69,6 +90,11 @@ class BackgroundColors:  # Colors for the terminal
 
 # Execution Constants:
 VERBOSE = False  # Set to True to output verbose messages
+INPUT_DIR = Path("./Input")  # Directory searched recursively for source SRT files
+SRT_TIMESTAMP_PATTERN = re.compile(r"^\d{2}:\d{2}:\d{2},\d{3}\s+-->\s+\d{2}:\d{2}:\d{2},\d{3}(?:\s+.*)?$")  # SRT timestamp validation pattern
+DESCRIPTIVE_PHRASES = frozenset(("music", "door closes", "applause", "speaking indistinctly", "laughing", "laughs", "sighs", "sigh", "whispers", "whispering", "inaudible", "indistinct chatter", "chuckles", "gasps", "coughs", "sobs", "crying", "screaming", "phone ringing", "knocking", "footsteps", "thunder", "alarm", "silence"))  # Conservative complete SDH fragments
+DESCRIPTIVE_KEYWORDS = frozenset(("music", "applause", "laughing", "laughs", "sighs", "sigh", "whispers", "whispering", "inaudible", "indistinctly", "chatter", "chuckles", "gasps", "coughs", "sobs", "crying", "screaming", "ringing", "knocking", "footsteps", "thunder", "alarm", "silence"))  # SDH indicator words
+DESCRIPTIVE_WORDS = frozenset(("music", "door", "doors", "closes", "close", "closing", "opens", "opening", "applause", "speaking", "indistinctly", "indistinct", "laughing", "laughs", "sighs", "sigh", "whispers", "whispering", "inaudible", "chatter", "crowd", "chuckles", "softly", "gasps", "coughs", "sobs", "crying", "screaming", "phone", "ringing", "knocking", "knocks", "footsteps", "thunder", "alarm", "silence", "dramatic"))  # Allowed words inside SDH fragments
 
 # Logger Setup:
 logger = Logger(f"./Logs/{Path(__file__).stem}.log", clean=True)  # Create a Logger instance
@@ -370,6 +396,372 @@ def play_sound():
         )
 
 
+def read_srt_file(filepath: Path) -> tuple[str, str]:
+    """
+    Read an SRT file with safe encoding fallbacks.
+
+    :param filepath: Source SRT path.
+    :return: Decoded text and encoding name.
+    """
+
+    data = filepath.read_bytes()  # Read raw bytes without altering source file
+
+    for encoding in ("utf-8-sig", "utf-8", "cp1252"):  # Try common subtitle encodings
+        try:  # Attempt decode with current encoding
+            return data.decode(encoding), encoding  # Return decoded subtitle text
+        except UnicodeDecodeError:  # Continue after decode failure
+            continue  # Try next encoding
+
+    raise UnicodeDecodeError("utf-8", data, 0, 1, "Unable to decode subtitle file")  # Report unsupported encoding
+
+
+def discover_srt_files(input_dir: Path) -> list[Path]:
+    """
+    Discover source SRT files recursively.
+
+    :param input_dir: Directory to search.
+    :return: Sorted source SRT paths.
+    """
+
+    return sorted(path for path in input_dir.rglob("*.srt") if not path.name.lower().endswith(".cleaned.srt"))  # Exclude generated cleaned files
+
+
+def parse_srt_content(content: str, filepath: Path) -> list[tuple[int, str, list[str]]]:
+    """
+    Parse and validate SRT content.
+
+    :param content: Decoded SRT text.
+    :param filepath: Source path for error context.
+    :return: Parsed subtitle entries.
+    """
+
+    normalized_content = content.replace("\r\n", "\n").replace("\r", "\n").strip("\ufeff")  # Normalize line endings
+    blocks = [block for block in re.split(r"\n\s*\n", normalized_content.strip()) if block.strip()]  # Split entries on blank lines
+
+    if not blocks:  # Reject empty subtitles
+        raise ValueError(f"Malformed SRT file with no entries: {filepath}")  # Report malformed file
+
+    entries = []  # Store parsed subtitle entries
+
+    for block_number, block in enumerate(blocks, start=1):  # Parse each subtitle block
+        lines = block.split("\n")  # Split block into lines
+
+        if len(lines) < 3:  # Require index, timestamp, and subtitle text
+            raise ValueError(f"Malformed SRT block {block_number} in {filepath}")  # Report malformed block
+
+        try:  # Parse numeric subtitle index
+            index = int(lines[0].strip())  # Convert index line to integer
+        except ValueError as exc:  # Handle invalid index line
+            raise ValueError(f"Invalid SRT index in block {block_number} in {filepath}") from exc  # Report invalid index
+
+        if index <= 0:  # Require positive subtitle indexes
+            raise ValueError(f"Invalid SRT index in block {block_number} in {filepath}")  # Report invalid index
+
+        timestamp = lines[1].strip()  # Preserve timestamp text without outer whitespace
+
+        if not SRT_TIMESTAMP_PATTERN.match(timestamp):  # Validate timestamp range syntax
+            raise ValueError(f"Invalid SRT timestamp in block {block_number} in {filepath}")  # Report invalid timestamp
+
+        text_lines = [line.rstrip() for line in lines[2:]]  # Preserve subtitle text with trailing whitespace removed
+
+        if not any(line.strip() for line in text_lines):  # Require meaningful subtitle text lines
+            raise ValueError(f"Empty SRT text in block {block_number} in {filepath}")  # Report empty subtitle text
+
+        entries.append((index, timestamp, text_lines))  # Store parsed entry
+
+    return entries  # Return parsed entries
+
+
+def serialize_srt_entries(entries: list[tuple[int, str, list[str]]]) -> str:
+    """
+    Serialize parsed SRT entries with sequential numbering.
+
+    :param entries: Parsed subtitle entries.
+    :return: Serialized SRT text.
+    """
+
+    blocks = []  # Store serialized blocks
+
+    for new_index, entry in enumerate(entries, start=1):  # Renumber entries sequentially
+        blocks.append("\n".join([str(new_index), entry[1], *entry[2]]))  # Serialize one subtitle block
+
+    return "\n\n".join(blocks) + ("\n" if blocks else "")  # Return valid SRT text
+
+
+def normalize_phrase(value: str) -> str:
+    """
+    Normalize a possible SDH phrase for conservative matching.
+
+    :param value: Phrase to normalize.
+    :return: Normalized phrase.
+    """
+
+    plain_value = re.sub(r"<[^>]+>", " ", value)  # Remove HTML tags for classification
+    plain_value = plain_value.replace("♪", " ")  # Ignore music note markers for classification
+    plain_value = re.sub(r"[^A-Za-z\s-]", " ", plain_value)  # Remove punctuation except word separators
+    plain_value = re.sub(r"\s+", " ", plain_value).strip().lower()  # Normalize whitespace and case
+    return plain_value  # Return normalized phrase
+
+
+def is_descriptive_phrase(value: str) -> bool:
+    """
+    Identify conservative SDH/descriptive phrases.
+
+    :param value: Candidate text inside a fragment.
+    :return: True when the phrase is descriptive content.
+    """
+
+    if any(character.isdigit() for character in value):  # Preserve numbered bracketed text
+        return False  # Treat numeric fragments as dialogue context
+
+    phrase = normalize_phrase(value)  # Normalize candidate phrase
+
+    if not phrase:  # Ignore empty candidates
+        return False  # Preserve unknown empty fragments
+
+    if phrase in DESCRIPTIVE_PHRASES:  # Match known complete descriptors
+        return True  # Remove known descriptor
+
+    words = phrase.replace("-", " ").split()  # Split phrase into words
+
+    if len(words) > 5:  # Avoid broad removal of long prose fragments
+        return False  # Preserve long ambiguous fragments
+
+    if not any(word in DESCRIPTIVE_KEYWORDS for word in words):  # Require one strong SDH word
+        return False  # Preserve ambiguous fragments
+
+    return all(word in DESCRIPTIVE_WORDS for word in words)  # Remove only known descriptive word combinations
+
+
+def is_music_only_line(value: str) -> bool:
+    """
+    Identify music-symbol lines that contain only descriptive content.
+
+    :param value: Subtitle line.
+    :return: True when the line contains only a music descriptor.
+    """
+
+    if "♪" not in value:  # Preserve lines without music symbols
+        return False  # Not a music-symbol descriptor
+
+    return is_descriptive_phrase(value)  # Reuse conservative phrase classification
+
+
+def remove_empty_html_tags(value: str) -> str:
+    """
+    Remove empty HTML tags left after SDH removal.
+
+    :param value: Subtitle line.
+    :return: Subtitle line without empty HTML tags.
+    """
+
+    previous_value = None  # Track previous value for loop convergence
+
+    while previous_value != value:  # Repeat until nested empty tags are gone
+        previous_value = value  # Store value before replacement
+        value = re.sub(r"<([A-Za-z][A-Za-z0-9]*)(?:\s[^>]*)?>\s*</\1>", " ", value)  # Remove empty matching tags
+
+    return value  # Return cleaned line
+
+
+def clean_subtitle_line(line: str) -> str:
+    """
+    Remove conservative SDH/descriptive fragments from one subtitle line.
+
+    :param line: Original subtitle line.
+    :return: Cleaned subtitle line.
+    """
+
+    def replace_fragment(match: re.Match[str]) -> str:
+        """
+        Replace one bracketed or parenthesized fragment when descriptive.
+
+        :param match: Regex match object.
+        :return: Replacement text.
+        """
+
+        fragment = match.group(0)  # Capture full bracketed fragment
+        inner_text = fragment[1:-1]  # Extract fragment text without brackets
+        return " " if is_descriptive_phrase(inner_text) else fragment  # Remove descriptor or preserve text
+
+    cleaned_line = re.sub(r"\[[^\[\]\n]{1,80}\]|\([^\(\)\n]{1,80}\)", replace_fragment, line)  # Remove conservative bracket fragments
+    cleaned_line = remove_empty_html_tags(cleaned_line)  # Remove tags emptied by fragment removal
+
+    if is_music_only_line(cleaned_line):  # Remove music-only descriptor lines
+        return ""  # Drop descriptor line
+
+    cleaned_line = re.sub(r"[ \t]{2,}", " ", cleaned_line)  # Collapse horizontal whitespace
+    cleaned_line = re.sub(r"\s+([,.!?;:])", r"\1", cleaned_line)  # Remove spaces before punctuation
+    cleaned_line = re.sub(r"(<[^/][^>]*>)\s+", r"\1", cleaned_line)  # Remove leading whitespace inside opening tags
+    cleaned_line = re.sub(r"\s+(</[^>]+>)", r"\1", cleaned_line)  # Remove trailing whitespace inside closing tags
+    cleaned_line = remove_empty_html_tags(cleaned_line)  # Remove any newly empty tags
+    return cleaned_line.strip()  # Return normalized cleaned line
+
+
+def clean_subtitle_lines(lines: list[str]) -> list[str]:
+    """
+    Remove SDH/descriptive content from multiline subtitle text.
+
+    :param lines: Original subtitle text lines.
+    :return: Cleaned subtitle text lines.
+    """
+
+    cleaned_lines = []  # Store cleaned text lines
+
+    for line in lines:  # Clean every original subtitle line
+        cleaned_line = clean_subtitle_line(line)  # Remove SDH fragments from current line
+
+        if cleaned_line:  # Preserve non-empty dialogue lines
+            cleaned_lines.append(cleaned_line)  # Add cleaned dialogue line
+
+    return cleaned_lines  # Return cleaned text lines
+
+
+def clean_subtitle_entries(entries: list[tuple[int, str, list[str]]]) -> tuple[list[tuple[int, str, list[str]]], list[tuple[int, str, str, str, bool]], int, int]:
+    """
+    Remove SDH/descriptive content from parsed subtitle entries.
+
+    :param entries: Parsed subtitle entries.
+    :return: Cleaned entries, diff changes, removed count, and mixed modified count.
+    """
+
+    cleaned_entries = []  # Store entries that keep dialogue
+    changes = []  # Store diff report entries
+    removed_count = 0  # Count complete entry removals
+    modified_count = 0  # Count mixed entry modifications
+
+    for index, timestamp, lines in entries:  # Process each parsed subtitle entry
+        cleaned_lines = clean_subtitle_lines(lines)  # Clean multiline subtitle text
+        original_text = "\n".join(lines)  # Build original text for diff report
+        cleaned_text = "\n".join(cleaned_lines)  # Build cleaned text for diff report
+
+        if not cleaned_lines:  # Remove entry when no dialogue remains
+            removed_count += 1  # Count removed entry
+            changes.append((index, timestamp, original_text, "<REMOVED>", True))  # Store removed-entry diff
+            continue  # Skip removed entry
+
+        cleaned_entries.append((index, timestamp, cleaned_lines))  # Preserve cleaned entry
+
+        if cleaned_text != original_text:  # Record mixed entry changes
+            modified_count += 1  # Count modified mixed entry
+            changes.append((index, timestamp, original_text, cleaned_text, False))  # Store replacement diff
+
+    return cleaned_entries, changes, removed_count, modified_count  # Return cleaned data and counts
+
+
+def build_diff_report(changes: list[tuple[int, str, str, str, bool]]) -> str:
+    """
+    Build a deterministic readable cleanup diff report.
+
+    :param changes: Modified or removed subtitle entries.
+    :return: Diff report text.
+    """
+
+    sections = []  # Store report sections
+
+    for index, timestamp, original_text, cleaned_text, removed in changes:  # Add one section per changed entry
+        marker = "Removed" if removed else "Modified"  # Select change marker
+        sections.append(f"Original index: {index}\nTimestamp: {timestamp}\nChange: {marker}\nOriginal:\n{original_text}\nCleaned:\n{cleaned_text}")  # Add readable diff section
+
+    return "\n\n---\n\n".join(sections) + "\n"  # Return deterministic UTF-8 report text
+
+
+def validate_cleaned_srt(content: str, filepath: Path) -> None:
+    """
+    Validate cleaned SRT content before publishing.
+
+    :param content: Cleaned SRT text.
+    :param filepath: Output SRT path.
+    :return: None
+    """
+
+    if not content.strip():  # Allow an empty cleaned file when every entry was removed
+        return  # Empty output is valid for all-descriptor sources
+
+    parse_srt_content(content, filepath)  # Validate serialized SRT structure
+
+
+def atomic_write_text(filepath: Path, content: str) -> None:
+    """
+    Write text with a temporary file and atomic replacement.
+
+    :param filepath: Destination path.
+    :param content: UTF-8 text content.
+    :return: None
+    """
+
+    temporary_filepath = filepath.with_name(f".{filepath.name}.{os.getpid()}.tmp")  # Build sibling temporary path
+
+    try:  # Write and publish atomically
+        filepath.parent.mkdir(parents=True, exist_ok=True)  # Create output directory
+        with open(temporary_filepath, "w", encoding="utf-8", newline="\n") as temporary_file:  # Open UTF-8 temporary file
+            temporary_file.write(content)  # Write generated text
+        os.replace(temporary_filepath, filepath)  # Replace destination atomically on same filesystem
+    finally:  # Remove leftover temporary file after failures
+        if temporary_filepath.exists():  # Detect incomplete temporary file
+            temporary_filepath.unlink()  # Remove incomplete temporary file
+
+
+def display_relative_path(filepath: Path, input_dir: Path) -> str:
+    """
+    Format a path relative to the input directory when possible.
+
+    :param filepath: Path to format.
+    :param input_dir: Input root path.
+    :return: Display path.
+    """
+
+    try:  # Prefer paths relative to INPUT_DIR
+        return filepath.relative_to(input_dir).as_posix()  # Return relative display path
+    except ValueError:  # Fall back when path is outside INPUT_DIR
+        return filepath.as_posix()  # Return absolute display path
+
+
+def process_srt_file(filepath: Path, input_dir: Path) -> tuple[int, int, int, int, int]:
+    """
+    Process one SRT file and write cleaned outputs when content changed.
+
+    :param filepath: Source SRT path.
+    :param input_dir: Input root path.
+    :return: Cleaned files, unchanged files, failed files, removed entries, and modified mixed entries.
+    """
+
+    relative_path = display_relative_path(filepath, input_dir)  # Build concise log path
+    print(f"Processing: {relative_path}")  # Log source being processed
+
+    try:  # Keep one file failure from stopping the batch
+        content, _encoding = read_srt_file(filepath)  # Read and decode source SRT
+        entries = parse_srt_content(content, filepath)  # Parse and validate source SRT
+        cleaned_entries, changes, removed_count, modified_count = clean_subtitle_entries(entries)  # Remove SDH content
+
+        if not changes:  # Avoid output files when nothing changed
+            print(f"No SDH/descriptive content found: {relative_path}")  # Log unchanged source
+            return 0, 1, 0, 0, 0  # Return unchanged count
+
+        cleaned_srt_filepath = filepath.with_name(f"{filepath.stem}.cleaned.srt")  # Build per-source cleaned SRT path
+        diff_filepath = filepath.with_name(f"{filepath.stem}.cleaned.diff")  # Build per-source diff path
+
+        if cleaned_srt_filepath == filepath or diff_filepath == filepath:  # Prevent source overwrite
+            raise ValueError(f"Refusing to overwrite source file: {filepath}")  # Report unsafe output path
+
+        cleaned_content = serialize_srt_entries(cleaned_entries)  # Serialize cleaned SRT with sequential numbering
+        validate_cleaned_srt(cleaned_content, cleaned_srt_filepath)  # Validate cleaned SRT before writing
+        diff_content = build_diff_report(changes)  # Build readable diff report
+
+        if not diff_content.strip():  # Prevent empty diff output
+            raise ValueError(f"Empty diff report for changed file: {filepath}")  # Report invalid diff state
+
+        atomic_write_text(cleaned_srt_filepath, cleaned_content)  # Write cleaned SRT beside source
+        atomic_write_text(diff_filepath, diff_content)  # Write diff report beside source
+
+        print(f"Cleaned: {display_relative_path(cleaned_srt_filepath, input_dir)}")  # Log cleaned output
+        print(f"Diff: {display_relative_path(diff_filepath, input_dir)}")  # Log diff output
+        return 1, 0, 0, removed_count, modified_count  # Return cleaned counts
+    except Exception as exc:  # Report file-specific failure and continue
+        print(f"{BackgroundColors.RED}Failed: {BackgroundColors.CYAN}{relative_path}{BackgroundColors.RED} - {exc}{Style.RESET_ALL}")  # Log concise failure
+        return 0, 0, 1, 0, 0  # Return failure count
+
+
 def main():
     """
     Main function.
@@ -385,7 +777,37 @@ def main():
     
     start_time = datetime.datetime.now()  # Get the start time of the program
     
-    # Implement logic here
+    input_dir = Path(resolve_full_trailing_space_path(str(INPUT_DIR))).resolve()  # Resolve INPUT_DIR path safely
+    discovered_count = 0  # Count discovered SRT files
+    cleaned_count = 0  # Count files with generated outputs
+    unchanged_count = 0  # Count files without SDH content
+    failed_count = 0  # Count files that failed processing
+    removed_entries_count = 0  # Count removed subtitle entries
+    modified_entries_count = 0  # Count mixed entries modified
+
+    if not verify_filepath_exists(str(input_dir)) or not input_dir.is_dir():  # Validate input directory
+        print(f"{BackgroundColors.RED}Input directory not found: {BackgroundColors.CYAN}{input_dir}{Style.RESET_ALL}")  # Log missing input directory
+    else:  # Process source SRT files
+        srt_files = discover_srt_files(input_dir)  # Discover source SRT files recursively
+        discovered_count = len(srt_files)  # Store discovered file count
+
+        for srt_file in srt_files:  # Process every source SRT file
+            file_cleaned, file_unchanged, file_failed, file_removed, file_modified = process_srt_file(srt_file, input_dir)  # Process one source file
+            cleaned_count += file_cleaned  # Add cleaned file count
+            unchanged_count += file_unchanged  # Add unchanged file count
+            failed_count += file_failed  # Add failed file count
+            removed_entries_count += file_removed  # Add removed entry count
+            modified_entries_count += file_modified  # Add modified entry count
+
+    print(
+        f"{BackgroundColors.GREEN}Summary:{Style.RESET_ALL}\n"
+        f"{BackgroundColors.GREEN}SRT files discovered: {BackgroundColors.CYAN}{discovered_count}{Style.RESET_ALL}\n"
+        f"{BackgroundColors.GREEN}Files cleaned: {BackgroundColors.CYAN}{cleaned_count}{Style.RESET_ALL}\n"
+        f"{BackgroundColors.GREEN}Files unchanged: {BackgroundColors.CYAN}{unchanged_count}{Style.RESET_ALL}\n"
+        f"{BackgroundColors.GREEN}Files failed: {BackgroundColors.CYAN}{failed_count}{Style.RESET_ALL}\n"
+        f"{BackgroundColors.GREEN}Subtitle entries removed: {BackgroundColors.CYAN}{removed_entries_count}{Style.RESET_ALL}\n"
+        f"{BackgroundColors.GREEN}Mixed entries modified: {BackgroundColors.CYAN}{modified_entries_count}{Style.RESET_ALL}"
+    )  # Output final processing summary
 
     finish_time = datetime.datetime.now()  # Get the finish time of the program
     
