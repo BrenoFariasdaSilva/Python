@@ -87,9 +87,10 @@ DESCRIPTIVE_SUBTITLES_REMOVAL = (
 DEEPL_API_KEYS = {}  # DeepL API accounts (will be loaded in load_dotenv function)
 INPUT_DIR = f"./Input"  # Directory containing the input SRT files
 OUTPUT_DIR = Path("./Output")  # Base output directory
+SCRIPT_DIR = Path(__file__).resolve().parent  # Directory containing this script
 
 # Logger Setup:
-logger = Logger(f"./Logs/{Path(__file__).stem}.log", clean=True)  # Create a Logger instance
+logger = Logger(str(SCRIPT_DIR / "Logs" / f"{Path(__file__).stem}.log"), clean=True)  # Create a Logger instance
 sys.stdout = logger  # Redirect stdout to the logger
 sys.stderr = logger  # Redirect stderr to the logger
 
@@ -365,6 +366,37 @@ def verify_filepath_exists(filepath):
     except Exception as e:  # Catch any exception to ensure logging and Telegram alert
         print(str(e))  # Print error to terminal for server logs
         raise  # Re-raise to preserve original failure semantics
+
+
+def resolve_from_script_dir(path) -> Path:
+    """
+    Resolves a configured path relative to the directory containing this script.
+
+    :param path: Configured path value.
+    :return: Absolute resolved path.
+    """
+
+    configured_path = Path(path).expanduser()  # Normalize configured path type and expand user home
+    if not configured_path.is_absolute():  # Resolve relative config from script directory
+        configured_path = SCRIPT_DIR / configured_path
+
+    return configured_path.resolve()  # Return absolute normalized path
+
+
+def is_path_inside(path: Path, parent: Path) -> bool:
+    """
+    Determines whether a path is the same as or inside a parent directory.
+
+    :param path: Path to test.
+    :param parent: Parent directory.
+    :return: True if path is parent or descendant, otherwise False.
+    """
+
+    try:
+        path.relative_to(parent)  # Succeeds for parent itself and descendants
+        return True
+    except ValueError:
+        return False
 
 
 def read_srt(file_path):
@@ -843,51 +875,62 @@ def main():
         )  # Output error message
         return  # Exit the program
 
-    if not os.path.exists(INPUT_DIR):  # If the input directory does not exist
-        os.makedirs(INPUT_DIR)  # Create the input directory
-        print(f"Input directory does not exist: {INPUT_DIR}")  # Output the error message
+    input_dir = resolve_from_script_dir(INPUT_DIR)  # Resolve configured input from script location
+    output_dir = resolve_from_script_dir(OUTPUT_DIR)  # Resolve configured output from script location
+    use_configured_output = is_path_inside(input_dir, SCRIPT_DIR)  # Internal inputs keep configured output layout
+
+    if not input_dir.exists():  # If the input directory does not exist
+        input_dir.mkdir(parents=True, exist_ok=True)  # Create the input directory
+        print(f"Input directory does not exist: {input_dir}")  # Output the error message
         return  # Exit the program
 
-    if not os.path.exists(OUTPUT_DIR):  # If the output directory does not exist
-        os.makedirs(OUTPUT_DIR)  # Create the output directory
+    if use_configured_output and not output_dir.exists():  # If configured output is needed and missing
+        output_dir.mkdir(parents=True, exist_ok=True)  # Create the output directory
 
-    srt_files = [f for f in Path(INPUT_DIR).rglob("*.srt") if f.is_file()]  # List of SRT file paths (includes subdirectories)
+    srt_files = [f for f in input_dir.rglob("*.srt") if f.is_file()]  # List of SRT file paths (includes subdirectories)
 
     if not srt_files:  # If no SRT files were found
-        print(f"No .srt files found in directory: {INPUT_DIR}")  # Output message
+        print(f"No .srt files found in directory: {input_dir}")  # Output message
         return  # Exit the program
 
     for srt_file in srt_files:  # Iterate through each SRT file in the input directory
-        srt_lines = read_srt(srt_file)  # Read SRT file into a list of lines
+        current_srt_path = srt_file.resolve()  # Resolve the current source SRT safely
+        srt_lines = read_srt(current_srt_path)  # Read SRT file into a list of lines
 
         if DESCRIPTIVE_SUBTITLES_REMOVAL:  # Verify if descriptive subtitle removal is enabled
-            srt_lines = remove_descriptive_subtitles(srt_file)  # Clean SRT lines by removing descriptive text
+            srt_lines = remove_descriptive_subtitles(current_srt_path)  # Clean SRT lines by removing descriptive text
 
         cleaned_blocks = parse_srt_blocks(srt_lines)  # Validate cleaned SRT structure
         if srt_lines and not cleaned_blocks:  # Reject malformed cleaned subtitles
-            print(f"{BackgroundColors.RED}Invalid SRT structure after SDH cleanup: {BackgroundColors.CYAN}{srt_file}{Style.RESET_ALL}")  # Log invalid cleaned file
+            print(f"{BackgroundColors.RED}Invalid SRT structure after SDH cleanup: {BackgroundColors.CYAN}{current_srt_path}{Style.RESET_ALL}")  # Log invalid cleaned file
             continue  # Continue with next SRT file
 
         translatable_character_count = count_translatable_characters(srt_lines)  # Count only cleaned subtitle text sent to DeepL
-        filename = getattr(srt_file, "name", str(srt_file))  # Extract filename string for processing display
+        filename = getattr(current_srt_path, "name", str(current_srt_path))  # Extract filename string for processing display
         print(f"{BackgroundColors.GREEN}Processing: {BackgroundColors.CYAN}{filename}{BackgroundColors.GREEN} ({translatable_character_count:,} characters){Style.RESET_ALL}")  # Log cleaned workload
 
-        relative_path = srt_file.relative_to(INPUT_DIR).parent  # Extract relative path from the input directory
-        output_subdir = OUTPUT_DIR / relative_path  # Build the output subdirectory path
+        if use_configured_output:  # Internal configured input keeps project output organization
+            relative_path = current_srt_path.relative_to(input_dir).parent  # Extract relative path from the input directory
+            output_subdir = output_dir / relative_path  # Build the output subdirectory path
+        else:  # External input writes each translation beside its source file
+            output_subdir = current_srt_path.parent  # Use current source SRT directory independently
+
         output_subdir.mkdir(parents=True, exist_ok=True)  # Ensure the output subdirectory exists
 
-        output_file = output_subdir / f"{srt_file.stem}_ptBR.srt"  # Build the output file path with ptBR suffix
+        output_file = (output_subdir / f"{current_srt_path.stem}_ptBR.srt").resolve()  # Build the output file path with ptBR suffix
+        if output_file == current_srt_path:  # Never overwrite the source SRT
+            raise RuntimeError(f"Refusing to overwrite source subtitle: {current_srt_path}")
 
         if translatable_character_count == 0:  # Avoid DeepL calls when cleanup removed every translatable line
             print(f"{BackgroundColors.YELLOW}{filename} contains no translatable dialogue after SDH cleanup.{Style.RESET_ALL}")  # Log empty cleaned file
             continue  # Continue with next SRT file
 
         if is_translated_output_complete(srt_lines, output_file):  # Require parseable matching output before skipping
-            print(f"{BackgroundColors.YELLOW}Skipping already complete translation: {BackgroundColors.CYAN}{srt_file}{Style.RESET_ALL}")  # Log complete-file skip
+            print(f"{BackgroundColors.YELLOW}Skipping already complete translation: {BackgroundColors.CYAN}{output_file}{Style.RESET_ALL}")  # Log complete-file skip
             continue  # Continue with next SRT file
 
         try:
-            translated_lines = translate_srt_lines(srt_file, srt_lines, translatable_character_count)  # Translate SRT lines using DeepL API
+            translated_lines = translate_srt_lines(current_srt_path, srt_lines, translatable_character_count)  # Translate SRT lines using DeepL API
         except RuntimeError as e:
             print(f"{BackgroundColors.RED}{e}{Style.RESET_ALL}")  # Log fatal quota exhaustion
             return  # Stop without saving an incomplete output
