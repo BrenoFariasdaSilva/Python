@@ -473,21 +473,27 @@ def is_descriptive_cue(text: str) -> bool:
     if not cue_text:
         return True  # Empty cue text is non-dialogue
 
-    descriptive_words = (
-        "applause", "audience", "beeping", "bell", "breathing", "cheering", "chuckles", "coughing",
-        "crying", "door", "footsteps", "groaning", "indistinctly", "laugh", "laughing", "laughs",
-        "music", "phone", "ringing", "sighs", "singing", "speaking indistinctly", "thunder", "whispers",
-    )  # Conservative SDH cue vocabulary
+    cue_words = re.findall(r"[a-z]+", cue_text)  # Extract cue words only
 
-    return any(word in cue_text for word in descriptive_words)  # Match known non-dialogue cues
+    if not cue_words:
+        return True  # Music symbols or punctuation only are non-dialogue
+
+    descriptive_words = {
+        "applause", "audience", "beeping", "bell", "breathing", "cheering", "chuckles", "closes",
+        "coughing", "crying", "door", "footsteps", "gasps", "groaning", "indistinctly", "instrumental",
+        "laugh", "laughing", "laughs", "music", "phone", "playing", "ringing", "sighs", "singing",
+        "speaking", "thunder", "whispering", "whispers",
+    }  # Conservative SDH cue vocabulary
+
+    return all(word in descriptive_words for word in cue_words)  # Avoid removing dialogue with one cue-like word
 
 
-def clean_subtitle_text_line(text_line: str) -> str:
+def clean_subtitle_text_line(text_line: str) -> Tuple[str, bool]:
     """
     Removes isolated SDH cues from one subtitle text line.
 
     :param text_line: Subtitle text line to clean.
-    :return: Cleaned subtitle text line.
+    :return: Tuple containing cleaned subtitle text line and whether content changed.
     """
 
     stripped = text_line.strip()  # Normalize current text line
@@ -497,18 +503,22 @@ def clean_subtitle_text_line(text_line: str) -> str:
         (tagless.startswith("[") and tagless.endswith("]"))
         or (tagless.startswith("(") and tagless.endswith(")"))
         or (tagless.startswith("♪") and tagless.endswith("♪"))
-        or (tagless.startswith("?") and tagless.endswith("?"))
+        or (tagless.startswith("♫") and tagless.endswith("♫"))
+        or (tagless.startswith("♬") and tagless.endswith("♬"))
+        or (tagless.startswith("♩") and tagless.endswith("♩"))
     ) and is_descriptive_cue(tagless):
-        return ""  # Drop whole-line descriptive cue
+        return "", True  # Drop whole-line descriptive cue
 
     cleaned = re.sub(
-        r"(\[[^\]]+\]|\([^)]+\)|♪[^♪]+♪)",
+        r"(\[[^\]]+\]|\([^)]+\)|[♪♫♬♩][^♪♫♬♩]+[♪♫♬♩])",
         lambda match: "" if is_descriptive_cue(match.group(0)) else match.group(0),
         stripped,
     )  # Remove inline descriptive cue spans only
     cleaned = re.sub(r"<([^>\s]+)[^>]*>\s*</\1>", "", cleaned)  # Remove empty HTML tags left by cue removal
 
-    return " ".join(cleaned.split())  # Normalize spacing after cue removal
+    cleaned = " ".join(cleaned.split())  # Normalize spacing after cue removal
+
+    return cleaned, cleaned != stripped  # Return cleaned text and change flag
 
 
 def serialize_srt_blocks(blocks: List[Tuple[str, str, List[str]]]) -> List[str]:
@@ -540,14 +550,14 @@ def count_translatable_characters(lines: List[str]) -> int:
     return sum(len("\n".join(text_lines)) for _, _, text_lines in parse_srt_blocks(lines))  # Match translation block counting
 
 
-def remove_descriptive_subtitles(file_path):
+def remove_descriptive_subtitles(file_path) -> Tuple[List[str], int, int]:
     """
     Removes descriptive cues from parsed SRT subtitle entries.
     Overwrites the original SRT file with cleaned lines.
     These cleaned lines are used for translation.
 
     :param file_path: Path to the SRT file
-    :return: List of cleaned lines
+    :return: Tuple containing cleaned lines, removed entry count, and mixed cleaned entry count.
     """
 
     verbose_output(
@@ -558,22 +568,32 @@ def remove_descriptive_subtitles(file_path):
     blocks = parse_srt_blocks(original_lines)  # Parse source before cue removal
 
     if not blocks:
-        return original_lines  # Preserve malformed input behavior
+        return original_lines, 0, 0  # Preserve malformed input behavior
 
     cleaned_blocks = []  # Store cleaned subtitle blocks
+    removed_entry_count = 0  # Count blocks removed entirely by cleanup
+    mixed_cleaned_entry_count = 0  # Count kept blocks whose text changed
 
     for index, timing, text_lines in blocks:  # Clean each parsed subtitle block
-        cleaned_text_lines = [clean_subtitle_text_line(text_line) for text_line in text_lines]  # Remove SDH cue spans
+        cleaned_line_results = [clean_subtitle_text_line(text_line) for text_line in text_lines]  # Remove SDH cue spans
+        cleaned_text_lines = [text_line for text_line, _ in cleaned_line_results]  # Extract cleaned text
         cleaned_text_lines = [text_line for text_line in cleaned_text_lines if text_line]  # Drop empty cleaned lines
         if cleaned_text_lines:
             cleaned_blocks.append((index, timing, cleaned_text_lines))  # Keep blocks with dialogue
+            if any(changed for _, changed in cleaned_line_results):  # Detect mixed cue cleanup
+                mixed_cleaned_entry_count += 1  # Count kept changed block
+        else:
+            removed_entry_count += 1  # Count removed SDH-only block
 
     cleaned_lines = serialize_srt_blocks(cleaned_blocks)  # Serialize cleaned SRT blocks
+    if cleaned_lines and not parse_srt_blocks(cleaned_lines):  # Validate serialized cleaned subtitles before replacing
+        raise ValueError(f"Invalid SRT structure after SDH cleanup: {file_path}")  # Stop before source replacement
+
     temp_file = Path(file_path).with_suffix(Path(file_path).suffix + ".tmp")  # Build same-folder temp file
     temp_file.write_text("\n".join(cleaned_lines), encoding="utf-8")  # Write cleaned subtitles atomically
     os.replace(temp_file, file_path)  # Replace source file after successful write
 
-    return cleaned_lines  # Return cleaned lines for translation
+    return cleaned_lines, removed_entry_count, mixed_cleaned_entry_count  # Return cleaned lines and cleanup counts
 
 
 def get_remaining_characters(translator):
@@ -898,7 +918,9 @@ def main():
         srt_lines = read_srt(current_srt_path)  # Read SRT file into a list of lines
 
         if DESCRIPTIVE_SUBTITLES_REMOVAL:  # Verify if descriptive subtitle removal is enabled
-            srt_lines = remove_descriptive_subtitles(current_srt_path)  # Clean SRT lines by removing descriptive text
+            srt_lines, removed_entry_count, mixed_cleaned_entry_count = remove_descriptive_subtitles(current_srt_path)  # Clean SRT lines by removing descriptive text
+            if removed_entry_count or mixed_cleaned_entry_count:  # Log concise cleanup summary when cleanup changed content
+                print(f"{BackgroundColors.YELLOW}SDH cleanup: {BackgroundColors.CYAN}{current_srt_path.name}{BackgroundColors.YELLOW} removed {BackgroundColors.CYAN}{removed_entry_count}{BackgroundColors.YELLOW} entries, cleaned {BackgroundColors.CYAN}{mixed_cleaned_entry_count}{BackgroundColors.YELLOW} mixed entries.{Style.RESET_ALL}")  # Log cleanup summary
 
         cleaned_blocks = parse_srt_blocks(srt_lines)  # Validate cleaned SRT structure
         if srt_lines and not cleaned_blocks:  # Reject malformed cleaned subtitles
