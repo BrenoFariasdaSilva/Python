@@ -61,13 +61,14 @@ import os  # For running a command in the terminal
 import platform  # For getting the operating system name
 import re  # For recognizing SDH subtitle cue wrappers
 import sys  # For system-specific parameters and functions
+import time  # For monotonic progress and ETA timing
 from colorama import Style  # For coloring the terminal
 from dotenv import load_dotenv  # For loading environment variables from .env file
 from lingua import LanguageDetectorBuilder  # For offline language detection before translation
 from Logger import Logger  # For logging output to both terminal and file
 from pathlib import Path  # For handling file paths
 from shutil import copyfile  # For copying files
-from typing import Dict, List, Tuple  # For typed account and subtitle structures
+from typing import Any, Dict, List, Tuple  # For typed account, progress, and subtitle structures
 
 
 # Macros:
@@ -557,7 +558,18 @@ def count_translatable_characters(lines: List[str]) -> int:
     :return: Total translatable character count.
     """
 
-    return sum(len("\n".join(text_lines)) for _, _, text_lines in parse_srt_blocks(lines))  # Match translation block counting
+    return sum(len(text_block) for text_block in build_translation_text_blocks(lines))  # Match translation block counting
+
+
+def build_translation_text_blocks(lines: List[str]) -> List[str]:
+    """
+    Builds exact text blocks sent to DeepL.
+
+    :param lines: Cleaned SRT lines.
+    :return: Text blocks sent to DeepL.
+    """
+
+    return ["\n".join(text_lines) for _, _, text_lines in parse_srt_blocks(lines)]  # Reuse parsed subtitle blocks
 
 
 def normalize_language_code(language_code: str) -> str:
@@ -712,25 +724,18 @@ def detect_cleaned_subtitle_language(lines: List[str], target_language_code: str
     return False, True, detected_label  # Conclusive non-target detection
 
 
-def remove_descriptive_subtitles(file_path) -> Tuple[List[str], int, int]:
+def clean_descriptive_subtitle_lines(lines: List[str]) -> Tuple[List[str], int, int]:
     """
-    Removes descriptive cues from parsed SRT subtitle entries.
-    Overwrites the original SRT file with cleaned lines.
-    These cleaned lines are used for translation.
+    Removes descriptive cues from SRT lines without writing files.
 
-    :param file_path: Path to the SRT file
+    :param lines: Source SRT lines.
     :return: Tuple containing cleaned lines, removed entry count, and mixed cleaned entry count.
     """
 
-    verbose_output(
-        f"{BackgroundColors.GREEN}Removing descriptive subtitles from: {BackgroundColors.CYAN}{file_path}{Style.RESET_ALL}"
-    )  # Verbose message
-
-    original_lines = read_srt(file_path)  # Read source SRT lines
-    blocks = parse_srt_blocks(original_lines)  # Parse source before cue removal
+    blocks = parse_srt_blocks(lines)  # Parse source before cue removal
 
     if not blocks:
-        return original_lines, 0, 0  # Preserve malformed input behavior
+        return lines, 0, 0  # Preserve malformed input behavior
 
     cleaned_blocks = []  # Store cleaned subtitle blocks
     removed_entry_count = 0  # Count blocks removed entirely by cleanup
@@ -748,14 +753,271 @@ def remove_descriptive_subtitles(file_path) -> Tuple[List[str], int, int]:
             removed_entry_count += 1  # Count removed SDH-only block
 
     cleaned_lines = serialize_srt_blocks(cleaned_blocks)  # Serialize cleaned SRT blocks
+    return cleaned_lines, removed_entry_count, mixed_cleaned_entry_count  # Return cleaned lines and cleanup counts
+
+
+def remove_descriptive_subtitles(file_path) -> Tuple[List[str], int, int]:
+    """
+    Removes descriptive cues from parsed SRT subtitle entries.
+    Overwrites the original SRT file with cleaned lines.
+    These cleaned lines are used for translation.
+
+    :param file_path: Path to the SRT file
+    :return: Tuple containing cleaned lines, removed entry count, and mixed cleaned entry count.
+    """
+
+    verbose_output(
+        f"{BackgroundColors.GREEN}Removing descriptive subtitles from: {BackgroundColors.CYAN}{file_path}{Style.RESET_ALL}"
+    )  # Verbose message
+
+    original_lines = read_srt(file_path)  # Read source SRT lines
+    cleaned_lines, removed_entry_count, mixed_cleaned_entry_count = clean_descriptive_subtitle_lines(original_lines)  # Clean without duplicating rules
     if cleaned_lines and not parse_srt_blocks(cleaned_lines):  # Validate serialized cleaned subtitles before replacing
         raise ValueError(f"Invalid SRT structure after SDH cleanup: {file_path}")  # Stop before source replacement
 
-    temp_file = Path(file_path).with_suffix(Path(file_path).suffix + ".tmp")  # Build same-folder temp file
-    temp_file.write_text("\n".join(cleaned_lines), encoding="utf-8")  # Write cleaned subtitles atomically
-    os.replace(temp_file, file_path)  # Replace source file after successful write
+    write_srt_lines_atomic(Path(file_path), cleaned_lines)  # Replace source file after successful write
 
     return cleaned_lines, removed_entry_count, mixed_cleaned_entry_count  # Return cleaned lines and cleanup counts
+
+
+def write_srt_lines_atomic(file_path: Path, lines: List[str]) -> None:
+    """
+    Writes SRT lines through a same-folder temporary file.
+
+    :param file_path: Destination SRT file.
+    :param lines: SRT lines to write.
+    :return: None
+    """
+
+    temp_file = Path(file_path).with_suffix(Path(file_path).suffix + ".tmp")  # Build same-folder temp file
+    temp_file.write_text("\n".join(lines), encoding="utf-8")  # Write cleaned subtitles atomically
+    os.replace(temp_file, file_path)  # Replace destination after successful write
+
+
+def is_interactive_output() -> bool:
+    """
+    Determines whether terminal output supports in-place progress updates.
+
+    :return: True when stdout is interactive, otherwise False.
+    """
+
+    return bool(getattr(logger, "is_tty", False))  # Reuse logger's original stdout TTY detection
+
+
+def format_duration(total_seconds: float) -> str:
+    """
+    Formats a duration for progress ETA and execution time.
+
+    :param total_seconds: Duration in seconds.
+    :return: Human-readable duration.
+    """
+
+    total_seconds = max(0, int(total_seconds))  # Avoid negative or fractional display noise
+    days, remainder = divmod(total_seconds, 86400)  # Split long durations into days and clock time
+    hours, remainder = divmod(remainder, 3600)  # Calculate hours
+    minutes, seconds = divmod(remainder, 60)  # Calculate minutes and seconds
+
+    if days:
+        return f"{days}d {hours:02d}:{minutes:02d}:{seconds:02d}"  # Include days for long runs
+
+    return f"{hours:02d}:{minutes:02d}:{seconds:02d}"  # Return clock-style duration
+
+
+def format_eta(done_characters: int, total_characters: int, start_time_monotonic: float) -> str:
+    """
+    Formats ETA from completed characters and monotonic elapsed time.
+
+    :param done_characters: Completed translated characters.
+    :param total_characters: Total planned characters.
+    :param start_time_monotonic: Monotonic start time.
+    :return: Formatted ETA text.
+    """
+
+    if done_characters <= 0 or total_characters <= done_characters:
+        return "calculating..." if done_characters <= 0 and total_characters > 0 else "00:00:00"  # Avoid fake early ETA
+
+    elapsed_seconds = time.monotonic() - start_time_monotonic  # Use monotonic elapsed time
+    if elapsed_seconds <= 0:
+        return "calculating..."  # Avoid division by zero
+
+    characters_per_second = done_characters / elapsed_seconds  # Average throughput smooths block-level jitter
+    if characters_per_second <= 0:
+        return "calculating..."  # Guard impossible rates
+
+    return format_duration((total_characters - done_characters) / characters_per_second)  # Return remaining duration
+
+
+def build_progress_bar(done_characters: int, total_characters: int, width: int = 20) -> str:
+    """
+    Builds a bounded text progress bar.
+
+    :param done_characters: Completed characters.
+    :param total_characters: Total characters.
+    :param width: Bar width.
+    :return: Text progress bar.
+    """
+
+    ratio = min(1.0, max(0.0, done_characters / total_characters)) if total_characters else 0.0  # Clamp ratio
+    filled = int(ratio * width)  # Calculate filled cells
+    return "#" * filled + "-" * (width - filled)  # Return bar text
+
+
+def render_translation_progress(progress_state: Dict[str, Any] | None, force: bool = False) -> None:
+    """
+    Renders current file and overall progress.
+
+    :param progress_state: Shared progress state.
+    :param force: True to force a snapshot.
+    :return: None
+    """
+
+    if not progress_state:
+        return  # No progress display requested
+
+    now = time.monotonic()  # Current monotonic time
+    interactive = progress_state["interactive"]  # Read output mode
+    if not interactive and not force and now - progress_state.get("last_snapshot_time", 0.0) < 5.0:
+        return  # Avoid one log line per tiny block in redirected output
+
+    file_total = progress_state["file_total_characters"]  # Current file total characters
+    file_done = min(progress_state["file_translated_characters"], file_total)  # Clamp file progress
+    overall_total = progress_state["overall_total_characters"]  # Overall total characters
+    overall_done = min(progress_state["overall_translated_characters"], overall_total)  # Clamp overall progress
+    file_percent = (file_done / file_total * 100) if file_total else 0.0  # Current file percent
+    overall_percent = (overall_done / overall_total * 100) if overall_total else 0.0  # Overall percent
+    file_eta = format_eta(file_done, file_total, progress_state["file_start_time"])  # Current file ETA
+    overall_eta = format_eta(overall_done, overall_total, progress_state["overall_start_time"])  # Overall ETA
+    file_line = f"File    [{build_progress_bar(file_done, file_total)}] {file_percent:5.1f}% | {file_done:,}/{file_total:,} chars | ETA {file_eta}"  # Build file progress line
+    overall_line = f"Overall [{build_progress_bar(overall_done, overall_total)}] {overall_percent:5.1f}% | {overall_done:,}/{overall_total:,} chars | Files {progress_state['completed_files']}/{progress_state['total_files']} | ETA {overall_eta}"  # Build overall progress line
+
+    if interactive:
+        stream = sys.__stdout__  # Write directly to terminal for in-place updates
+        if progress_state.get("progress_visible"):
+            stream.write("\033[F\033[K\033[F\033[K")  # Clear previous two progress lines
+        stream.write(f"{file_line}\n{overall_line}\n")  # Draw current progress lines
+        stream.flush()  # Flush terminal output
+        progress_state["progress_visible"] = True  # Mark progress as visible
+    else:
+        print(file_line)  # Plain snapshot for redirected output
+        print(overall_line)  # Plain snapshot for redirected output
+
+    progress_state["last_snapshot_time"] = now  # Store snapshot time
+
+
+def print_progress_event(progress_state: Dict[str, Any] | None, message: str) -> None:
+    """
+    Prints an event without corrupting active progress bars.
+
+    :param progress_state: Shared progress state.
+    :param message: Event message.
+    :return: None
+    """
+
+    if progress_state and progress_state.get("interactive") and progress_state.get("progress_visible"):
+        stream = sys.__stdout__  # Direct terminal stream
+        stream.write("\033[F\033[K\033[F\033[K")  # Clear active progress lines before standalone message
+        stream.flush()  # Flush clear sequence
+        progress_state["progress_visible"] = False  # Mark progress as hidden
+
+    print(message)  # Print event through logger
+
+    if progress_state:
+        render_translation_progress(progress_state, force=True)  # Redraw progress when translation continues
+
+
+def get_translated_output_file(current_srt_path: Path, input_dir: Path, output_dir: Path, use_configured_output: bool) -> Path:
+    """
+    Resolves translated output path using existing output rules.
+
+    :param current_srt_path: Source SRT path.
+    :param input_dir: Resolved input directory.
+    :param output_dir: Resolved configured output directory.
+    :param use_configured_output: Whether configured output layout applies.
+    :return: Resolved translated output file path.
+    """
+
+    if use_configured_output:
+        relative_path = current_srt_path.relative_to(input_dir).parent  # Extract relative path from input directory
+        output_subdir = output_dir / relative_path  # Build configured output subdirectory
+    else:
+        output_subdir = current_srt_path.parent  # External input writes beside source
+
+    return (output_subdir / f"{current_srt_path.stem}_ptBR.srt").resolve()  # Build target filename
+
+
+def is_generated_srt_file(srt_file: Path) -> bool:
+    """
+    Identifies generated subtitle outputs that must not be source candidates.
+
+    :param srt_file: SRT path.
+    :return: True when file is generated output, otherwise False.
+    """
+
+    lower_name = srt_file.name.lower()  # Normalize filename
+    return lower_name.endswith("_ptbr.srt") or lower_name.endswith(".cleaned.srt")  # Exclude project-generated SRTs
+
+
+def build_translation_plan(srt_files: List[Path], input_dir: Path, output_dir: Path, use_configured_output: bool) -> Tuple[List[Dict[str, Any]], Dict[str, int]]:
+    """
+    Builds the non-destructive translation plan.
+
+    :param srt_files: Discovered SRT files.
+    :param input_dir: Resolved input directory.
+    :param output_dir: Resolved output directory.
+    :param use_configured_output: Whether configured output layout applies.
+    :return: Tuple containing plan entries and summary counts.
+    """
+
+    plan = []  # Store pending translation work
+    summary = {"discovered": sum(1 for srt_file in srt_files if not is_generated_srt_file(srt_file)), "existing_skipped": 0, "target_language_skipped": 0, "empty_skipped": 0, "invalid": 0, "total_characters": 0}  # Store preflight counts
+
+    for srt_file in srt_files:  # Analyze each discovered SRT
+        current_srt_path = srt_file.resolve()  # Resolve source path
+        if is_generated_srt_file(current_srt_path):
+            continue  # Generated outputs are not source candidates
+
+        output_file = get_translated_output_file(current_srt_path, input_dir, output_dir, use_configured_output)  # Resolve expected output
+        if output_file == current_srt_path:
+            raise RuntimeError(f"Refusing to overwrite source subtitle: {current_srt_path}")  # Preserve safety check
+
+        try:
+            source_lines = read_srt(current_srt_path)  # Read source SRT
+            srt_lines = source_lines  # Default to source lines
+            removed_entry_count = 0  # Default cleanup counts
+            mixed_cleaned_entry_count = 0  # Default cleanup counts
+            if DESCRIPTIVE_SUBTITLES_REMOVAL:
+                srt_lines, removed_entry_count, mixed_cleaned_entry_count = clean_descriptive_subtitle_lines(source_lines)  # Plan cleanup without writing
+
+            cleaned_blocks = parse_srt_blocks(srt_lines)  # Validate cleaned SRT structure
+            if srt_lines and not cleaned_blocks:
+                summary["invalid"] += 1  # Count invalid preflight file
+                print(f"{BackgroundColors.RED}Invalid SRT structure after SDH cleanup: {BackgroundColors.CYAN}{current_srt_path}{Style.RESET_ALL}")  # Log invalid source
+                continue
+
+            translatable_character_count = count_translatable_characters(srt_lines)  # Count exact DeepL text blocks
+            if translatable_character_count == 0:
+                summary["empty_skipped"] += 1  # Empty after cleanup is not pending translation
+                print(f"{BackgroundColors.YELLOW}{current_srt_path.name} contains no translatable dialogue after SDH cleanup.{Style.RESET_ALL}")  # Log empty skip
+                continue
+
+            is_target_language, detection_conclusive, detected_language_label = detect_cleaned_subtitle_language(srt_lines, TARGET_LANG)  # Offline language detection
+            if is_target_language:
+                summary["target_language_skipped"] += 1  # Target-language source does not require DeepL
+                print(f"{BackgroundColors.YELLOW}Skipping translation: {BackgroundColors.CYAN}{current_srt_path.name}{BackgroundColors.YELLOW} is already in the target language ({BackgroundColors.CYAN}{get_language_display_name(normalize_language_code(TARGET_LANG))}{BackgroundColors.YELLOW}; detected {BackgroundColors.CYAN}{detected_language_label}{BackgroundColors.YELLOW}).{Style.RESET_ALL}")  # Log target skip
+                continue
+
+            if is_translated_output_complete(srt_lines, output_file):
+                summary["existing_skipped"] += 1  # Existing complete output does not need translation
+                print(f"{BackgroundColors.YELLOW}Skipping already complete translation: {BackgroundColors.CYAN}{output_file}{Style.RESET_ALL}")  # Log complete skip
+                continue
+
+            plan.append({"source_path": current_srt_path, "output_file": output_file, "lines": srt_lines, "characters": translatable_character_count, "removed_entries": removed_entry_count, "mixed_cleaned_entries": mixed_cleaned_entry_count, "detection_conclusive": detection_conclusive, "detected_language_label": detected_language_label})  # Add pending translation work
+            summary["total_characters"] += translatable_character_count  # Add only planned translation characters
+        except Exception as e:
+            summary["invalid"] += 1  # Count unreadable or invalid preflight file
+            print(f"{BackgroundColors.RED}Invalid preflight file: {BackgroundColors.CYAN}{current_srt_path}{BackgroundColors.RED} - {e}{Style.RESET_ALL}")  # Log preflight failure
+
+    return plan, summary  # Return plan and counts
 
 
 def get_remaining_characters(translator):
@@ -792,7 +1054,7 @@ def create_deepl_client(account_name: str, api_key: str) -> deepl.DeepLClient:
     return deepl.DeepLClient(auth_key=api_key)  # Create client without exposing the API key
 
 
-def translate_text_block(text_block: str, account_items: List[Tuple[str, str]], active_account_index: int, translators: Dict[str, deepl.DeepLClient]) -> Tuple[List[str], int]:
+def translate_text_block(text_block: str, account_items: List[Tuple[str, str]], active_account_index: int, translators: Dict[str, deepl.DeepLClient], progress_state: Dict[str, Any] | None = None) -> Tuple[List[str], int]:
     """
     Translates a block of text using the DeepL API, respecting remaining characters limit.
 
@@ -800,6 +1062,7 @@ def translate_text_block(text_block: str, account_items: List[Tuple[str, str]], 
     :param account_items: Ordered list of DeepL account names and API keys.
     :param active_account_index: Index for the currently active account.
     :param translators: DeepL clients already created for this execution.
+    :param progress_state: Optional shared progress state for clean event logging.
     :return: Tuple containing translated lines and active account index.
     """
 
@@ -821,22 +1084,18 @@ def translate_text_block(text_block: str, account_items: List[Tuple[str, str]], 
             remaining_chars = get_remaining_characters(translator)  # Read remaining characters
         except deepl.QuotaExceededException:
             quota_failed = True  # Count this verified quota failure once
-            print(
-                f"{BackgroundColors.YELLOW}DeepL account {BackgroundColors.CYAN}{account_name}{BackgroundColors.YELLOW} quota exhausted. Trying next account.{Style.RESET_ALL}"
-            )  # Log quota-only rotation
+            print_progress_event(progress_state, f"{BackgroundColors.YELLOW}DeepL account {BackgroundColors.CYAN}{account_name}{BackgroundColors.YELLOW} quota exhausted. Trying next account.{Style.RESET_ALL}")  # Log quota-only rotation
             remaining_chars = 0  # Keep variable defined after quota failure
 
         if not quota_failed and remaining_chars is not None and len(text_block) > remaining_chars:  # Detect insufficient allowance before translation
             quota_failed = True  # Count this verified quota failure once
-            print(
-                f"{BackgroundColors.YELLOW}DeepL account {BackgroundColors.CYAN}{account_name}{BackgroundColors.YELLOW} has insufficient quota for block size {BackgroundColors.CYAN}{len(text_block)}{BackgroundColors.YELLOW}. Trying next account.{Style.RESET_ALL}"
-            )  # Log quota-only account skip
+            print_progress_event(progress_state, f"{BackgroundColors.YELLOW}DeepL account {BackgroundColors.CYAN}{account_name}{BackgroundColors.YELLOW} has insufficient quota for block size {BackgroundColors.CYAN}{len(text_block)}{BackgroundColors.YELLOW}. Trying next account.{Style.RESET_ALL}")  # Log quota-only account skip
 
         if quota_failed:
             attempt_counts[account_name] += 1  # Count this account's quota attempt for the pending block
             total_quota_attempts += 1  # Count one verified quota attempt
             if all(attempt_count >= 1 for attempt_count in attempt_counts.values()) and not second_cycle_logged and total_quota_attempts < maximum_quota_attempts:
-                print(f"{BackgroundColors.YELLOW}All DeepL accounts were attempted once for the current block. Starting the second circular attempt.{Style.RESET_ALL}")  # Log second cycle
+                print_progress_event(progress_state, f"{BackgroundColors.YELLOW}All DeepL accounts were attempted once for the current block. Starting the second circular attempt.{Style.RESET_ALL}")  # Log second cycle
                 second_cycle_logged = True  # Avoid duplicate second-cycle log
             if total_quota_attempts >= maximum_quota_attempts:
                 break  # Stop after two quota attempts per account
@@ -845,11 +1104,9 @@ def translate_text_block(text_block: str, account_items: List[Tuple[str, str]], 
             active_account_index = (active_account_index + 1) % len(account_items)  # Advance circularly to next account
             next_account_name = account_items[active_account_index][0]  # Read next account name for logging
             if len(account_items) == 1:
-                print(f"{BackgroundColors.YELLOW}Retrying DeepL account {BackgroundColors.CYAN}{next_account_name}{BackgroundColors.YELLOW} for the second quota attempt.{Style.RESET_ALL}")  # Log single-account retry
+                print_progress_event(progress_state, f"{BackgroundColors.YELLOW}Retrying DeepL account {BackgroundColors.CYAN}{next_account_name}{BackgroundColors.YELLOW} for the second quota attempt.{Style.RESET_ALL}")  # Log single-account retry
             elif previous_account_name != next_account_name:
-                print(
-                    f"{BackgroundColors.YELLOW}Switching DeepL account from {BackgroundColors.CYAN}{previous_account_name}{BackgroundColors.YELLOW} to {BackgroundColors.CYAN}{next_account_name}{Style.RESET_ALL}"
-                )  # Log circular account switch
+                print_progress_event(progress_state, f"{BackgroundColors.YELLOW}Switching DeepL account from {BackgroundColors.CYAN}{previous_account_name}{BackgroundColors.YELLOW} to {BackgroundColors.CYAN}{next_account_name}{Style.RESET_ALL}")  # Log circular account switch
             continue  # Retry exact same untranslated block with next account
 
         try:  # Perform translation
@@ -861,11 +1118,9 @@ def translate_text_block(text_block: str, account_items: List[Tuple[str, str]], 
         except deepl.QuotaExceededException:
             attempt_counts[account_name] += 1  # Count this verified quota failure once
             total_quota_attempts += 1  # Count one verified quota attempt
-            print(
-                f"{BackgroundColors.YELLOW}DeepL account {BackgroundColors.CYAN}{account_name}{BackgroundColors.YELLOW} quota exhausted. Trying next account.{Style.RESET_ALL}"
-            )  # Log quota-only rotation
+            print_progress_event(progress_state, f"{BackgroundColors.YELLOW}DeepL account {BackgroundColors.CYAN}{account_name}{BackgroundColors.YELLOW} quota exhausted. Trying next account.{Style.RESET_ALL}")  # Log quota-only rotation
             if all(attempt_count >= 1 for attempt_count in attempt_counts.values()) and not second_cycle_logged and total_quota_attempts < maximum_quota_attempts:
-                print(f"{BackgroundColors.YELLOW}All DeepL accounts were attempted once for the current block. Starting the second circular attempt.{Style.RESET_ALL}")  # Log second cycle
+                print_progress_event(progress_state, f"{BackgroundColors.YELLOW}All DeepL accounts were attempted once for the current block. Starting the second circular attempt.{Style.RESET_ALL}")  # Log second cycle
                 second_cycle_logged = True  # Avoid duplicate second-cycle log
             if total_quota_attempts >= maximum_quota_attempts:
                 break  # Stop after two quota attempts per account
@@ -874,21 +1129,19 @@ def translate_text_block(text_block: str, account_items: List[Tuple[str, str]], 
             active_account_index = (active_account_index + 1) % len(account_items)  # Advance circularly to next account
             next_account_name = account_items[active_account_index][0]  # Read next account name for logging
             if len(account_items) == 1:
-                print(f"{BackgroundColors.YELLOW}Retrying DeepL account {BackgroundColors.CYAN}{next_account_name}{BackgroundColors.YELLOW} for the second quota attempt.{Style.RESET_ALL}")  # Log single-account retry
+                print_progress_event(progress_state, f"{BackgroundColors.YELLOW}Retrying DeepL account {BackgroundColors.CYAN}{next_account_name}{BackgroundColors.YELLOW} for the second quota attempt.{Style.RESET_ALL}")  # Log single-account retry
             elif previous_account_name != next_account_name:
-                print(
-                    f"{BackgroundColors.YELLOW}Switching DeepL account from {BackgroundColors.CYAN}{previous_account_name}{BackgroundColors.YELLOW} to {BackgroundColors.CYAN}{next_account_name}{Style.RESET_ALL}"
-                )  # Log circular account switch
+                print_progress_event(progress_state, f"{BackgroundColors.YELLOW}Switching DeepL account from {BackgroundColors.CYAN}{previous_account_name}{BackgroundColors.YELLOW} to {BackgroundColors.CYAN}{next_account_name}{Style.RESET_ALL}")  # Log circular account switch
             continue  # Continue with next account
         except Exception as e:  # Handle any non-quota translation error
-            print(f"{BackgroundColors.RED}Translation failed: {e}. Returning original lines.{Style.RESET_ALL}")
+            print_progress_event(progress_state, f"{BackgroundColors.RED}Translation failed: {e}. Returning original lines.{Style.RESET_ALL}")
             return text_block.split("\n"), active_account_index  # Return original lines on failure
 
     attempted_accounts = ", ".join(account_name for account_name, _ in account_items)  # Build safe account-name summary
     raise RuntimeError(f"All configured DeepL accounts were attempted at least twice and none has sufficient quota for pending block size {len(text_block)}. Accounts attempted: {attempted_accounts}")
 
 
-def translate_srt_lines(srt_file, lines, translatable_character_count: int, account_items: List[Tuple[str, str]], active_account_index: int, translators: Dict[str, deepl.DeepLClient]) -> Tuple[List[str], int]:
+def translate_srt_lines(srt_file, lines, translatable_character_count: int, account_items: List[Tuple[str, str]], active_account_index: int, translators: Dict[str, deepl.DeepLClient], progress_state: Dict[str, Any] | None = None) -> Tuple[List[str], int]:
     """
     Translates lines from an SRT file using DeepL API, keeping timing and index lines unchanged.
 
@@ -898,6 +1151,7 @@ def translate_srt_lines(srt_file, lines, translatable_character_count: int, acco
     :param account_items: Ordered list of DeepL account names and API keys.
     :param active_account_index: Process-wide active account index.
     :param translators: DeepL clients reused across files.
+    :param progress_state: Optional shared progress state.
     :return: Tuple containing translated lines and active account index.
     """
 
@@ -909,10 +1163,7 @@ def translate_srt_lines(srt_file, lines, translatable_character_count: int, acco
     buffer = []  # Initialize empty buffer for batching subtitle text lines
     translated_character_count = 0  # Track completed translation workload
 
-    total_lines = len(lines)  # Store total line count for progress percentage calculation
-    current_line = 0  # Initialize line counter for progress tracking
     filename = getattr(srt_file, "name", str(srt_file))  # Extract filename string for progress display
-    real_stderr = sys.__stderr__ if sys.__stderr__ is not None else open(os.devnull, "w")  # Resolve original stderr to a non-None stream for in-place progress output
 
     for line in lines:  # Iterate through each line in the SRT file
         stripped = line.strip()  # Remove leading and trailing whitespace from the current line
@@ -923,7 +1174,7 @@ def translate_srt_lines(srt_file, lines, translatable_character_count: int, acco
             if buffer:  # Verify if the translation buffer contains pending text lines
                 text_block = "\n".join(buffer)  # Build exact text block for DeepL
                 try:
-                    translated, active_account_index = translate_text_block(text_block, account_items, active_account_index, translators)  # Translate buffered text lines as one block
+                    translated, active_account_index = translate_text_block(text_block, account_items, active_account_index, translators, progress_state)  # Translate buffered text lines as one block
                 except RuntimeError as e:
                     remaining_characters = translatable_character_count - translated_character_count  # Count untranslated workload
                     raise RuntimeError(f"Error: {e}. File: {filename}. Remaining: {remaining_characters:,} characters.") from None
@@ -931,22 +1182,19 @@ def translate_srt_lines(srt_file, lines, translatable_character_count: int, acco
                     translated = buffer  # Fall back to the original buffer lines on failed translation
                 translated_lines.extend(translated)  # Append translated lines to the result list
                 translated_character_count += len(text_block)  # Count block after successful translation path
+                if progress_state:
+                    progress_state["file_translated_characters"] += len(text_block)  # Advance current-file progress after success
+                    progress_state["overall_translated_characters"] += len(text_block)  # Advance overall progress after success
+                    render_translation_progress(progress_state)  # Redraw progress after successful block
                 buffer = []  # Reset buffer after processing the current block
             translated_lines.append(line.rstrip("\n"))  # Append the timing or index line to result unchanged
         else:  # Handle regular subtitle text lines
             buffer.append(stripped)  # Append the stripped text line to the translation buffer
 
-        current_line += 1  # Increment the processed line counter
-        percent = int(current_line / total_lines * 100) if total_lines > 0 else 0  # Calculate progress as an integer percentage
-        filled = percent // 10  # Calculate the number of filled segments in the progress bar
-        bar = "#" * filled + "-" * (10 - filled)  # Build the visual progress bar string with filled and empty segments
-        real_stderr.write(f"\r{BackgroundColors.GREEN}Processing: {BackgroundColors.CYAN}{filename}{BackgroundColors.GREEN} ({translatable_character_count:,} characters) [{bar}] {percent}%{Style.RESET_ALL}   ")  # Overwrite current terminal line with updated progress
-        real_stderr.flush()  # Flush original stderr to force immediate display of progress
-
     if buffer:  # Verify if the buffer still contains unprocessed text lines after the loop
         text_block = "\n".join(buffer)  # Build exact final text block for DeepL
         try:
-            translated, active_account_index = translate_text_block(text_block, account_items, active_account_index, translators)  # Translate the remaining buffered text lines
+            translated, active_account_index = translate_text_block(text_block, account_items, active_account_index, translators, progress_state)  # Translate the remaining buffered text lines
         except RuntimeError as e:
             remaining_characters = translatable_character_count - translated_character_count  # Count untranslated workload
             raise RuntimeError(f"Error: {e}. File: {filename}. Remaining: {remaining_characters:,} characters.") from None
@@ -954,9 +1202,10 @@ def translate_srt_lines(srt_file, lines, translatable_character_count: int, acco
             translated = buffer  # Fall back to the original buffer lines on failed translation
         translated_lines.extend(translated)  # Append the remaining translated lines to the result list
         translated_character_count += len(text_block)  # Count final block after successful translation path
-
-    real_stderr.write("\n")  # Advance the terminal cursor to a new line after progress finishes
-    real_stderr.flush()  # Flush original stderr to finalize the progress output
+        if progress_state:
+            progress_state["file_translated_characters"] += len(text_block)  # Advance current-file progress after final success
+            progress_state["overall_translated_characters"] += len(text_block)  # Advance overall progress after final success
+            render_translation_progress(progress_state)  # Redraw progress after successful block
 
     return translated_lines, active_account_index  # Return translated lines and preserved active account index
 
@@ -1016,7 +1265,7 @@ def save_srt(lines, output_file, success_message: str = "Translated SRT saved as
         f.write("\n".join(lines))  # Write translated lines to the file
 
     print(
-        f"{BackgroundColors.GREEN}{success_message}: {BackgroundColors.CYAN}{output_file}{Style.RESET_ALL}"
+        f"{BackgroundColors.GREEN}{success_message}:{Style.RESET_ALL}\n{BackgroundColors.CYAN}{output_file}{Style.RESET_ALL}"
     )  # Output the saved file message
 
 
@@ -1030,11 +1279,7 @@ def calculate_execution_time(start_time, finish_time):
     """
 
     delta = finish_time - start_time  # Calculate the time difference
-
-    hours, remainder = divmod(delta.seconds, 3600)  # Calculate the hours, minutes and seconds
-    minutes, seconds = divmod(remainder, 60)  # Calculate the minutes and seconds
-
-    return f"{hours:02d}:{minutes:02d}:{seconds:02d}"  # Format the execution time
+    return format_duration(delta.total_seconds())  # Format the execution time
 
 
 def play_sound():
@@ -1081,11 +1326,6 @@ def main():
 
     ensure_env_file()  # Ensure .env file exists
 
-    api_keys_loaded = False  # Load DeepL API keys only for files that require translation
-    account_items = []  # Process-wide ordered DeepL account collection
-    active_account_index = 0  # Process-wide active account index
-    translators = {}  # Process-wide DeepL clients reused across files
-
     input_dir = resolve_from_script_dir(INPUT_DIR)  # Resolve configured input from script location
     output_dir = resolve_from_script_dir(OUTPUT_DIR)  # Resolve configured output from script location
     use_configured_output = is_path_inside(input_dir, SCRIPT_DIR)  # Internal inputs keep configured output layout
@@ -1095,84 +1335,85 @@ def main():
         print(f"Input directory does not exist: {input_dir}")  # Output the error message
         return  # Exit the program
 
-    if use_configured_output and not output_dir.exists():  # If configured output is needed and missing
-        output_dir.mkdir(parents=True, exist_ok=True)  # Create the output directory
-
     srt_files = [f for f in input_dir.rglob("*.srt") if f.is_file()]  # List of SRT file paths (includes subdirectories)
 
     if not srt_files:  # If no SRT files were found
         print(f"No .srt files found in directory: {input_dir}")  # Output message
         return  # Exit the program
 
-    for srt_file in srt_files:  # Iterate through each SRT file in the input directory
-        current_srt_path = srt_file.resolve()  # Resolve the current source SRT safely
-        srt_lines = read_srt(current_srt_path)  # Read SRT file into a list of lines
+    translation_plan, preflight_summary = build_translation_plan(srt_files, input_dir, output_dir, use_configured_output)  # Build non-destructive plan before DeepL
+    planned_files = len(translation_plan)  # Count pending files
+    total_planned_characters = preflight_summary["total_characters"]  # Count pending characters only
+    skipped_files = preflight_summary["existing_skipped"] + preflight_summary["target_language_skipped"] + preflight_summary["empty_skipped"]  # Count non-pending source files
+    print(f"{BackgroundColors.GREEN}Translation plan: {BackgroundColors.CYAN}{planned_files}{BackgroundColors.GREEN} files | {BackgroundColors.CYAN}{total_planned_characters:,}{BackgroundColors.GREEN} characters | {BackgroundColors.CYAN}{preflight_summary['existing_skipped']}{BackgroundColors.GREEN} existing translations skipped | {BackgroundColors.CYAN}{preflight_summary['invalid']}{BackgroundColors.GREEN} invalid files{Style.RESET_ALL}")  # Print preflight summary
 
-        if DESCRIPTIVE_SUBTITLES_REMOVAL:  # Verify if descriptive subtitle removal is enabled
-            srt_lines, removed_entry_count, mixed_cleaned_entry_count = remove_descriptive_subtitles(current_srt_path)  # Clean SRT lines by removing descriptive text
-            if removed_entry_count or mixed_cleaned_entry_count:  # Log concise cleanup summary when cleanup changed content
-                print(f"{BackgroundColors.YELLOW}SDH cleanup: {BackgroundColors.CYAN}{current_srt_path.name}{BackgroundColors.YELLOW} removed {BackgroundColors.CYAN}{removed_entry_count}{BackgroundColors.YELLOW} entries, cleaned {BackgroundColors.CYAN}{mixed_cleaned_entry_count}{BackgroundColors.YELLOW} mixed entries.{Style.RESET_ALL}")  # Log cleanup summary
+    translated_files = 0  # Count files translated in this run
+    failed_files = 0  # Count failed planned files
+    translated_characters = 0  # Count successfully translated characters
 
-        cleaned_blocks = parse_srt_blocks(srt_lines)  # Validate cleaned SRT structure
-        if srt_lines and not cleaned_blocks:  # Reject malformed cleaned subtitles
-            print(f"{BackgroundColors.RED}Invalid SRT structure after SDH cleanup: {BackgroundColors.CYAN}{current_srt_path}{Style.RESET_ALL}")  # Log invalid cleaned file
-            continue  # Continue with next SRT file
+    if not translation_plan:
+        print(f"{BackgroundColors.YELLOW}No files require translation. Valid target-language outputs already exist or source files were skipped.{Style.RESET_ALL}")  # Print no-op summary
+    else:
+        if use_configured_output and not output_dir.exists():  # If configured output is needed and missing
+            output_dir.mkdir(parents=True, exist_ok=True)  # Create output directory only when work exists
 
-        translatable_character_count = count_translatable_characters(srt_lines)  # Count only cleaned subtitle text sent to DeepL
-        filename = getattr(current_srt_path, "name", str(current_srt_path))  # Extract filename string for processing display
-        print(f"{BackgroundColors.GREEN}Processing: {BackgroundColors.CYAN}{filename}{BackgroundColors.GREEN} ({translatable_character_count:,} characters){Style.RESET_ALL}")  # Log cleaned workload
-
-        if use_configured_output:  # Internal configured input keeps project output organization
-            relative_path = current_srt_path.relative_to(input_dir).parent  # Extract relative path from the input directory
-            output_subdir = output_dir / relative_path  # Build the output subdirectory path
-        else:  # External input writes each translation beside its source file
-            output_subdir = current_srt_path.parent  # Use current source SRT directory independently
-
-        output_subdir.mkdir(parents=True, exist_ok=True)  # Ensure the output subdirectory exists
-
-        output_file = (output_subdir / f"{current_srt_path.stem}_ptBR.srt").resolve()  # Build the output file path with ptBR suffix
-        if output_file == current_srt_path:  # Never overwrite the source SRT
-            raise RuntimeError(f"Refusing to overwrite source subtitle: {current_srt_path}")
-
-        if translatable_character_count == 0:  # Avoid DeepL calls when cleanup removed every translatable line
-            print(f"{BackgroundColors.YELLOW}{filename} contains no translatable dialogue after SDH cleanup.{Style.RESET_ALL}")  # Log empty cleaned file
-            continue  # Continue with next SRT file
-
-        is_target_language, detection_conclusive, detected_language_label = detect_cleaned_subtitle_language(srt_lines, TARGET_LANG)  # Detect language from cleaned dialogue only
-        if is_target_language:  # Skip DeepL when cleaned subtitle is already in target language
-            print(f"{BackgroundColors.YELLOW}Skipping translation: {BackgroundColors.CYAN}{filename}{BackgroundColors.YELLOW} is already in the target language ({BackgroundColors.CYAN}{get_language_display_name(normalize_language_code(TARGET_LANG))}{BackgroundColors.YELLOW}; detected {BackgroundColors.CYAN}{detected_language_label}{BackgroundColors.YELLOW}).{Style.RESET_ALL}")  # Log target-language skip
-            if is_translated_output_complete(srt_lines, output_file):  # Preserve complete-output skip behavior
-                print(f"{BackgroundColors.YELLOW}Skipping already complete translation: {BackgroundColors.CYAN}{output_file}{Style.RESET_ALL}")  # Log complete-file skip
-            else:
-                save_srt(srt_lines, output_file, "Cleaned target-language SRT saved as")  # Save cleaned target-language output safely
-            continue  # Continue with next SRT file
-
-        if not detection_conclusive:  # Continue normally when language detection is not reliable
-            print(f"{BackgroundColors.YELLOW}Language detection was inconclusive for {BackgroundColors.CYAN}{filename}{BackgroundColors.YELLOW}. Continuing with translation.{Style.RESET_ALL}")  # Log inconclusive detection
-
-        if is_translated_output_complete(srt_lines, output_file):  # Require parseable matching output before skipping
-            print(f"{BackgroundColors.YELLOW}Skipping already complete translation: {BackgroundColors.CYAN}{output_file}{Style.RESET_ALL}")  # Log complete-file skip
-            continue  # Continue with next SRT file
-
-        if not api_keys_loaded and not get_api_keys():  # Load .env and get DeepL API keys only before translation
+        if not get_api_keys():  # Load DeepL API keys only after pending work exists
             print(
                 f"{BackgroundColors.RED}DEEPL_API_KEYS not found or invalid in .env file. Please set it before running the program.{Style.RESET_ALL}"
             )  # Output error message
             return  # Exit the program
 
-        api_keys_loaded = True  # Mark DeepL API keys as available for subsequent translation files
-        if not account_items:
-            account_items = list(DEEPL_API_KEYS.items())  # Preserve configured account order across files
+        account_items = list(DEEPL_API_KEYS.items())  # Preserve configured account order across files
+        active_account_index = 0  # Process-wide active account index
+        translators = {}  # Process-wide DeepL clients reused across files
+        progress_state = {"interactive": is_interactive_output(), "overall_total_characters": total_planned_characters, "overall_translated_characters": 0, "overall_start_time": time.monotonic(), "total_files": planned_files, "completed_files": 0, "progress_visible": False, "last_snapshot_time": 0.0}  # Shared progress state
 
-        try:
-            translated_lines, active_account_index = translate_srt_lines(current_srt_path, srt_lines, translatable_character_count, account_items, active_account_index, translators)  # Translate SRT lines using DeepL API
-        except RuntimeError as e:
-            print(f"{BackgroundColors.RED}{e}{Style.RESET_ALL}")  # Log fatal quota exhaustion
-            return  # Stop without saving an incomplete output
+        for file_number, planned_file in enumerate(translation_plan, start=1):  # Translate each planned file
+            current_srt_path = planned_file["source_path"]  # Source path
+            output_file = planned_file["output_file"]  # Output path
+            srt_lines = planned_file["lines"]  # Planned cleaned lines
+            translatable_character_count = planned_file["characters"]  # Planned exact character count
+            filename = current_srt_path.name  # Display filename
 
-        save_srt(translated_lines, output_file)  # Save the translated SRT to the output file
+            if planned_file["removed_entries"] or planned_file["mixed_cleaned_entries"]:  # Log concise cleanup summary when cleanup changed content
+                write_srt_lines_atomic(current_srt_path, srt_lines)  # Preserve existing source cleanup behavior after preflight
+                print(f"{BackgroundColors.YELLOW}SDH cleanup: {BackgroundColors.CYAN}{filename}{BackgroundColors.YELLOW} removed {BackgroundColors.CYAN}{planned_file['removed_entries']}{BackgroundColors.YELLOW} entries, cleaned {BackgroundColors.CYAN}{planned_file['mixed_cleaned_entries']}{BackgroundColors.YELLOW} mixed entries.{Style.RESET_ALL}")  # Log cleanup summary
+
+            if not planned_file["detection_conclusive"]:  # Continue normally when language detection is not reliable
+                print(f"{BackgroundColors.YELLOW}Language detection was inconclusive for {BackgroundColors.CYAN}{filename}{BackgroundColors.YELLOW}. Continuing with translation.{Style.RESET_ALL}")  # Log inconclusive detection
+
+            output_file.parent.mkdir(parents=True, exist_ok=True)  # Ensure output directory exists for this file
+            progress_state.update({"file_total_characters": translatable_character_count, "file_translated_characters": 0, "file_start_time": time.monotonic(), "progress_visible": False, "last_snapshot_time": 0.0})  # Reset file progress only
+            print(f"\n{BackgroundColors.GREEN}File {BackgroundColors.CYAN}{file_number}/{planned_files}{BackgroundColors.GREEN}: {BackgroundColors.CYAN}{filename}{Style.RESET_ALL}")  # Print compact file header once
+            print(f"{BackgroundColors.GREEN}Characters: {BackgroundColors.CYAN}{translatable_character_count:,}{Style.RESET_ALL}")  # Print character total once
+            render_translation_progress(progress_state, force=True)  # Render 0% progress
+
+            try:
+                translated_lines, active_account_index = translate_srt_lines(current_srt_path, srt_lines, translatable_character_count, account_items, active_account_index, translators, progress_state)  # Translate SRT lines using DeepL API
+            except RuntimeError as e:
+                failed_files += 1  # Count failed planned file
+                translated_characters = progress_state["overall_translated_characters"]  # Preserve partial successful character progress
+                print_progress_event(progress_state, f"{BackgroundColors.RED}{e}{Style.RESET_ALL}")  # Log fatal quota exhaustion cleanly
+                break  # Preserve existing stop-on-fatal-quota behavior
+
+            progress_state["completed_files"] += 1  # Count fully translated file
+            translated_files += 1  # Count successful file
+            translated_characters = progress_state["overall_translated_characters"]  # Store successful character progress
+            render_translation_progress(progress_state, force=True)  # Finalize successful file progress
+            save_srt(translated_lines, output_file)  # Save the translated SRT to the output file
 
     finish_time = datetime.datetime.now()  # Get the finish time of the program
+    print(
+        f"\n{BackgroundColors.GREEN}Translation completed.{Style.RESET_ALL}\n\n"
+        f"{BackgroundColors.GREEN}Files discovered: {BackgroundColors.CYAN}{preflight_summary['discovered']}{Style.RESET_ALL}\n"
+        f"{BackgroundColors.GREEN}Files planned: {BackgroundColors.CYAN}{planned_files}{Style.RESET_ALL}\n"
+        f"{BackgroundColors.GREEN}Files translated: {BackgroundColors.CYAN}{translated_files}{Style.RESET_ALL}\n"
+        f"{BackgroundColors.GREEN}Existing translations skipped: {BackgroundColors.CYAN}{preflight_summary['existing_skipped']}{Style.RESET_ALL}\n"
+        f"{BackgroundColors.GREEN}Other files skipped: {BackgroundColors.CYAN}{skipped_files - preflight_summary['existing_skipped']}{Style.RESET_ALL}\n"
+        f"{BackgroundColors.GREEN}Invalid files: {BackgroundColors.CYAN}{preflight_summary['invalid']}{Style.RESET_ALL}\n"
+        f"{BackgroundColors.GREEN}Files failed: {BackgroundColors.CYAN}{failed_files}{Style.RESET_ALL}\n"
+        f"{BackgroundColors.GREEN}Characters translated: {BackgroundColors.CYAN}{translated_characters:,}/{total_planned_characters:,}{Style.RESET_ALL}"
+    )  # Output concise translation summary
     print(
         f"{BackgroundColors.GREEN}Start time: {BackgroundColors.CYAN}{start_time.strftime('%d/%m/%Y - %H:%M:%S')}\n{BackgroundColors.GREEN}Finish time: {BackgroundColors.CYAN}{finish_time.strftime('%d/%m/%Y - %H:%M:%S')}\n{BackgroundColors.GREEN}Execution time: {BackgroundColors.CYAN}{calculate_execution_time(start_time, finish_time)}{Style.RESET_ALL}"
     )  # Output start, finish, and execution times
