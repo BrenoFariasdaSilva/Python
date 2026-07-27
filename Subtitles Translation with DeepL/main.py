@@ -58,6 +58,7 @@ import deepl  # For DeepL API
 import json  # For parsing DeepL API accounts from environment variables
 import os  # For running a command in the terminal
 import platform  # For getting the operating system name
+import re  # For recognizing SDH subtitle cue wrappers
 import sys  # For system-specific parameters and functions
 from colorama import Style  # For coloring the terminal
 from dotenv import load_dotenv  # For loading environment variables from .env file
@@ -380,9 +381,136 @@ def read_srt(file_path):
         return f.readlines()  # Read all lines and return as a list
 
 
+def parse_srt_blocks(lines: List[str]) -> List[Tuple[str, str, List[str]]]:
+    """
+    Parses SRT lines into index, timing, and text-line blocks.
+
+    :param lines: SRT lines to parse.
+    :return: List of parsed SRT blocks.
+    """
+
+    blocks = []  # Store parsed subtitle blocks
+    block = []  # Store current subtitle block
+
+    for line in lines + [""]:  # Add sentinel blank line to flush final block
+        stripped = line.strip()  # Normalize current line
+        if stripped:
+            block.append(stripped)  # Add non-empty line to current block
+            continue
+
+        if not block:
+            continue
+
+        if len(block) < 3 or not block[0].isdigit() or "-->" not in block[1]:  # Reject malformed SRT block
+            return []  # Return empty result for malformed subtitles
+
+        text_lines = [text_line.strip() for text_line in block[2:] if text_line.strip()]  # Normalize translatable text lines
+        if not text_lines:
+            return []  # Return empty result for blocks without text
+
+        blocks.append((block[0], block[1], text_lines))  # Store parsed block
+        block = []  # Reset current subtitle block
+
+    return blocks  # Return parsed subtitle blocks
+
+
+def strip_html_tags(text: str) -> str:
+    """
+    Removes simple HTML tags from text for cue classification.
+
+    :param text: Text that may contain HTML tags.
+    :return: Text without HTML tags.
+    """
+
+    return re.sub(r"<[^>]+>", "", text)  # Remove simple inline HTML tags
+
+
+def is_descriptive_cue(text: str) -> bool:
+    """
+    Determines whether text is only an SDH or descriptive cue.
+
+    :param text: Subtitle text to classify.
+    :return: True if text is only descriptive, otherwise False.
+    """
+
+    normalized = strip_html_tags(text).strip()  # Remove tags before classification
+    normalized = normalized.strip("[](){}").strip()  # Remove cue wrappers
+    normalized = normalized.strip("♪♫♬♩?!.- ").strip()  # Remove cue punctuation and music symbols
+    cue_text = normalized.lower()  # Normalize cue text
+
+    if not cue_text:
+        return True  # Empty cue text is non-dialogue
+
+    descriptive_words = (
+        "applause", "audience", "beeping", "bell", "breathing", "cheering", "chuckles", "coughing",
+        "crying", "door", "footsteps", "groaning", "indistinctly", "laugh", "laughing", "laughs",
+        "music", "phone", "ringing", "sighs", "singing", "speaking indistinctly", "thunder", "whispers",
+    )  # Conservative SDH cue vocabulary
+
+    return any(word in cue_text for word in descriptive_words)  # Match known non-dialogue cues
+
+
+def clean_subtitle_text_line(text_line: str) -> str:
+    """
+    Removes isolated SDH cues from one subtitle text line.
+
+    :param text_line: Subtitle text line to clean.
+    :return: Cleaned subtitle text line.
+    """
+
+    stripped = text_line.strip()  # Normalize current text line
+    tagless = strip_html_tags(stripped).strip()  # Remove tags for line-level classification
+
+    if (
+        (tagless.startswith("[") and tagless.endswith("]"))
+        or (tagless.startswith("(") and tagless.endswith(")"))
+        or (tagless.startswith("♪") and tagless.endswith("♪"))
+        or (tagless.startswith("?") and tagless.endswith("?"))
+    ) and is_descriptive_cue(tagless):
+        return ""  # Drop whole-line descriptive cue
+
+    cleaned = re.sub(
+        r"(\[[^\]]+\]|\([^)]+\)|♪[^♪]+♪)",
+        lambda match: "" if is_descriptive_cue(match.group(0)) else match.group(0),
+        stripped,
+    )  # Remove inline descriptive cue spans only
+    cleaned = re.sub(r"<([^>\s]+)[^>]*>\s*</\1>", "", cleaned)  # Remove empty HTML tags left by cue removal
+
+    return " ".join(cleaned.split())  # Normalize spacing after cue removal
+
+
+def serialize_srt_blocks(blocks: List[Tuple[str, str, List[str]]]) -> List[str]:
+    """
+    Serializes parsed SRT blocks back into lines.
+
+    :param blocks: Parsed subtitle blocks.
+    :return: Serialized SRT lines.
+    """
+
+    lines = []  # Store serialized lines
+
+    for index, timing, text_lines in blocks:  # Serialize each subtitle block
+        lines.extend([index, timing])  # Add index and timing lines
+        lines.extend(text_lines)  # Add subtitle text lines
+        lines.append("")  # Add SRT block separator
+
+    return lines  # Return serialized SRT lines
+
+
+def count_translatable_characters(lines: List[str]) -> int:
+    """
+    Counts characters that will be sent to DeepL.
+
+    :param lines: Cleaned SRT lines.
+    :return: Total translatable character count.
+    """
+
+    return sum(len("\n".join(text_lines)) for _, _, text_lines in parse_srt_blocks(lines))  # Match translation block counting
+
+
 def remove_descriptive_subtitles(file_path):
     """
-    Removes descriptive lines from the SRT file, such as text within brackets or parentheses.
+    Removes descriptive cues from parsed SRT subtitle entries.
     Overwrites the original SRT file with cleaned lines.
     These cleaned lines are used for translation.
 
@@ -394,27 +522,24 @@ def remove_descriptive_subtitles(file_path):
         f"{BackgroundColors.GREEN}Removing descriptive subtitles from: {BackgroundColors.CYAN}{file_path}{Style.RESET_ALL}"
     )  # Verbose message
 
-    cleaned_lines = []  # Store cleaned lines
+    original_lines = read_srt(file_path)  # Read source SRT lines
+    blocks = parse_srt_blocks(original_lines)  # Parse source before cue removal
 
-    with open(file_path, "r", encoding="utf-8") as f:  # Open SRT for reading
-        for line in f:  # Iterate through each line
-            stripped = line.strip()  # Remove leading/trailing whitespace
+    if not blocks:
+        return original_lines  # Preserve malformed input behavior
 
-            if (
-                stripped == "" or stripped.replace(":", "").replace(",", "").isdigit() or "-->" in line
-            ):  # If line is empty, timing, or index
-                cleaned_lines.append(line.rstrip("\n"))  # Keep timing/index/empty lines as is
-                continue  # Skip further checks
+    cleaned_blocks = []  # Store cleaned subtitle blocks
 
-            if stripped.startswith("[") and stripped.endswith("]"):  # If line is descriptive (in brackets)
-                continue  # Skip descriptive lines
-            if stripped.startswith("(") and stripped.endswith(")"):  # If line is descriptive (in parentheses)
-                continue  # Skip descriptive lines
+    for index, timing, text_lines in blocks:  # Clean each parsed subtitle block
+        cleaned_text_lines = [clean_subtitle_text_line(text_line) for text_line in text_lines]  # Remove SDH cue spans
+        cleaned_text_lines = [text_line for text_line in cleaned_text_lines if text_line]  # Drop empty cleaned lines
+        if cleaned_text_lines:
+            cleaned_blocks.append((index, timing, cleaned_text_lines))  # Keep blocks with dialogue
 
-            cleaned_lines.append(stripped)  # Keep normal text lines
-
-    with open(file_path, "w", encoding="utf-8") as f:  # Open SRT for writing
-        f.write("\n".join(cleaned_lines))  # Overwrite SRT with cleaned lines
+    cleaned_lines = serialize_srt_blocks(cleaned_blocks)  # Serialize cleaned SRT blocks
+    temp_file = Path(file_path).with_suffix(Path(file_path).suffix + ".tmp")  # Build same-folder temp file
+    temp_file.write_text("\n".join(cleaned_lines), encoding="utf-8")  # Write cleaned subtitles atomically
+    os.replace(temp_file, file_path)  # Replace source file after successful write
 
     return cleaned_lines  # Return cleaned lines for translation
 
@@ -519,12 +644,13 @@ def translate_text_block(text_block: str, account_items: List[Tuple[str, str]], 
     raise RuntimeError("All configured DeepL accounts have insufficient quota for the pending subtitle block")
 
 
-def translate_srt_lines(srt_file, lines):
+def translate_srt_lines(srt_file, lines, translatable_character_count: int):
     """
     Translates lines from an SRT file using DeepL API, keeping timing and index lines unchanged.
 
     :param srt_file: Path to the SRT file (for logging purposes).
     :param lines: List of SRT lines.
+    :param translatable_character_count: Total cleaned characters eligible for DeepL translation.
     :return: List of translated lines.
     """
 
@@ -538,6 +664,7 @@ def translate_srt_lines(srt_file, lines):
     translators = {}  # Reuse DeepL clients by account during this execution
     translated_lines = []  # Initialize empty list for storing translated lines
     buffer = []  # Initialize empty buffer for batching subtitle text lines
+    translated_character_count = 0  # Track completed translation workload
 
     total_lines = len(lines)  # Store total line count for progress percentage calculation
     current_line = 0  # Initialize line counter for progress tracking
@@ -551,10 +678,16 @@ def translate_srt_lines(srt_file, lines):
             stripped == "" or stripped.replace(":", "").replace(",", "").isdigit() or "-->" in line
         ):  # Verify if the line is empty, a sequence index, or a timing marker
             if buffer:  # Verify if the translation buffer contains pending text lines
-                translated, active_account_index = translate_text_block("\n".join(buffer), account_items, active_account_index, exhausted_accounts, translators)  # Translate buffered text lines as one block
+                text_block = "\n".join(buffer)  # Build exact text block for DeepL
+                try:
+                    translated, active_account_index = translate_text_block(text_block, account_items, active_account_index, exhausted_accounts, translators)  # Translate buffered text lines as one block
+                except RuntimeError:
+                    remaining_characters = translatable_character_count - translated_character_count  # Count untranslated workload
+                    raise RuntimeError(f"Error: All configured DeepL accounts have insufficient quota to finish {filename}. Remaining: {remaining_characters:,} characters.") from None
                 if translated is None:  # Verify if translation returned None instead of a result
                     translated = buffer  # Fall back to the original buffer lines on failed translation
                 translated_lines.extend(translated)  # Append translated lines to the result list
+                translated_character_count += len(text_block)  # Count block after successful translation path
                 buffer = []  # Reset buffer after processing the current block
             translated_lines.append(line.rstrip("\n"))  # Append the timing or index line to result unchanged
         else:  # Handle regular subtitle text lines
@@ -564,14 +697,20 @@ def translate_srt_lines(srt_file, lines):
         percent = int(current_line / total_lines * 100) if total_lines > 0 else 0  # Calculate progress as an integer percentage
         filled = percent // 10  # Calculate the number of filled segments in the progress bar
         bar = "#" * filled + "-" * (10 - filled)  # Build the visual progress bar string with filled and empty segments
-        real_stderr.write(f"\r{BackgroundColors.GREEN}Processing: {BackgroundColors.CYAN}{filename}{BackgroundColors.GREEN} [{bar}] {percent}%{Style.RESET_ALL}   ")  # Overwrite current terminal line with updated progress
+        real_stderr.write(f"\r{BackgroundColors.GREEN}Processing: {BackgroundColors.CYAN}{filename}{BackgroundColors.GREEN} ({translatable_character_count:,} characters) [{bar}] {percent}%{Style.RESET_ALL}   ")  # Overwrite current terminal line with updated progress
         real_stderr.flush()  # Flush original stderr to force immediate display of progress
 
     if buffer:  # Verify if the buffer still contains unprocessed text lines after the loop
-        translated, active_account_index = translate_text_block("\n".join(buffer), account_items, active_account_index, exhausted_accounts, translators)  # Translate the remaining buffered text lines
+        text_block = "\n".join(buffer)  # Build exact final text block for DeepL
+        try:
+            translated, active_account_index = translate_text_block(text_block, account_items, active_account_index, exhausted_accounts, translators)  # Translate the remaining buffered text lines
+        except RuntimeError:
+            remaining_characters = translatable_character_count - translated_character_count  # Count untranslated workload
+            raise RuntimeError(f"Error: All configured DeepL accounts have insufficient quota to finish {filename}. Remaining: {remaining_characters:,} characters.") from None
         if translated is None:  # Verify if translation returned None for the remaining block
             translated = buffer  # Fall back to the original buffer lines on failed translation
         translated_lines.extend(translated)  # Append the remaining translated lines to the result list
+        translated_character_count += len(text_block)  # Count final block after successful translation path
 
     real_stderr.write("\n")  # Advance the terminal cursor to a new line after progress finishes
     real_stderr.flush()  # Flush original stderr to finalize the progress output
@@ -587,29 +726,7 @@ def parse_srt_entries(lines: List[str]) -> List[Tuple[str, str, str]]:
     :return: List of parsed SRT entries.
     """
 
-    entries = []  # Store parsed entries
-    block = []  # Store current subtitle block
-
-    for line in lines + [""]:  # Append sentinel blank line to flush final block
-        stripped = line.strip()  # Normalize line for SRT parsing
-        if stripped:
-            block.append(stripped)  # Add non-empty line to current block
-            continue
-
-        if not block:
-            continue
-
-        if len(block) < 3 or not block[0].isdigit() or "-->" not in block[1]:  # Reject malformed SRT block
-            return []  # Return empty result for malformed subtitles
-
-        text = "\n".join(block[2:]).strip()  # Join text lines for completeness comparison
-        if not text:
-            return []  # Reject empty subtitle text blocks
-
-        entries.append((block[0], block[1], text))  # Store parsed entry
-        block = []  # Reset current subtitle block
-
-    return entries  # Return parsed entries
+    return [(index, timing, "\n".join(text_lines)) for index, timing, text_lines in parse_srt_blocks(lines)]  # Reuse parsed blocks
 
 
 def is_translated_output_complete(source_lines: List[str], output_file: Path) -> bool:
@@ -746,18 +863,31 @@ def main():
         if DESCRIPTIVE_SUBTITLES_REMOVAL:  # Verify if descriptive subtitle removal is enabled
             srt_lines = remove_descriptive_subtitles(srt_file)  # Clean SRT lines by removing descriptive text
 
+        cleaned_blocks = parse_srt_blocks(srt_lines)  # Validate cleaned SRT structure
+        if srt_lines and not cleaned_blocks:  # Reject malformed cleaned subtitles
+            print(f"{BackgroundColors.RED}Invalid SRT structure after SDH cleanup: {BackgroundColors.CYAN}{srt_file}{Style.RESET_ALL}")  # Log invalid cleaned file
+            continue  # Continue with next SRT file
+
+        translatable_character_count = count_translatable_characters(srt_lines)  # Count only cleaned subtitle text sent to DeepL
+        filename = getattr(srt_file, "name", str(srt_file))  # Extract filename string for processing display
+        print(f"{BackgroundColors.GREEN}Processing: {BackgroundColors.CYAN}{filename}{BackgroundColors.GREEN} ({translatable_character_count:,} characters){Style.RESET_ALL}")  # Log cleaned workload
+
         relative_path = srt_file.relative_to(INPUT_DIR).parent  # Extract relative path from the input directory
         output_subdir = OUTPUT_DIR / relative_path  # Build the output subdirectory path
         output_subdir.mkdir(parents=True, exist_ok=True)  # Ensure the output subdirectory exists
 
         output_file = output_subdir / f"{srt_file.stem}_ptBR.srt"  # Build the output file path with ptBR suffix
 
+        if translatable_character_count == 0:  # Avoid DeepL calls when cleanup removed every translatable line
+            print(f"{BackgroundColors.YELLOW}{filename} contains no translatable dialogue after SDH cleanup.{Style.RESET_ALL}")  # Log empty cleaned file
+            continue  # Continue with next SRT file
+
         if is_translated_output_complete(srt_lines, output_file):  # Require parseable matching output before skipping
             print(f"{BackgroundColors.YELLOW}Skipping already complete translation: {BackgroundColors.CYAN}{srt_file}{Style.RESET_ALL}")  # Log complete-file skip
             continue  # Continue with next SRT file
 
         try:
-            translated_lines = translate_srt_lines(srt_file, srt_lines)  # Translate SRT lines using DeepL API
+            translated_lines = translate_srt_lines(srt_file, srt_lines, translatable_character_count)  # Translate SRT lines using DeepL API
         except RuntimeError as e:
             print(f"{BackgroundColors.RED}{e}{Style.RESET_ALL}")  # Log fatal quota exhaustion
             return  # Stop without saving an incomplete output
