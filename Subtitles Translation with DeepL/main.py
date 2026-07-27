@@ -88,7 +88,7 @@ DESCRIPTIVE_SUBTITLES_REMOVAL = (
     True  # Set to True to remove descriptive lines (e.g., [music], (laughs)) from SRT before translation
 )
 DEEPL_API_KEYS = {}  # DeepL API accounts (will be loaded in load_dotenv function)
-INPUT_DIR = f"./Input"  # Directory containing the input SRT files
+INPUT_DIR = f"F:/Series/From/From.S01.2160p.WEB-DL.DDP5.1.x265-TEPES[rartv]/"  # Directory containing the input SRT files
 OUTPUT_DIR = Path("./Output")  # Base output directory
 SOURCE_LANG = "EN"  # DeepL source language code
 TARGET_LANG = "PT-BR"  # DeepL target language code
@@ -437,7 +437,7 @@ def parse_srt_blocks(lines: List[str]) -> List[Tuple[str, str, List[str]]]:
     block = []  # Store current subtitle block
 
     for line in lines + [""]:  # Add sentinel blank line to flush final block
-        stripped = line.strip()  # Normalize current line
+        stripped = line.strip().lstrip("\ufeff")  # Normalize current line and ignore UTF-8 BOM
         if stripped:
             block.append(stripped)  # Add non-empty line to current block
             continue
