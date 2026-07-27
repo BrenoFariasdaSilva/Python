@@ -98,6 +98,7 @@ LANGUAGE_DETECTION_MAX_SAMPLE_CHARS = 4000  # Enough dialogue for detection with
 TARGET_LANGUAGE_MIN_CONFIDENCE = 0.75  # Require strong target-language confidence before skipping
 TARGET_LANGUAGE_MIN_MARGIN = 0.20  # Require target language to clearly beat the next candidate
 TARGET_LANGUAGE_MIN_SHARE = 0.80  # Require target language to dominate mixed-language content
+SUBTITLE_FORMATTING_TAG_PATTERN = re.compile(r"</?(?:i|b|u|font)(?:\s+[^<>]*)?>", re.IGNORECASE)  # Recognized SRT formatting tags
 LANGUAGE_DETECTOR = None  # Lazily initialized offline language detector
 
 # Logger Setup:
@@ -459,13 +460,13 @@ def parse_srt_blocks(lines: List[str]) -> List[Tuple[str, str, List[str]]]:
 
 def strip_html_tags(text: str) -> str:
     """
-    Removes simple HTML tags from text for cue classification.
+    Removes supported SRT formatting tags from text.
 
-    :param text: Text that may contain HTML tags.
-    :return: Text without HTML tags.
+    :param text: Text that may contain formatting tags.
+    :return: Text without supported SRT formatting tags.
     """
 
-    return re.sub(r"<[^>]+>", "", text)  # Remove simple inline HTML tags
+    return SUBTITLE_FORMATTING_TAG_PATTERN.sub("", text)  # Remove recognized formatting tags only
 
 
 def is_descriptive_cue(text: str) -> bool:
@@ -508,7 +509,8 @@ def clean_subtitle_text_line(text_line: str) -> Tuple[str, bool]:
     """
 
     stripped = text_line.strip()  # Normalize current text line
-    tagless = strip_html_tags(stripped).strip()  # Remove tags for line-level classification
+    tagless = strip_html_tags(stripped).strip()  # Remove supported tags before cleanup and classification
+    formatting_changed = tagless != stripped  # Track formatting-tag removal as cleanup
 
     if (
         (tagless.startswith("[") and tagless.endswith("]"))
@@ -523,13 +525,12 @@ def clean_subtitle_text_line(text_line: str) -> Tuple[str, bool]:
     cleaned = re.sub(
         r"(\[[^\]]+\]|\([^)]+\)|[♪♫♬♩][^♪♫♬♩]+[♪♫♬♩])",
         lambda match: "" if is_descriptive_cue(match.group(0)) else match.group(0),
-        stripped,
+        tagless,
     )  # Remove inline descriptive cue spans only
-    cleaned = re.sub(r"<([^>\s]+)[^>]*>\s*</\1>", "", cleaned)  # Remove empty HTML tags left by cue removal
 
     cleaned = " ".join(cleaned.split())  # Normalize spacing after cue removal
 
-    return cleaned, cleaned != stripped  # Return cleaned text and change flag
+    return cleaned, formatting_changed or cleaned != stripped  # Return cleaned text and change flag
 
 
 def serialize_srt_blocks(blocks: List[Tuple[str, str, List[str]]]) -> List[str]:
@@ -542,8 +543,8 @@ def serialize_srt_blocks(blocks: List[Tuple[str, str, List[str]]]) -> List[str]:
 
     lines = []  # Store serialized lines
 
-    for index, timing, text_lines in blocks:  # Serialize each subtitle block
-        lines.extend([index, timing])  # Add index and timing lines
+    for new_index, (_index, timing, text_lines) in enumerate(blocks, start=1):  # Serialize each subtitle block
+        lines.extend([str(new_index), timing])  # Add sequential index and timing lines
         lines.extend(text_lines)  # Add subtitle text lines
         lines.append("")  # Add SRT block separator
 
