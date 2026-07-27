@@ -33,8 +33,9 @@ TODOs:
    - Extend support for additional languages
 
 Dependencies:
-   - Python >= 3.8
+   - Python >= 3.12
    - deepl
+   - lingua-language-detector
    - python-dotenv
    - colorama
    - Logger (custom logging module)
@@ -62,6 +63,7 @@ import re  # For recognizing SDH subtitle cue wrappers
 import sys  # For system-specific parameters and functions
 from colorama import Style  # For coloring the terminal
 from dotenv import load_dotenv  # For loading environment variables from .env file
+from lingua import LanguageDetectorBuilder  # For offline language detection before translation
 from Logger import Logger  # For logging output to both terminal and file
 from pathlib import Path  # For handling file paths
 from shutil import copyfile  # For copying files
@@ -87,7 +89,15 @@ DESCRIPTIVE_SUBTITLES_REMOVAL = (
 DEEPL_API_KEYS = {}  # DeepL API accounts (will be loaded in load_dotenv function)
 INPUT_DIR = f"./Input"  # Directory containing the input SRT files
 OUTPUT_DIR = Path("./Output")  # Base output directory
+SOURCE_LANG = "EN"  # DeepL source language code
+TARGET_LANG = "PT-BR"  # DeepL target language code
 SCRIPT_DIR = Path(__file__).resolve().parent  # Directory containing this script
+LANGUAGE_DETECTION_MIN_LETTERS = 80  # Avoid classifying tiny or numeric-only subtitles
+LANGUAGE_DETECTION_MAX_SAMPLE_CHARS = 4000  # Enough dialogue for detection without scanning huge files
+TARGET_LANGUAGE_MIN_CONFIDENCE = 0.75  # Require strong target-language confidence before skipping
+TARGET_LANGUAGE_MIN_MARGIN = 0.20  # Require target language to clearly beat the next candidate
+TARGET_LANGUAGE_MIN_SHARE = 0.80  # Require target language to dominate mixed-language content
+LANGUAGE_DETECTOR = None  # Lazily initialized offline language detector
 
 # Logger Setup:
 logger = Logger(str(SCRIPT_DIR / "Logs" / f"{Path(__file__).stem}.log"), clean=True)  # Create a Logger instance
@@ -550,6 +560,158 @@ def count_translatable_characters(lines: List[str]) -> int:
     return sum(len("\n".join(text_lines)) for _, _, text_lines in parse_srt_blocks(lines))  # Match translation block counting
 
 
+def normalize_language_code(language_code: str) -> str:
+    """
+    Normalizes a language code to the ISO 639-1 base code used by language detection.
+
+    :param language_code: Language code such as PT-BR, PT, EN-US, or EN.
+    :return: Uppercase base language code.
+    """
+
+    return language_code.replace("_", "-").upper().split("-")[0]  # Lingua detects language, not regional variant
+
+
+def get_language_display_name(language_code: str) -> str:
+    """
+    Converts a base language code to a concise display name.
+
+    :param language_code: Base language code.
+    :return: Human-readable language label.
+    """
+
+    language_names = {
+        "EN": "English",
+        "PT": "Portuguese",
+    }  # Names needed by current source/target configuration
+
+    return language_names.get(language_code, language_code)  # Fall back to code for unmapped languages
+
+
+def count_letters(text: str) -> int:
+    """
+    Counts Unicode letters in text.
+
+    :param text: Text to inspect.
+    :return: Number of alphabetic characters.
+    """
+
+    return sum(1 for character in text if character.isalpha())  # Ignore numbers and punctuation for reliability checks
+
+
+def build_language_detection_sample(lines: List[str]) -> str:
+    """
+    Builds a language-detection sample from cleaned subtitle dialogue only.
+
+    :param lines: Cleaned SRT lines.
+    :return: Dialogue text sample for offline language detection.
+    """
+
+    sample_lines = []  # Store cleaned dialogue lines used for language detection
+    seen_lines = {}  # Limit repeated lines so names or repeated short cues do not dominate
+    sample_length = 0  # Track sample size without repeatedly joining text
+
+    for _, _, text_lines in parse_srt_blocks(lines):  # Use parsed subtitle text only
+        for text_line in text_lines:  # Inspect each cleaned dialogue line
+            dialogue_line = strip_html_tags(text_line).strip()  # Ignore formatting tags for detection only
+            dialogue_line = re.sub(r"^[A-Z][A-Z0-9 .'-]{1,30}:\s*", "", dialogue_line).strip()  # Remove speaker label prefix for detection
+            if count_letters(dialogue_line) < 3:  # Ignore numeric, punctuation-only, or tiny fragments
+                continue
+
+            line_key = dialogue_line.lower()  # Normalize repeated dialogue for sampling
+            if seen_lines.get(line_key, 0) >= 3:  # Avoid repeated names or phrases dominating detection
+                continue
+
+            seen_lines[line_key] = seen_lines.get(line_key, 0) + 1  # Count accepted repeated line
+            sample_lines.append(dialogue_line)  # Add dialogue-only text
+            sample_length += len(dialogue_line) + 1  # Track approximate joined length
+            if sample_length >= LANGUAGE_DETECTION_MAX_SAMPLE_CHARS:
+                return "\n".join(sample_lines)[:LANGUAGE_DETECTION_MAX_SAMPLE_CHARS]  # Return bounded sample
+
+    return "\n".join(sample_lines)  # Return complete bounded sample
+
+
+def get_language_detector():
+    """
+    Returns the shared offline language detector.
+
+    :return: Lingua language detector.
+    """
+
+    global LANGUAGE_DETECTOR  # Reuse detector and loaded models across files
+
+    if LANGUAGE_DETECTOR is None:
+        LANGUAGE_DETECTOR = LanguageDetectorBuilder.from_all_languages().build()  # Build offline detector without DeepL quota
+
+    return LANGUAGE_DETECTOR  # Return shared detector
+
+
+def calculate_language_share(detector, sample: str, target_code: str) -> float:
+    """
+    Estimates whether target language dominates mixed-language content.
+
+    :param detector: Lingua language detector.
+    :param sample: Cleaned dialogue sample.
+    :param target_code: Normalized target language code.
+    :return: Character share detected as target language.
+    """
+
+    detected_sections = detector.detect_multiple_languages_of(sample)  # Segment mixed-language sample conservatively
+    if not detected_sections:
+        return 0.0
+
+    target_characters = 0  # Count detected target-language section characters
+    detected_characters = 0  # Count all detected section characters
+
+    for section in detected_sections:  # Iterate detected contiguous language sections
+        section_length = section.end_index - section.start_index  # Calculate section length in sample text
+        detected_characters += section_length  # Track detected content length
+        detected_code = section.language.iso_code_639_1.name  # Read detector's base language code
+        if detected_code == target_code:
+            target_characters += section_length  # Track target-language content length
+
+    return target_characters / detected_characters if detected_characters else 0.0  # Return target dominance ratio
+
+
+def detect_cleaned_subtitle_language(lines: List[str], target_language_code: str) -> Tuple[bool, bool, str]:
+    """
+    Detects whether cleaned subtitle dialogue is already in the target language.
+
+    :param lines: Cleaned SRT lines.
+    :param target_language_code: Configured DeepL target language code.
+    :return: Tuple of target-language match, conclusive detection, and detected language label.
+    """
+
+    sample = build_language_detection_sample(lines)  # Build sample only from cleaned dialogue
+    if count_letters(sample) < LANGUAGE_DETECTION_MIN_LETTERS:
+        return False, False, ""  # Avoid classifying tiny, numeric-only, or ambiguous subtitles
+
+    target_code = normalize_language_code(target_language_code)  # Lingua returns base language codes only
+    detector = get_language_detector()  # Initialize offline detector before any DeepL call
+    confidence_values = detector.compute_language_confidence_values(sample)  # Score likely languages locally
+    if not confidence_values:
+        return False, False, ""  # Unknown detection result
+
+    top_confidence = confidence_values[0]  # Most likely detected language
+    detected_code = top_confidence.language.iso_code_639_1.name  # Base language code from detector
+    detected_label = f"{get_language_display_name(detected_code)} ({detected_code})"  # Label for logs
+    second_confidence = confidence_values[1].value if len(confidence_values) > 1 else 0.0  # Compare against next candidate
+    target_confidence = next((value.value for value in confidence_values if value.language.iso_code_639_1.name == target_code), 0.0)  # Find target score
+    target_share = calculate_language_share(detector, sample, target_code)  # Guard mixed-language subtitles
+
+    if (
+        detected_code == target_code
+        and target_confidence >= TARGET_LANGUAGE_MIN_CONFIDENCE
+        and target_confidence - second_confidence >= TARGET_LANGUAGE_MIN_MARGIN
+        and target_share >= TARGET_LANGUAGE_MIN_SHARE
+    ):
+        return True, True, detected_label  # Target language dominates cleaned dialogue
+
+    if top_confidence.value < 0.55 or top_confidence.value - second_confidence < 0.15:
+        return False, False, detected_label  # Ambiguous detection should continue to translation
+
+    return False, True, detected_label  # Conclusive non-target detection
+
+
 def remove_descriptive_subtitles(file_path) -> Tuple[List[str], int, int]:
     """
     Removes descriptive cues from parsed SRT subtitle entries.
@@ -678,7 +840,7 @@ def translate_text_block(text_block: str, account_items: List[Tuple[str, str]], 
             continue  # Continue with next account
 
         try:  # Perform translation
-            result = translator.translate_text(text_block, source_lang="EN", target_lang="PT-BR")  # Translate text block
+            result = translator.translate_text(text_block, source_lang=SOURCE_LANG, target_lang=TARGET_LANG)  # Translate text block
             if result is not None and hasattr(result, "text") and result.text:  # Ensure result is valid
                 return result.text.split("\n"), account_index  # Return translated lines and current account
             else:
@@ -811,12 +973,13 @@ def is_translated_output_complete(source_lines: List[str], output_file: Path) ->
     return True  # Output is complete for this source
 
 
-def save_srt(lines, output_file):
+def save_srt(lines, output_file, success_message: str = "Translated SRT saved as"):
     """
     Saves translated lines to an output SRT file.
 
     :param lines: List of translated lines
-    :param output_file: Path to save the output SRT
+    :param output_file: Path to save the output SRT.
+    :param success_message: Message prefix for the saved output path.
     :return: None
     """
 
@@ -824,7 +987,7 @@ def save_srt(lines, output_file):
         f.write("\n".join(lines))  # Write translated lines to the file
 
     print(
-        f"{BackgroundColors.GREEN}Translated SRT saved as: {BackgroundColors.CYAN}{output_file}{Style.RESET_ALL}"
+        f"{BackgroundColors.GREEN}{success_message}: {BackgroundColors.CYAN}{output_file}{Style.RESET_ALL}"
     )  # Output the saved file message
 
 
@@ -889,11 +1052,7 @@ def main():
 
     ensure_env_file()  # Ensure .env file exists
 
-    if not get_api_keys():  # Load .env and get DeepL API keys
-        print(
-            f"{BackgroundColors.RED}DEEPL_API_KEYS not found or invalid in .env file. Please set it before running the program.{Style.RESET_ALL}"
-        )  # Output error message
-        return  # Exit the program
+    api_keys_loaded = False  # Load DeepL API keys only for files that require translation
 
     input_dir = resolve_from_script_dir(INPUT_DIR)  # Resolve configured input from script location
     output_dir = resolve_from_script_dir(OUTPUT_DIR)  # Resolve configured output from script location
@@ -947,9 +1106,29 @@ def main():
             print(f"{BackgroundColors.YELLOW}{filename} contains no translatable dialogue after SDH cleanup.{Style.RESET_ALL}")  # Log empty cleaned file
             continue  # Continue with next SRT file
 
+        is_target_language, detection_conclusive, detected_language_label = detect_cleaned_subtitle_language(srt_lines, TARGET_LANG)  # Detect language from cleaned dialogue only
+        if is_target_language:  # Skip DeepL when cleaned subtitle is already in target language
+            print(f"{BackgroundColors.YELLOW}Skipping translation: {BackgroundColors.CYAN}{filename}{BackgroundColors.YELLOW} is already in the target language ({BackgroundColors.CYAN}{get_language_display_name(normalize_language_code(TARGET_LANG))}{BackgroundColors.YELLOW}; detected {BackgroundColors.CYAN}{detected_language_label}{BackgroundColors.YELLOW}).{Style.RESET_ALL}")  # Log target-language skip
+            if is_translated_output_complete(srt_lines, output_file):  # Preserve complete-output skip behavior
+                print(f"{BackgroundColors.YELLOW}Skipping already complete translation: {BackgroundColors.CYAN}{output_file}{Style.RESET_ALL}")  # Log complete-file skip
+            else:
+                save_srt(srt_lines, output_file, "Cleaned target-language SRT saved as")  # Save cleaned target-language output safely
+            continue  # Continue with next SRT file
+
+        if not detection_conclusive:  # Continue normally when language detection is not reliable
+            print(f"{BackgroundColors.YELLOW}Language detection was inconclusive for {BackgroundColors.CYAN}{filename}{BackgroundColors.YELLOW}. Continuing with translation.{Style.RESET_ALL}")  # Log inconclusive detection
+
         if is_translated_output_complete(srt_lines, output_file):  # Require parseable matching output before skipping
             print(f"{BackgroundColors.YELLOW}Skipping already complete translation: {BackgroundColors.CYAN}{output_file}{Style.RESET_ALL}")  # Log complete-file skip
             continue  # Continue with next SRT file
+
+        if not api_keys_loaded and not get_api_keys():  # Load .env and get DeepL API keys only before translation
+            print(
+                f"{BackgroundColors.RED}DEEPL_API_KEYS not found or invalid in .env file. Please set it before running the program.{Style.RESET_ALL}"
+            )  # Output error message
+            return  # Exit the program
+
+        api_keys_loaded = True  # Mark DeepL API keys as available for subsequent translation files
 
         try:
             translated_lines = translate_srt_lines(current_srt_path, srt_lines, translatable_character_count)  # Translate SRT lines using DeepL API
