@@ -51,30 +51,8 @@ import datetime  # For getting the current date and time
 import os  # For running a command in the terminal
 import platform  # For getting the operating system name
 import re  # For matching SRT timestamps and SDH fragments
-import sys  # For system-specific parameters and functions
 from colorama import Style  # For coloring the terminal
 from pathlib import Path  # For handling file paths
-
-try:  # Attempt to use the template logger when it is available
-    from Logger import Logger  # For logging output to both terminal and file
-except ModuleNotFoundError:  # Provide the same logging surface when the external module is absent
-    class Logger:  # Minimal logger compatible with the template redirection
-        def __init__(self, filename: str, clean: bool = False) -> None:  # Initialize terminal and file output
-            self.terminal = sys.__stdout__  # Preserve original stdout
-            Path(filename).parent.mkdir(parents=True, exist_ok=True)  # Create log directory
-            mode = "w" if clean else "a"  # Select log write mode
-            self.log = open(filename, mode, encoding="utf-8")  # Open UTF-8 log file
-
-        def write(self, message: str) -> None:  # Write message to terminal and log file
-            self.terminal.write(message)  # Write to terminal stream
-            self.log.write(message)  # Write to log stream
-
-        def flush(self) -> None:  # Flush both output streams
-            self.terminal.flush()  # Flush terminal stream
-            self.log.flush()  # Flush log stream
-
-        def close(self) -> None:  # Close the log stream
-            self.log.close()  # Close log file
 
 
 # Macros:
@@ -95,11 +73,6 @@ SRT_TIMESTAMP_PATTERN = re.compile(r"^\d{2}:\d{2}:\d{2},\d{3}\s+-->\s+\d{2}:\d{2
 DESCRIPTIVE_PHRASES = frozenset(("music", "door closes", "applause", "speaking indistinctly", "laughing", "laughs", "sighs", "sigh", "whispers", "whispering", "inaudible", "indistinct chatter", "chuckles", "gasps", "coughs", "sobs", "crying", "screaming", "phone ringing", "knocking", "footsteps", "thunder", "alarm", "silence"))  # Conservative complete SDH fragments
 DESCRIPTIVE_KEYWORDS = frozenset(("music", "applause", "laughing", "laughs", "sighs", "sigh", "whispers", "whispering", "inaudible", "indistinctly", "chatter", "chuckles", "gasps", "coughs", "sobs", "crying", "screaming", "ringing", "knocking", "footsteps", "thunder", "alarm", "silence"))  # SDH indicator words
 DESCRIPTIVE_WORDS = frozenset(("music", "door", "doors", "closes", "close", "closing", "opens", "opening", "applause", "speaking", "indistinctly", "indistinct", "laughing", "laughs", "sighs", "sigh", "whispers", "whispering", "inaudible", "chatter", "crowd", "chuckles", "softly", "gasps", "coughs", "sobs", "crying", "screaming", "phone", "ringing", "knocking", "knocks", "footsteps", "thunder", "alarm", "silence", "dramatic"))  # Allowed words inside SDH fragments
-
-# Logger Setup:
-logger = Logger(f"./Logs/{Path(__file__).stem}.log", clean=True)  # Create a Logger instance
-sys.stdout = logger  # Redirect stdout to the logger
-sys.stderr = logger  # Redirect stderr to the logger
 
 # Sound Constants:
 SOUND_COMMANDS = {
