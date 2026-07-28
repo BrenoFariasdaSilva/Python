@@ -909,7 +909,7 @@ def render_translation_progress(progress_state: Dict[str, Any] | None, force: bo
         stream = sys.__stdout__  # Write directly to terminal for in-place updates
         if progress_state.get("progress_visible"):
             stream.write("\033[F\033[K\033[F\033[K")  # Clear previous two progress lines
-        stream.write(f"{file_line}\n{overall_line}\n")  # Draw current progress lines
+        stream.write(f"{BackgroundColors.GREEN}{file_line}{Style.RESET_ALL}\n{BackgroundColors.CYAN}{overall_line}{Style.RESET_ALL}\n")  # Draw current progress lines
         stream.flush()  # Flush terminal output
         progress_state["progress_visible"] = True  # Mark progress as visible
     else:
@@ -930,7 +930,7 @@ def print_progress_event(progress_state: Dict[str, Any] | None, message: str) ->
 
     if progress_state and progress_state.get("interactive") and progress_state.get("progress_visible"):
         stream = sys.__stdout__  # Direct terminal stream
-        stream.write("\033[F\033[K\033[F\033[K")  # Clear active progress lines before standalone message
+        stream.write(f"{Style.RESET_ALL}\033[F\033[K\033[F\033[K")  # Reset color and clear active progress lines before standalone message
         stream.flush()  # Flush clear sequence
         progress_state["progress_visible"] = False  # Mark progress as hidden
 
