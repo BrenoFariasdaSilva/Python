@@ -5,6 +5,7 @@ import platform  # For getting the operating system name
 import shutil  # For checking if a command exists in the system path
 import subprocess  # Import subprocess for running commands
 import sys  # For getting the system path
+from pathlib import Path  # For handling filesystem paths
 from colorama import Style  # For coloring the terminal
 from tqdm import tqdm  # Import tqdm for progress bar
 
@@ -297,22 +298,50 @@ def check_and_install_package(package_name="subliminal"):
             install_package_with_pip(package_name)  # Fallback to pip if pipx fails
 
 
+def contains_supported_video_file(directory, filenames):
+    """
+    Verify if a directory directly contains at least one supported video file.
+
+    :param directory: Directory path to inspect
+    :param filenames: Direct filenames inside the directory
+    :return: True if a supported video file exists directly in the directory, False otherwise
+    """
+
+    from subliminal.video import VIDEO_EXTENSIONS  # Import subliminal supported video extensions
+
+    directory_path = Path(directory)  # Convert directory to a Path object
+    return any(
+        (directory_path / filename).is_file() and filename.lower().endswith(VIDEO_EXTENSIONS)
+        for filename in filenames
+    )  # Return True if any direct file has a supported video extension
+
+
 def get_directories():
     """
-    Get all subdirectories inside the input directory.
-    Excludes the INPUT_DIRECTORY itself if it contains subdirectories.
+    Get all directories inside the input directory that directly contain supported video files.
 
-    :return: List of absolute paths to subdirectories
+    :return: List of absolute paths to eligible directories
     """
 
-    dirs = [
-        os.path.normpath(os.path.abspath(root)) for root, _, _ in os.walk(INPUT_DIRECTORY)
-    ]  # Collect all directories
-    if (
-        len(dirs) > 1 and os.path.normpath(os.path.abspath(INPUT_DIRECTORY)) in dirs
-    ):  # If root dir has subdirs, remove itself
-        dirs.remove(os.path.normpath(os.path.abspath(INPUT_DIRECTORY)))  # Remove the root input directory
-    return dirs  # Return only valid subdirectories
+    input_directory = Path(INPUT_DIRECTORY).expanduser().resolve(strict=True)  # Resolve the configured input directory
+    dirs = []  # Initialize eligible directory list
+    seen = set()  # Track normalized paths to prevent duplicate processing
+
+    def handle_walk_error(error):
+        raise error  # Do not silently ignore inaccessible directories
+
+    for root, dirnames, filenames in os.walk(input_directory, onerror=handle_walk_error):  # Walk the input tree
+        dirnames.sort()  # Keep traversal order deterministic
+        filenames.sort()  # Keep direct file checks deterministic
+        directory = Path(root).resolve()  # Normalize the current directory
+
+        if contains_supported_video_file(directory, filenames):  # Include only directories with direct videos
+            directory_key = os.path.normcase(str(directory))  # Normalize for duplicate prevention
+            if directory_key not in seen:  # Verify this directory was not already added
+                dirs.append(str(directory))  # Add eligible directory
+                seen.add(directory_key)  # Mark directory as seen
+
+    return dirs  # Return eligible directories
 
 
 def download_subtitles(directory, languages=LANGUAGES):
@@ -433,7 +462,11 @@ def main():
         end="\n\n",
     )  # Output the Welcome message
 
-    os.makedirs(INPUT_DIRECTORY, exist_ok=True)  # Create the input directory if it does
+    if not verify_filepath_exists(INPUT_DIRECTORY) or not Path(INPUT_DIRECTORY).expanduser().resolve().is_dir():  # Verify input directory exists
+        print(
+            f"{BackgroundColors.RED}Input directory not found or is not a directory: {BackgroundColors.CYAN}{INPUT_DIRECTORY}{Style.RESET_ALL}"
+        )
+        return  # Return if input directory is invalid
 
     check_and_install_package()  # Check and install the subliminal package
 
@@ -441,7 +474,7 @@ def main():
 
     if len(dirs) == 0:  # If no directories are found
         print(
-            f"{BackgroundColors.RED}No directories found in the {BackgroundColors.CYAN}Input{BackgroundColors.RED} directory. Please add directories to download subtitles.{Style.RESET_ALL}"
+            f"{BackgroundColors.RED}No supported video files found in the input directory or its descendants: {BackgroundColors.CYAN}{INPUT_DIRECTORY}{Style.RESET_ALL}"
         )
         return  # Return if no directories are found
 
