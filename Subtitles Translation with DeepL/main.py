@@ -449,6 +449,7 @@ def parse_srt_blocks(lines: List[str]) -> List[Tuple[str, str, List[str]]]:
 
     blocks = []  # Store parsed subtitle blocks
     block = []  # Store current subtitle block
+    pending_empty_block = None  # Hold index/timing when text appears after extra blank lines
 
     for line in lines + [""]:  # Add sentinel blank line to flush final block
         stripped = line.strip().lstrip("\ufeff")  # Normalize current line and ignore UTF-8 BOM
@@ -459,17 +460,47 @@ def parse_srt_blocks(lines: List[str]) -> List[Tuple[str, str, List[str]]]:
         if not block:
             continue
 
-        if len(block) < 3 or not block[0].isdigit() or "-->" not in block[1]:  # Reject malformed SRT block
+        if len(block) < 2 or not block[0].isdigit() or "-->" not in block[1]:  # Reject malformed SRT block
+            if pending_empty_block:
+                index, timing = pending_empty_block  # Recover text split from its timing by extra blank lines
+                blocks.append((index, timing, [text_line.strip() for text_line in block if text_line.strip()]))  # Store recovered block text
+                pending_empty_block = None  # Clear recovered pending block
+                block = []  # Reset current subtitle block
+                continue
+            if blocks:
+                blocks[-1][2].extend(text_line.strip() for text_line in block if text_line.strip())  # Recover orphan text split by extra blank lines
+                block = []  # Reset current subtitle block
+                continue
             return []  # Return empty result for malformed subtitles
 
         text_lines = [text_line.strip() for text_line in block[2:] if text_line.strip()]  # Normalize translatable text lines
+        if pending_empty_block:
+            index, timing = pending_empty_block  # Restore earlier empty timed cue before current valid block
+            blocks.append((index, timing, []))  # Preserve empty cue structure
+            pending_empty_block = None  # Clear restored pending block
         if not text_lines:
-            return []  # Return empty result for blocks without text
-
+            pending_empty_block = (block[0], block[1])  # Wait for possible text split by extra blank lines
+            block = []  # Reset current subtitle block
+            continue
         blocks.append((block[0], block[1], text_lines))  # Store parsed block
         block = []  # Reset current subtitle block
 
+    if pending_empty_block:
+        index, timing = pending_empty_block  # Restore trailing empty timed cue
+        blocks.append((index, timing, []))  # Preserve empty cue structure
+
     return blocks  # Return parsed subtitle blocks
+
+
+def has_valid_srt_structure(lines: List[str]) -> bool:
+    """
+    Determines whether SRT lines are empty or structurally parseable.
+
+    :param lines: SRT lines to validate.
+    :return: True when empty or valid, otherwise False.
+    """
+
+    return not lines or bool(parse_srt_blocks(lines))  # Preserve empty-file handling while rejecting malformed content
 
 
 def strip_html_tags(text: str) -> str:
@@ -788,7 +819,8 @@ def remove_descriptive_subtitles(file_path) -> Tuple[List[str], int, int]:
     original_lines = read_srt(file_path)  # Read source SRT lines
     cleaned_lines, removed_entry_count, mixed_cleaned_entry_count = clean_descriptive_subtitle_lines(original_lines)  # Clean without duplicating rules
     if cleaned_lines and not parse_srt_blocks(cleaned_lines):  # Validate serialized cleaned subtitles before replacing
-        raise ValueError(f"Invalid SRT structure after SDH cleanup: {file_path}")  # Stop before source replacement
+        print(f"{BackgroundColors.YELLOW}SDH cleanup failed structural validation. Original subtitle will be translated:{Style.RESET_ALL}\n{BackgroundColors.CYAN}{file_path}{Style.RESET_ALL}")  # Preserve source on cleanup failure
+        return original_lines, 0, 0  # Fallback to original valid source lines
 
     write_srt_lines_atomic(Path(file_path), cleaned_lines)  # Replace source file after successful write
 
@@ -1060,7 +1092,7 @@ def build_translation_plan(srt_files: List[Path], input_dir: Path, output_dir: P
     plan = []  # Store pending translation work
     records = []  # Store valid discovered SRT metadata before source/output dedupe
     records_by_path = {}  # Map resolved paths to discovered records
-    summary = {"discovered": len(srt_files), "source_candidates": 0, "generated_skipped": 0, "existing_skipped": 0, "target_language_skipped": 0, "empty_skipped": 0, "invalid": 0, "invalid_language_outputs": 0, "mislabeled_source_files": 0, "other_skipped": 0, "total_characters": 0}  # Store preflight counts
+    summary = {"discovered": len(srt_files), "source_candidates": 0, "generated_skipped": 0, "existing_skipped": 0, "target_language_skipped": 0, "empty_skipped": 0, "invalid": 0, "cleanup_fallbacks": 0, "cleanup_warnings": 0, "invalid_language_outputs": 0, "mislabeled_source_files": 0, "other_skipped": 0, "total_characters": 0}  # Store preflight counts
 
     for srt_file in srt_files:  # Analyze each discovered SRT
         current_srt_path = srt_file.resolve()  # Resolve source path
@@ -1075,14 +1107,19 @@ def build_translation_plan(srt_files: List[Path], input_dir: Path, output_dir: P
             srt_lines = source_lines  # Default to source lines
             removed_entry_count = 0  # Default cleanup counts
             mixed_cleaned_entry_count = 0  # Default cleanup counts
-            if DESCRIPTIVE_SUBTITLES_REMOVAL:
-                srt_lines, removed_entry_count, mixed_cleaned_entry_count = clean_descriptive_subtitle_lines(source_lines)  # Plan cleanup without writing
-
-            cleaned_blocks = parse_srt_blocks(srt_lines)  # Validate cleaned SRT structure
-            if srt_lines and not cleaned_blocks:
-                summary["invalid"] += 1  # Count invalid preflight file
-                print(f"{BackgroundColors.RED}Invalid SRT structure after SDH cleanup: {BackgroundColors.CYAN}{current_srt_path}{Style.RESET_ALL}")  # Log invalid source
+            cleanup_fallback = False  # Track valid source translated without cleanup after cleanup validation failure
+            if not has_valid_srt_structure(source_lines):
+                summary["invalid"] += 1  # Count genuinely invalid source structure
+                print(f"{BackgroundColors.RED}Invalid SRT structure: {BackgroundColors.CYAN}{current_srt_path}{Style.RESET_ALL}")  # Log invalid source
                 continue
+            if DESCRIPTIVE_SUBTITLES_REMOVAL:
+                cleaned_lines, cleaned_removed_entry_count, cleaned_mixed_entry_count = clean_descriptive_subtitle_lines(source_lines)  # Plan cleanup without writing
+                if has_valid_srt_structure(cleaned_lines):
+                    srt_lines = cleaned_lines  # Use valid cleaned representation for all later processing
+                    removed_entry_count = cleaned_removed_entry_count  # Preserve cleanup metadata for valid cleanup
+                    mixed_cleaned_entry_count = cleaned_mixed_entry_count  # Preserve cleanup metadata for valid cleanup
+                else:
+                    cleanup_fallback = True  # Keep original valid source when cleanup breaks structure
 
             translatable_character_count = count_translatable_characters(srt_lines)  # Count exact DeepL text blocks
             if translatable_character_count == 0:
@@ -1091,7 +1128,7 @@ def build_translation_plan(srt_files: List[Path], input_dir: Path, output_dir: P
                 continue
 
             is_target_language, detection_conclusive, detected_language_label = detect_cleaned_subtitle_language(srt_lines, TARGET_LANG)  # Offline language detection
-            record = {"source_path": current_srt_path, "output_file": output_file, "lines": srt_lines, "characters": translatable_character_count, "removed_entries": removed_entry_count, "mixed_cleaned_entries": mixed_cleaned_entry_count, "detection_conclusive": detection_conclusive, "detected_language_label": detected_language_label, "is_target_language": is_target_language, "filename_has_generated_marker": has_generated_filename_marker(current_srt_path), "family_key": get_srt_family_key(current_srt_path)}  # Store content-based classification record
+            record = {"source_path": current_srt_path, "output_file": output_file, "lines": srt_lines, "characters": translatable_character_count, "removed_entries": removed_entry_count, "mixed_cleaned_entries": mixed_cleaned_entry_count, "cleanup_fallback": cleanup_fallback, "detection_conclusive": detection_conclusive, "detected_language_label": detected_language_label, "is_target_language": is_target_language, "filename_has_generated_marker": has_generated_filename_marker(current_srt_path), "family_key": get_srt_family_key(current_srt_path)}  # Store content-based classification record
             records.append(record)  # Keep record for family dedupe
             records_by_path[current_srt_path] = record  # Map by resolved path
         except Exception as e:
@@ -1135,6 +1172,9 @@ def build_translation_plan(srt_files: List[Path], input_dir: Path, output_dir: P
 
             summary["generated_skipped"] += sum(1 for record in extra_records if record["is_target_language"])  # Count valid generated companions without planning them
             summary["invalid_language_outputs"] += sum(1 for record in extra_records if not record["is_target_language"])  # Track invalid generated companions
+            if source_record["cleanup_fallback"]:
+                summary["cleanup_fallbacks"] += 1  # Count planned best-effort cleanup fallback separately from invalid files
+                print(f"{BackgroundColors.YELLOW}SDH cleanup failed structural validation. Original subtitle will be translated:{Style.RESET_ALL}\n{BackgroundColors.CYAN}{source_record['source_path']}{Style.RESET_ALL}")  # Log cleanup fallback
             plan.append(source_record)  # Add pending translation work
             summary["total_characters"] += source_record["characters"]  # Add only planned translation characters
             continue
@@ -1155,6 +1195,9 @@ def build_translation_plan(srt_files: List[Path], input_dir: Path, output_dir: P
         else:
             print(f"{BackgroundColors.YELLOW}Language detection was inconclusive despite the target-language filename. Keeping file eligible for translation:{Style.RESET_ALL}\n{BackgroundColors.CYAN}{source_record['source_path']}{Style.RESET_ALL}")  # Log conservative classification
 
+        if source_record["cleanup_fallback"]:
+            summary["cleanup_fallbacks"] += 1  # Count planned best-effort cleanup fallback separately from invalid files
+            print(f"{BackgroundColors.YELLOW}SDH cleanup failed structural validation. Original subtitle will be translated:{Style.RESET_ALL}\n{BackgroundColors.CYAN}{source_record['source_path']}{Style.RESET_ALL}")  # Log cleanup fallback
         plan.append(source_record)  # Add pending translation work
         summary["total_characters"] += source_record["characters"]  # Add only planned translation characters
         for record in family_records:
@@ -1446,6 +1489,27 @@ def save_srt(lines, output_file, success_message: str = "Translated SRT saved as
     )  # Output the saved file message
 
 
+def cleanup_saved_translation(output_file: Path) -> bool:
+    """
+    Attempts SDH cleanup on a saved translated SRT without risking the valid output.
+
+    :param output_file: Saved translated SRT path.
+    :return: True when cleanup was skipped because it produced invalid structure.
+    """
+
+    output_lines = output_file.read_text(encoding="utf-8").splitlines()  # Read valid translated output
+    cleaned_lines, removed_entry_count, mixed_cleaned_entry_count = clean_descriptive_subtitle_lines(output_lines)  # Clean translated output in memory
+    if not removed_entry_count and not mixed_cleaned_entry_count:
+        return False  # No translated cleanup needed
+
+    if not has_valid_srt_structure(cleaned_lines) or count_translatable_characters(cleaned_lines) == 0:
+        print(f"{BackgroundColors.YELLOW}Translated SRT saved successfully, but SDH cleanup was skipped because it produced an invalid structure:{Style.RESET_ALL}\n{BackgroundColors.CYAN}{output_file}{Style.RESET_ALL}")  # Preserve valid translated output
+        return True  # Cleanup warning emitted
+
+    write_srt_lines_atomic(output_file, cleaned_lines)  # Replace only with validated cleaned translation
+    return False  # Cleanup succeeded
+
+
 def calculate_execution_time(start_time, finish_time):
     """
     Calculates the execution time between start and finish times and formats it as hh:mm:ss.
@@ -1521,7 +1585,7 @@ def main():
     planned_files = len(translation_plan)  # Count pending files
     total_planned_characters = preflight_summary["total_characters"]  # Count pending characters only
     other_skipped_files = preflight_summary["empty_skipped"] + preflight_summary["other_skipped"]  # Count non-language skipped files
-    print(f"{BackgroundColors.GREEN}Translation plan: {BackgroundColors.CYAN}{planned_files}{BackgroundColors.GREEN} files | {BackgroundColors.CYAN}{total_planned_characters:,}{BackgroundColors.GREEN} characters | {BackgroundColors.CYAN}{preflight_summary['existing_skipped']}{BackgroundColors.GREEN} existing translations skipped | {BackgroundColors.CYAN}{preflight_summary['target_language_skipped']}{BackgroundColors.GREEN} target-language files skipped | {BackgroundColors.CYAN}{preflight_summary['invalid_language_outputs']}{BackgroundColors.GREEN} invalid-language outputs | {BackgroundColors.CYAN}{preflight_summary['invalid']}{BackgroundColors.GREEN} invalid files{Style.RESET_ALL}")  # Print preflight summary
+    print(f"{BackgroundColors.GREEN}Translation plan: {BackgroundColors.CYAN}{planned_files}{BackgroundColors.GREEN} files | {BackgroundColors.CYAN}{total_planned_characters:,}{BackgroundColors.GREEN} characters | {BackgroundColors.CYAN}{preflight_summary['existing_skipped']}{BackgroundColors.GREEN} existing translations skipped | {BackgroundColors.CYAN}{preflight_summary['target_language_skipped']}{BackgroundColors.GREEN} target-language files skipped | {BackgroundColors.CYAN}{preflight_summary['invalid_language_outputs']}{BackgroundColors.GREEN} invalid-language outputs | {BackgroundColors.CYAN}{preflight_summary['cleanup_fallbacks']}{BackgroundColors.GREEN} cleanup fallbacks | {BackgroundColors.CYAN}{preflight_summary['invalid']}{BackgroundColors.GREEN} invalid files{Style.RESET_ALL}")  # Print preflight summary
 
     translated_files = 0  # Count files translated in this run
     failed_files = 0  # Count failed planned files
@@ -1554,6 +1618,8 @@ def main():
             if planned_file["removed_entries"] or planned_file["mixed_cleaned_entries"]:  # Log concise cleanup summary when cleanup changed content
                 write_srt_lines_atomic(current_srt_path, srt_lines)  # Preserve existing source cleanup behavior after preflight
                 print(f"{BackgroundColors.YELLOW}SDH cleanup: {BackgroundColors.CYAN}{filename}{BackgroundColors.YELLOW} removed {BackgroundColors.CYAN}{planned_file['removed_entries']}{BackgroundColors.YELLOW} entries, cleaned {BackgroundColors.CYAN}{planned_file['mixed_cleaned_entries']}{BackgroundColors.YELLOW} mixed entries.{Style.RESET_ALL}")  # Log cleanup summary
+            if planned_file["cleanup_fallback"]:
+                print(f"{BackgroundColors.YELLOW}Cleanup mode: Original subtitle content{Style.RESET_ALL}")  # Identify fallback source representation once
 
             if not planned_file["detection_conclusive"]:  # Continue normally when language detection is not reliable
                 print(f"{BackgroundColors.YELLOW}Source language detection was inconclusive for {BackgroundColors.CYAN}{filename}{BackgroundColors.YELLOW}. DeepL will determine the source language during translation.{Style.RESET_ALL}")  # Log inconclusive detection
@@ -1572,11 +1638,17 @@ def main():
                 print_progress_event(progress_state, f"{BackgroundColors.RED}{e}{Style.RESET_ALL}")  # Log fatal quota exhaustion cleanly
                 break  # Preserve existing stop-on-fatal-quota behavior
 
+            if translated_lines and not has_valid_srt_structure(translated_lines):
+                failed_files += 1  # Count invalid translated serialization as failed work
+                print_progress_event(progress_state, f"{BackgroundColors.RED}Translated SRT structure is invalid and was not saved: {BackgroundColors.CYAN}{output_file}{Style.RESET_ALL}")  # Preserve output safety
+                continue
             progress_state["completed_files"] += 1  # Count fully translated file
             translated_files += 1  # Count successful file
             translated_characters = progress_state["overall_translated_characters"]  # Store successful character progress
             render_translation_progress(progress_state, force=True)  # Finalize successful file progress
             save_srt(translated_lines, output_file)  # Save the translated SRT to the output file
+            if DESCRIPTIVE_SUBTITLES_REMOVAL and cleanup_saved_translation(output_file):
+                preflight_summary["cleanup_warnings"] += 1  # Count skipped translated cleanup separately from translation failure
 
     finish_time = datetime.datetime.now()  # Get the finish time of the program
     print(
@@ -1590,6 +1662,8 @@ def main():
         f"{BackgroundColors.GREEN}Generated files skipped: {BackgroundColors.CYAN}{preflight_summary['generated_skipped']}{Style.RESET_ALL}\n"
         f"{BackgroundColors.GREEN}Invalid-language outputs: {BackgroundColors.CYAN}{preflight_summary['invalid_language_outputs']}{Style.RESET_ALL}\n"
         f"{BackgroundColors.GREEN}Mislabeled source files: {BackgroundColors.CYAN}{preflight_summary['mislabeled_source_files']}{Style.RESET_ALL}\n"
+        f"{BackgroundColors.GREEN}Cleanup fallbacks: {BackgroundColors.CYAN}{preflight_summary['cleanup_fallbacks']}{Style.RESET_ALL}\n"
+        f"{BackgroundColors.GREEN}Cleanup warnings: {BackgroundColors.CYAN}{preflight_summary['cleanup_warnings']}{Style.RESET_ALL}\n"
         f"{BackgroundColors.GREEN}Other files skipped: {BackgroundColors.CYAN}{other_skipped_files}{Style.RESET_ALL}\n"
         f"{BackgroundColors.GREEN}Invalid files: {BackgroundColors.CYAN}{preflight_summary['invalid']}{Style.RESET_ALL}\n"
         f"{BackgroundColors.GREEN}Files failed: {BackgroundColors.CYAN}{failed_files}{Style.RESET_ALL}\n"
