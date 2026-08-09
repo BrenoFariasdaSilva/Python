@@ -348,6 +348,38 @@ def calculate_execution_time(start_time, finish_time=None):
     return f"{seconds}s"  # Fallback: only seconds
 
 
+def parse_movie_file(movie_path: Path) -> dict[str, object] | None:
+    """
+    Parse a movie file path into comparison metadata.
+
+    :param movie_path: Actual movie file path.
+    :return: Parsed movie metadata or None when parsing fails.
+    """
+
+    release_name = movie_path.stem.strip()  # Read filename without extension
+    year_matches = list(YEAR_PATTERN.finditer(release_name))  # Locate all valid four-digit release years
+    if not year_matches:  # Verify release year exists
+        verbose_output(true_string=f"{BackgroundColors.YELLOW}Skipping movie without year: {BackgroundColors.CYAN}{movie_path}{Style.RESET_ALL}")  # Log missing year
+        return None  # Skip files without release year
+
+    year_match = year_matches[-1]  # Use last valid year so numeric title content remains intact
+    movie_name = release_name[:year_match.start()].strip()  # Keep title text before release year
+    if not movie_name:  # Verify parsed title exists
+        verbose_output(true_string=f"{BackgroundColors.YELLOW}Skipping movie without title: {BackgroundColors.CYAN}{movie_path}{Style.RESET_ALL}")  # Log missing title
+        return None  # Skip files without title
+
+    release_suffix = release_name[year_match.end():].strip()  # Capture metadata text after release year
+    parsed_movie: dict[str, object] = {  # Build parsed movie record
+        "MovieName": movie_name,  # Preserve original parsed movie title
+        "NormalizedMovieName": normalize_movie_title(movie_name),  # Store normalized comparison title
+        "Year": year_match.group(0),  # Store parsed release year
+        "Resolution": extract_resolution(release_suffix),  # Store parsed resolution
+        "Path": str(movie_path),  # Store actual movie file path
+    }  # Finish parsed movie record
+    
+    return parsed_movie  # Return parsed metadata
+
+
 def discover_movie_files(directory_path: str) -> list[dict[str, object]]:
     """
     Recursively discover movie files under a directory.
