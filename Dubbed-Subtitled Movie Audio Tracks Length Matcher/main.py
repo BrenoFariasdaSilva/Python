@@ -11,14 +11,14 @@ Description :
     different-length matches.
 
     Key features include:
-        - Recursive video discovery under E:\\Movies\\Dublado, E:\\Movies\\Legendado, and E:\\Movies\\Dual
+        - Recursive video discovery under E:/Movies/Dublado, E:/Movies/Legendado, and E:/Movies/Dual
         - Release-name parsing for movie title, year, and resolution
         - Deterministic fuzzy title matching with exact-year pairing
         - Video duration extraction through ffprobe at whole-second precision
         - Structured JSON report generation in the local Reports directory
 
 Usage:
-    1. Ensure the input folders exist under E:\\Movies and ffprobe is available on PATH.
+    1. Ensure the input folders exist under E:/Movies and ffprobe is available on PATH.
     2. Run the script with Make or Python.
         $ make run   or   $ python main.py
     3. Review the generated report files inside the Reports directory.
@@ -71,9 +71,9 @@ class BackgroundColors:  # Colors for the terminal
 # Execution Constants:
 VERBOSE = False  # Set to True to output verbose messages
 INPUT_DIRECTORY = "E:/Movies"  # Input directory containing movie category folders
-DUBLADO_DIRECTORY = os.path.join(INPUT_DIRECTORY, "Dublado")  # Dublado movie directory
-LEGENDADO_DIRECTORY = os.path.join(INPUT_DIRECTORY, "Legendado")  # Legendado movie directory
-DUAL_DIRECTORY = os.path.join(INPUT_DIRECTORY, "Dual")  # Dual movie directory
+DUBLADO_DIRECTORY = f"{INPUT_DIRECTORY}/Dublado"  # Dublado movie directory
+LEGENDADO_DIRECTORY = f"{INPUT_DIRECTORY}/Legendado"  # Legendado movie directory
+DUAL_DIRECTORY = f"{INPUT_DIRECTORY}/Dual"  # Dual movie directory
 SOURCE_NAMES = ("Dublado", "Legendado", "Dual")  # Source names in deterministic report order
 SOURCE_DIRECTORIES = {"Dublado": DUBLADO_DIRECTORY, "Legendado": LEGENDADO_DIRECTORY, "Dual": DUAL_DIRECTORY}  # Source directories by source name
 REPORTS_DIRECTORY = Path(__file__).resolve().parent / "Reports"  # Repository report output directory
@@ -408,7 +408,7 @@ def parse_movie_file(movie_path: Path) -> dict[str, object] | None:
         "NormalizedMovieName": normalize_movie_title(movie_name),  # Store normalized comparison title
         "Year": year_match.group(0),  # Store parsed release year
         "Resolution": extract_resolution(release_suffix),  # Store parsed resolution
-        "Path": str(movie_path),  # Store actual movie file path
+        "Path": movie_path.as_posix(),  # Store actual movie file path
     }  # Finish parsed movie record
     
     return parsed_movie  # Return parsed metadata
@@ -621,6 +621,17 @@ def merge_source_values(source_names: list[str], source_values: dict[str, object
     return {source_name: source_values[source_name] for source_name in source_names}  # Return source-specific values
 
 
+def format_report_path(movie_path: object) -> str:
+    """
+    Format a movie path for JSON reports.
+
+    :param movie_path: Movie path value to format.
+    :return: Report path using forward slashes.
+    """
+
+    return str(movie_path).replace(chr(92), "/")  # Return report path with forward slashes
+
+
 def build_third_movie_record(source_name: str, movie: dict[str, object], duration: int | None) -> dict[str, object]:
     """
     Build a supplemental third movie record.
@@ -633,7 +644,7 @@ def build_third_movie_record(source_name: str, movie: dict[str, object], duratio
 
     third_movie: dict[str, object] = {  # Build supplemental third movie record
         "Source": source_name,  # Store source name
-        "Path": movie["Path"],  # Store actual movie file path
+        "Path": format_report_path(movie["Path"]),  # Store actual movie file path
         "Resolution": movie["Resolution"],  # Store parsed resolution
         "Length": format_duration(duration),  # Store formatted duration
     }  # Finish supplemental third movie record
@@ -662,7 +673,7 @@ def build_report_record(movie_group: dict[str, dict[str, object]], source_durati
     }  # Finish initial report record
 
     for source_name in primary_sources:  # Iterate primary sources for path fields
-        report_record[f"{source_name}Path"] = movie_group[source_name]["Path"]  # Store actual source file path
+        report_record[f"{source_name}Path"] = format_report_path(movie_group[source_name]["Path"])  # Store actual source file path
 
     if third_source is not None:  # Verify supplemental third source exists
         report_record["ThirdMovie"] = build_third_movie_record(third_source, movie_group[third_source], source_durations[third_source])  # Store supplemental third movie
@@ -818,11 +829,11 @@ def main():
     finish_time = datetime.datetime.now()  # Get the finish time of the program
     
     print(
-        f"{BackgroundColors.GREEN}Start time: {BackgroundColors.CYAN}{start_time.strftime('%d/%m/%Y - %H:%M:%S')}\n{BackgroundColors.GREEN}Finish time: {BackgroundColors.CYAN}{finish_time.strftime('%d/%m/%Y - %H:%M:%S')}\n{BackgroundColors.GREEN}Execution time: {BackgroundColors.CYAN}{calculate_execution_time(start_time, finish_time)}{Style.RESET_ALL}"
+        f"{BackgroundColors.GREEN}\nStart time: {BackgroundColors.CYAN}{start_time.strftime('%d/%m/%Y - %H:%M:%S')}\n{BackgroundColors.GREEN}Finish time: {BackgroundColors.CYAN}{finish_time.strftime('%d/%m/%Y - %H:%M:%S')}\n{BackgroundColors.GREEN}Execution time: {BackgroundColors.CYAN}{calculate_execution_time(start_time, finish_time)}{Style.RESET_ALL}"
     )  # Output the start and finish times
     
     print(
-        f"{BackgroundColors.BOLD}{BackgroundColors.GREEN}Program finished.{Style.RESET_ALL}"
+        f"{BackgroundColors.BOLD}{BackgroundColors.GREEN}\nProgram finished.{Style.RESET_ALL}"
     )  # Output the end of the program message
     
     (
