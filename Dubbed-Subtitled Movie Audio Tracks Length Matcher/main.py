@@ -348,6 +348,23 @@ def calculate_execution_time(start_time, finish_time=None):
     return f"{seconds}s"  # Fallback: only seconds
 
 
+def format_duration(duration_seconds: int | None) -> str:
+    """
+    Format whole seconds as HH:MM:SS.
+
+    :param duration_seconds: Whole-second duration or None.
+    :return: Formatted duration string.
+    """
+
+    if duration_seconds is None:  # Verify duration is available
+        return ""  # Return empty value when unavailable
+
+    hours = duration_seconds // 3600  # Calculate full hours
+    minutes = (duration_seconds % 3600) // 60  # Calculate remaining minutes
+    seconds = duration_seconds % 60  # Calculate remaining seconds
+    return f"{hours:02d}:{minutes:02d}:{seconds:02d}"  # Return HH:MM:SS duration
+
+
 def merge_pair_value(dublado_value: object, legendado_value: object) -> object:
     """
     Preserve pair values when Dublado and Legendado records differ.
