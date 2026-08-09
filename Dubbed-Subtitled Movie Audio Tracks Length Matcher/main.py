@@ -348,6 +348,20 @@ def calculate_execution_time(start_time, finish_time=None):
     return f"{seconds}s"  # Fallback: only seconds
 
 
+def extract_resolution(release_suffix: str) -> str:
+    """
+    Extract the first resolution token from a release suffix.
+
+    :param release_suffix: Release name text after the parsed year.
+    :return: Resolution token or an empty string.
+    """
+
+    resolution_match = RESOLUTION_PATTERN.search(release_suffix)  # Locate resolution token in suffix
+    if resolution_match:  # Verify a resolution token was found
+        return resolution_match.group(0)  # Return original resolution token
+    return ""  # Return empty resolution when missing
+
+
 def parse_movie_file(movie_path: Path) -> dict[str, object] | None:
     """
     Parse a movie file path into comparison metadata.
