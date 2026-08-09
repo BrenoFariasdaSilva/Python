@@ -69,6 +69,14 @@ class BackgroundColors:  # Colors for the terminal
 
 # Execution Constants:
 VERBOSE = False  # Set to True to output verbose messages
+INPUT_DIRECTORY = "E:/Movies"  # Input directory containing movie category folders
+DUBLADO_DIRECTORY = os.path.join(INPUT_DIRECTORY, "Dublado")  # Dublado movie directory
+LEGENDADO_DIRECTORY = os.path.join(INPUT_DIRECTORY, "Legendado")  # Legendado movie directory
+REPORTS_DIRECTORY = Path(__file__).resolve().parent / "Reports"  # Repository report output directory
+VIDEO_EXTENSIONS = {".avi", ".m2ts", ".m4v", ".mkv", ".mov", ".mp4", ".mpeg", ".mpg", ".ts", ".webm", ".wmv"}  # Supported movie file extensions
+TITLE_MATCH_THRESHOLD = 0.90  # Minimum normalized title similarity for a match
+YEAR_PATTERN = re.compile(r"\b(?:19|20)\d{2}\b")  # Release year pattern
+RESOLUTION_PATTERN = re.compile(r"\b(?:\d{3,4}p|[48]k|hd|fullhd|uhd)\b", re.IGNORECASE)  # Release resolution pattern
 
 # Sound Constants:
 SOUND_COMMANDS = {
