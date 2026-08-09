@@ -349,6 +349,26 @@ def calculate_execution_time(start_time, finish_time=None):
     return f"{seconds}s"  # Fallback: only seconds
 
 
+def find_default_audio_stream(audio_streams: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """
+    Find the audio stream used as the default stream.
+
+    :param audio_streams: Audio streams returned by FFprobe.
+    :return: Default audio stream metadata when available.
+    """
+
+    for audio_stream in audio_streams:  # Inspect audio streams in FFprobe order.
+        disposition = audio_stream.get("disposition", {})  # Read stream disposition metadata.
+
+        if isinstance(disposition, dict) and disposition.get("default") == 1:  # Detect the container default flag.
+            return audio_stream  # Return the explicitly marked default audio stream.
+
+    if audio_streams:  # Detect media files where no explicit default flag exists.
+        return audio_streams[0]  # Use FFprobe order as the deterministic default fallback.
+
+    return None  # Return no default when no audio streams exist.
+
+
 def identify_language(stream: dict[str, Any]) -> str:
     """
     Identify a stream language from metadata and configured aliases.
