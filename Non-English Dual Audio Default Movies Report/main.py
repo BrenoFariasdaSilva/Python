@@ -349,6 +349,22 @@ def calculate_execution_time(start_time, finish_time=None):
     return f"{seconds}s"  # Fallback: only seconds
 
 
+def get_stream_tags(stream: dict[str, Any]) -> dict[str, str]:
+    """
+    Extract string metadata tags from one FFprobe stream.
+
+    :param stream: FFprobe stream metadata.
+    :return: Stream tag mapping with string keys and values.
+    """
+
+    tags_value = stream.get("tags", {})  # Read optional stream tags.
+
+    if not isinstance(tags_value, dict):  # Detect absent or malformed tag metadata.
+        return {}  # Return an empty tag mapping.
+
+    return {str(key): str(value) for key, value in tags_value.items()}  # Return normalized string tags.
+
+
 def get_streams_by_type(metadata: dict[str, Any], codec_type: str) -> list[dict[str, Any]]:
     """
     Return streams matching one FFprobe codec type.
