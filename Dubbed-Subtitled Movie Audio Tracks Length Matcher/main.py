@@ -348,6 +348,22 @@ def calculate_execution_time(start_time, finish_time=None):
     return f"{seconds}s"  # Fallback: only seconds
 
 
+def normalize_movie_title(movie_name: str) -> str:
+    """
+    Normalize a movie title for deterministic comparison.
+
+    :param movie_name: Movie title extracted from a release name.
+    :return: Normalized movie title.
+    """
+
+    normalized = unicodedata.normalize("NFKD", movie_name)  # Split accented characters into comparable parts
+    normalized = "".join(character for character in normalized if not unicodedata.combining(character))  # Remove accent marks
+    normalized = normalized.casefold()  # Normalize case for comparison
+    normalized = re.sub(r"[^\w\s]", " ", normalized, flags=re.UNICODE)  # Replace punctuation with spaces
+    normalized = re.sub(r"\s+", " ", normalized).strip()  # Collapse repeated whitespace
+    return normalized  # Return normalized title
+
+
 def extract_resolution(release_suffix: str) -> str:
     """
     Extract the first resolution token from a release suffix.
