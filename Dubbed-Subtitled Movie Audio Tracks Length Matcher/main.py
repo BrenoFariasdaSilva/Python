@@ -681,6 +681,8 @@ def main():
     
     start_time = datetime.datetime.now()  # Get the start time of the program
     
+    generate_movie_overlap_reports()  # Generate Dublado and Legendado movie overlap reports
+
     finish_time = datetime.datetime.now()  # Get the finish time of the program
     
     print(
