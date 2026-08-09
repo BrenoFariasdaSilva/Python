@@ -349,6 +349,34 @@ def calculate_execution_time(start_time, finish_time=None):
     return f"{seconds}s"  # Fallback: only seconds
 
 
+def build_movie_report_entry(movie_directory: Path, metadata: dict[str, Any]) -> dict[str, Any]:
+    """
+    Build one movie report entry from directory and media metadata.
+
+    :param movie_directory: Movie directory path.
+    :param metadata: Parsed FFprobe metadata.
+    :return: Structured movie report entry.
+    """
+
+    parsed_name = parse_movie_directory_name(movie_directory.name)  # Parse movie naming metadata.
+    format_metadata = metadata.get("format", {})  # Read container format metadata.
+    duration_value = format_metadata.get("duration") if isinstance(format_metadata, dict) else None  # Read duration metadata when available.
+    audio_streams = get_streams_by_type(metadata, "audio")  # Read audio stream metadata.
+    subtitle_streams = get_streams_by_type(metadata, "subtitle")  # Read internal subtitle stream metadata.
+    default_audio_stream = find_default_audio_stream(audio_streams)  # Resolve the default audio stream.
+    internal_subtitles = [format_subtitle_track(stream) for stream in subtitle_streams]  # Format internal subtitle streams.
+    external_subtitles = find_external_subtitles(movie_directory)  # Format external SRT subtitles.
+
+    return {  # Return the structured movie entry.
+        "MovieName": parsed_name["MovieName"],  # Include parsed movie name.
+        "Year": parsed_name["Year"],  # Include parsed movie year.
+        "Resolution": parsed_name["Resolution"],  # Include parsed movie resolution.
+        "Length": format_duration(duration_value),  # Include HH:MM:SS duration.
+        "AudioTracks": [format_audio_track(stream, default_audio_stream) for stream in audio_streams],  # Include every audio track.
+        "SubtitleTracks": internal_subtitles + external_subtitles,  # Include internal and external subtitles.
+    }  # Close the movie report entry.
+
+
 def generate_report() -> Path:
     """
     Generate the non-English default audio movie JSON report.
