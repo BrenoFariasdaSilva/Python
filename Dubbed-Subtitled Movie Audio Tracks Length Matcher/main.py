@@ -348,6 +348,43 @@ def calculate_execution_time(start_time, finish_time=None):
     return f"{seconds}s"  # Fallback: only seconds
 
 
+def select_movie_pairs(dublado_movies: list[dict[str, object]], legendado_movies: list[dict[str, object]]) -> list[tuple[dict[str, object], dict[str, object], float]]:
+    """
+    Select deterministic one-to-one Dublado and Legendado movie pairs.
+
+    :param dublado_movies: Parsed Dublado movie metadata records.
+    :param legendado_movies: Parsed Legendado movie metadata records.
+    :return: Matched movie pairs with similarity scores.
+    """
+
+    candidates = []  # Initialize eligible match candidates
+    for dublado_index, dublado_movie in enumerate(dublado_movies):  # Iterate Dublado movies with stable index
+        for legendado_index, legendado_movie in enumerate(legendado_movies):  # Iterate Legendado movies with stable index
+            if dublado_movie["Year"] != legendado_movie["Year"]:  # Verify release years match exactly
+                continue  # Skip movies from different years
+
+            similarity = movie_similarity(dublado_movie, legendado_movie)  # Calculate normalized title similarity
+            if similarity < TITLE_MATCH_THRESHOLD:  # Verify similarity meets minimum threshold
+                continue  # Skip weak matches
+
+            candidates.append((similarity, dublado_index, legendado_index, dublado_movie, legendado_movie))  # Store eligible candidate
+
+    candidates.sort(key=lambda candidate: (-candidate[0], str(candidate[3]["NormalizedMovieName"]), str(candidate[4]["NormalizedMovieName"]), str(candidate[3]["Path"]), str(candidate[4]["Path"])))  # Sort by best score with deterministic ties
+    used_dublado_indexes = set()  # Track paired Dublado records
+    used_legendado_indexes = set()  # Track paired Legendado records
+    selected_pairs = []  # Initialize selected one-to-one pairs
+
+    for similarity, dublado_index, legendado_index, dublado_movie, legendado_movie in candidates:  # Iterate sorted candidates
+        if dublado_index in used_dublado_indexes or legendado_index in used_legendado_indexes:  # Verify neither side is already paired
+            continue  # Skip duplicate pairing
+
+        used_dublado_indexes.add(dublado_index)  # Mark Dublado movie as paired
+        used_legendado_indexes.add(legendado_index)  # Mark Legendado movie as paired
+        selected_pairs.append((dublado_movie, legendado_movie, similarity))  # Store final pair
+
+    return selected_pairs  # Return deterministic selected pairs
+
+
 def get_video_duration_seconds(movie_path: str) -> int | None:
     """
     Read a video duration with ffprobe at whole-second precision.
