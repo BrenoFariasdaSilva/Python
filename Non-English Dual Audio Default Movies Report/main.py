@@ -349,6 +349,44 @@ def calculate_execution_time(start_time, finish_time=None):
     return f"{seconds}s"  # Fallback: only seconds
 
 
+def run_ffprobe_metadata(movie_file: Path) -> dict[str, Any]:
+    """
+    Read media format and stream metadata from one movie file.
+
+    :param movie_file: Movie file inspected by FFprobe.
+    :return: Parsed FFprobe metadata.
+    """
+
+    command = [  # Build the FFprobe JSON metadata command.
+        "ffprobe",  # Select the FFprobe executable.
+        "-v",  # Configure FFprobe output verbosity.
+        "error",  # Emit errors only.
+        "-show_format",  # Include container format metadata.
+        "-show_streams",  # Include stream metadata.
+        "-of",  # Configure output format.
+        "json",  # Emit structured JSON.
+        str(movie_file),  # Pass the movie file path.
+    ]  # Close the FFprobe command vector.
+
+    try:  # Run FFprobe and capture the JSON output.
+        result = subprocess.run(command, capture_output=True, text=True, encoding="utf-8", errors="replace", check=True)  # Execute FFprobe with deterministic text decoding.
+    except subprocess.CalledProcessError as error:  # Convert FFprobe failures into runtime errors.
+        details = error.stderr.strip() or "No FFprobe error output was provided."  # Preserve FFprobe diagnostic text.
+        raise RuntimeError(f"FFprobe failed for {movie_file}: {details}") from error  # Raise a contextual metadata error.
+    except OSError as error:  # Convert executable launch failures into runtime errors.
+        raise RuntimeError(f"FFprobe could not be started for {movie_file}: {error}") from error  # Raise a contextual launch error.
+
+    try:  # Parse FFprobe JSON output.
+        metadata = json.loads(result.stdout)  # Decode FFprobe JSON metadata.
+    except json.JSONDecodeError as error:  # Convert malformed JSON into runtime errors.
+        raise RuntimeError(f"FFprobe returned invalid JSON for {movie_file}.") from error  # Raise a contextual JSON error.
+
+    if not isinstance(metadata, dict):  # Detect an invalid top-level FFprobe shape.
+        raise RuntimeError(f"FFprobe returned unexpected metadata for {movie_file}.")  # Reject malformed FFprobe metadata.
+
+    return metadata  # Return parsed metadata.
+
+
 def format_duration(duration_value: Any) -> str:
     """
     Format a media duration value as HH:MM:SS.
