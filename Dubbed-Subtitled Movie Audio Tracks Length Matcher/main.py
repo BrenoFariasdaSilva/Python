@@ -44,9 +44,14 @@ Assumptions & Notes:
 
 import atexit  # For playing a sound when the program finishes
 import datetime  # For getting the current date and time
+import difflib  # For deterministic fuzzy title matching
+import json  # For writing structured report files
 import os  # For running a command in the terminal
 import platform  # For getting the operating system name
+import re  # For parsing release names
+import subprocess  # For reading video metadata through ffprobe
 import sys  # For system-specific parameters and functions
+import unicodedata  # For normalizing accented title text
 from colorama import Style  # For coloring the terminal
 from pathlib import Path  # For handling file paths
 
