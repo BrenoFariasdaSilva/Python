@@ -349,6 +349,32 @@ def calculate_execution_time(start_time, finish_time=None):
     return f"{seconds}s"  # Fallback: only seconds
 
 
+def format_subtitle_track(stream: dict[str, Any]) -> str:
+    """
+    Format one internal subtitle stream for the JSON report.
+
+    :param stream: FFprobe subtitle stream metadata.
+    :return: Human-readable internal subtitle text.
+    """
+
+    tags = get_stream_tags(stream)  # Read subtitle metadata tags.
+    language = tags.get("language", "").strip()  # Read subtitle language metadata.
+    title = tags.get("title", "").strip()  # Read subtitle title metadata.
+    codec = str(stream.get("codec_name") or "").strip()  # Read subtitle codec metadata.
+    parts = ["Internal:"]  # Start the internal subtitle display marker.
+
+    if language:  # Detect subtitle language metadata.
+        parts.append(language)  # Add subtitle language metadata.
+
+    if codec:  # Detect subtitle codec metadata.
+        parts.append(f"({codec})")  # Add subtitle codec metadata.
+
+    if title:  # Detect subtitle title metadata.
+        parts.append(f"- {title}")  # Add subtitle title metadata.
+
+    return " ".join(parts).strip()  # Return formatted internal subtitle text.
+
+
 def find_external_subtitles(movie_directory: Path) -> list[str]:
     """
     Find external SRT subtitle files in one movie directory.
