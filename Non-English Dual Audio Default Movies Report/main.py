@@ -69,6 +69,15 @@ class BackgroundColors:  # Colors for the terminal
 
 # Execution Constants:
 VERBOSE = False  # Set to True to output verbose messages
+INPUT_DIRECTORY = "E:/Movies/Dual/"  # Set the movie library root directory
+SCRIPT_DIRECTORY = Path(__file__).resolve().parent  # Resolve the executing file directory
+REPORTS_DIRECTORY = SCRIPT_DIRECTORY / "Reports"  # Set the script report directory
+REPORT_FILE = REPORTS_DIRECTORY / "non_english_default_audio_movies.json"  # Set the JSON report output path
+SUPPORTED_VIDEO_EXTENSIONS = (".mkv", ".mp4", ".avi", ".mov")  # Define supported video file extensions
+LANGUAGES_MAPPING = {  # Map display languages to known metadata aliases
+    "English": ["english", "eng", "en", "Inglês"],  # Map English aliases
+    "Brazilian Portuguese": ["PT-BR FULL", "brazilian", "portuguese", "COMPLETA PT-BR", "PT-BR COMPLETA", "Português (Brasil)", "pt-br", "pt"],  # Map Brazilian Portuguese aliases
+}  # Close the language mapping
 
 # Sound Constants:
 SOUND_COMMANDS = {
