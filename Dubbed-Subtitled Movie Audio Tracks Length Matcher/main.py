@@ -348,6 +348,20 @@ def calculate_execution_time(start_time, finish_time=None):
     return f"{seconds}s"  # Fallback: only seconds
 
 
+def merge_pair_value(dublado_value: object, legendado_value: object) -> object:
+    """
+    Preserve pair values when Dublado and Legendado records differ.
+
+    :param dublado_value: Dublado value.
+    :param legendado_value: Legendado value.
+    :return: Single shared value or a side-specific value mapping.
+    """
+
+    if dublado_value == legendado_value:  # Verify values are identical
+        return dublado_value  # Return single shared value
+    return {"Dublado": dublado_value, "Legendado": legendado_value}  # Return side-specific values
+
+
 def build_report_record(dublado_movie: dict[str, object], legendado_movie: dict[str, object], dublado_duration: int | None, legendado_duration: int | None) -> dict[str, object]:
     """
     Build a report record for a matched movie pair.
