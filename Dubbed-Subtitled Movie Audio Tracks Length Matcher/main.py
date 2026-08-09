@@ -348,6 +348,30 @@ def calculate_execution_time(start_time, finish_time=None):
     return f"{seconds}s"  # Fallback: only seconds
 
 
+def build_report_record(dublado_movie: dict[str, object], legendado_movie: dict[str, object], dublado_duration: int | None, legendado_duration: int | None) -> dict[str, object]:
+    """
+    Build a report record for a matched movie pair.
+
+    :param dublado_movie: Parsed Dublado movie metadata.
+    :param legendado_movie: Parsed Legendado movie metadata.
+    :param dublado_duration: Dublado whole-second duration.
+    :param legendado_duration: Legendado whole-second duration.
+    :return: Structured JSON report record.
+    """
+
+    dublado_length = format_duration(dublado_duration)  # Format Dublado duration
+    legendado_length = format_duration(legendado_duration)  # Format Legendado duration
+    report_record = {  # Build report record with required top-level fields
+        "MovieName": merge_pair_value(dublado_movie["MovieName"], legendado_movie["MovieName"]),  # Preserve title values
+        "Year": dublado_movie["Year"],  # Store exact matched release year
+        "Resolution": merge_pair_value(dublado_movie["Resolution"], legendado_movie["Resolution"]),  # Preserve resolution values
+        "Length": merge_pair_value(dublado_length, legendado_length),  # Preserve duration values
+        "DubladoPath": dublado_movie["Path"],  # Store actual Dublado file path
+        "LegendadoPath": legendado_movie["Path"],  # Store actual Legendado file path
+    }  # Finish report record
+    return report_record  # Return report record
+
+
 def report_sort_key(report_record: dict[str, object]) -> str:
     """
     Build a deterministic case-insensitive report sort key.
