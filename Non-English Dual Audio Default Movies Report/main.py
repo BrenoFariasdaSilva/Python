@@ -1,49 +1,45 @@
 """
 ================================================================================
-<PROJECT OR SCRIPT TITLE>
+Non-English Dual Audio Default Movies Report
 ================================================================================
 Author      : Breno Farias da Silva
 Created     : <YYYY-MM-DD>
 Description :
-    <Provide a concise and complete overview of what this script does.>
-    <Mention its purpose, scope, and relevance to the larger project.>
+    This script analyzes movie directories under E:/Movies/Dual/ and reports
+    movies whose actual default audio track is not identified as English.
+    It reads media metadata through FFprobe, resolves language values through
+    LANGUAGES_MAPPING, and preserves uncertain default-audio language cases.
 
     Key features include:
-        - <Feature 1 — e.g., automatic data loading and preprocessing>
-        - <Feature 2 — e.g., model training and evaluation>
-        - <Feature 3 — e.g., visualization or report generation>
-        - <Feature 4 — e.g., logging or notification system>
-        - <Feature 5 — e.g., integration with other modules or datasets>
+        - Movie directory discovery under E:/Movies/Dual/
+        - Deterministic video file selection without treating .srt files as movies
+        - Default audio stream detection from media container metadata
+        - Language identification using media metadata and LANGUAGES_MAPPING
+        - Movie metadata, audio tracks, internal subtitles, and external .srt subtitles
+        - Structured JSON report generation in the script Reports directory
 
 Usage:
-    1. <Explain any configuration steps before running, such as editing variables or paths.>
-    2. <Describe how to execute the script — typically via Makefile or Python.>
-        $ make <target>   or   $ python <script_name>.py
-    3. <List what outputs are expected or where results are saved.>
+    1. Set INPUT_DIRECTORY to the movie library root.
+    2. Ensure FFprobe is installed and available through the system PATH.
+    3. Run the script via terminal:
+        $ make run   or   $ python main.py
 
 Outputs:
-    - <Output file or directory 1 — e.g., results.csv>
-    - <Output file or directory 2 — e.g., Feature_Analysis/plots/>
-    - <Output file or directory 3 — e.g., logs/output.txt>
+    - Non-English Dual Audio Default Movies Report/Reports/non_english_default_audio_movies.json
 
 TODOs:
-    - <Add a task or improvement — e.g., implement CLI argument parsing.>
-    - <Add another improvement — e.g., extend support to Parquet files.>
-    - <Add optimization — e.g., parallelize evaluation loop.>
-    - <Add robustness — e.g., error handling or data validation.>
+    - Add CLI arguments for input and report paths if needed.
 
 Dependencies:
-    - Python >= <version>
-    - <Library 1 — e.g., pandas>
-    - <Library 2 — e.g., numpy>
-    - <Library 3 — e.g., scikit-learn>
-    - <Library 4 — e.g., matplotlib, seaborn, tqdm, colorama>
+    - Python
+    - FFprobe
+    - colorama
 
 Assumptions & Notes:
-    - <List any key assumptions — e.g., last column is the target variable.>
-    - <Mention data format — e.g., CSV files only.>
-    - <Mention platform or OS-specific notes — e.g., sound disabled on Windows.>
-    - <Note on output structure or reusability.>
+    - Each direct subdirectory of INPUT_DIRECTORY represents one movie.
+    - Movie directory names follow MovieName Year Resolution Language.
+    - Unknown default-audio language metadata is recorded separately from the
+      primary non-English report list.
 """
 
 import atexit  # For playing a sound when the program finishes
