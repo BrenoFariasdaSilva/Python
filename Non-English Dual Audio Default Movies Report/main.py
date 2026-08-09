@@ -349,6 +349,60 @@ def calculate_execution_time(start_time, finish_time=None):
     return f"{seconds}s"  # Fallback: only seconds
 
 
+def generate_report() -> Path:
+    """
+    Generate the non-English default audio movie JSON report.
+
+    :return: Written report path.
+    """
+
+    validate_ffprobe_available()  # Validate FFprobe availability.
+    input_directory = Path(INPUT_DIRECTORY)  # Build the input directory path.
+
+    if not input_directory.exists():  # Detect a missing input directory.
+        raise FileNotFoundError(f"Input directory not found: {input_directory}")  # Stop execution when the movie root is absent.
+
+    movie_directories = sorted(  # Collect movie directories deterministically.
+        (candidate for candidate in input_directory.iterdir() if candidate.is_dir()),  # Keep direct child directories only.
+        key=lambda candidate: candidate.name.casefold(),  # Sort directories case-insensitively.
+    )  # Close the movie directory collection.
+    reported_movies = []  # Store movies with non-English default audio.
+    unknown_default_audio_language = []  # Store movies with unresolved default audio language.
+
+    for movie_directory in movie_directories:  # Process each movie directory.
+        movie_file = find_movie_file(movie_directory)  # Resolve the movie file path.
+
+        if movie_file is None:  # Detect skipped directories.
+            continue  # Continue with the next movie directory.
+
+        try:  # Read metadata for this movie.
+            metadata = run_ffprobe_metadata(movie_file)  # Extract FFprobe metadata.
+            audio_streams = get_streams_by_type(metadata, "audio")  # Read audio stream metadata.
+            default_audio_stream = find_default_audio_stream(audio_streams)  # Resolve default audio stream metadata.
+            default_language = identify_language(default_audio_stream) if default_audio_stream is not None else "Unknown"  # Identify default audio language.
+            movie_entry = build_movie_report_entry(movie_directory, metadata)  # Build the movie report entry.
+        except Exception as error:  # Preserve processing failures without aborting the full report.
+            print(f"{BackgroundColors.RED}[WARNING] Failed to process {movie_directory}: {error}{Style.RESET_ALL}")  # Report the failed movie directory.
+            continue  # Continue with the next movie directory.
+
+        if default_language == "English":  # Exclude confident English default audio.
+            continue  # Continue with the next movie directory.
+
+        if default_language == "Unknown":  # Preserve unresolved language metadata separately.
+            unknown_default_audio_language.append(movie_entry)  # Add movie to the unknown-language collection.
+            continue  # Continue with the next movie directory.
+
+        reported_movies.append(movie_entry)  # Add movie to the non-English report collection.
+
+    reported_movies.sort(key=lambda movie: str(movie["MovieName"]).casefold())  # Sort reported movies by name.
+    unknown_default_audio_language.sort(key=lambda movie: str(movie["MovieName"]).casefold())  # Sort unknown-language movies by name.
+    report_data = {"Movies": reported_movies, "UnknownDefaultAudioLanguage": unknown_default_audio_language}  # Build the structured report payload.
+    REPORTS_DIRECTORY.mkdir(parents=True, exist_ok=True)  # Create the script Reports directory when needed.
+    REPORT_FILE.write_text(json.dumps(report_data, indent=4, ensure_ascii=False) + "\n", encoding="utf-8")  # Write human-readable JSON.
+
+    return REPORT_FILE  # Return the written report path.
+
+
 def play_sound():
     """
     Plays a sound when the program finishes and skips if the operating system is Windows.
