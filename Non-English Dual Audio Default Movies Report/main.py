@@ -349,6 +349,26 @@ def calculate_execution_time(start_time, finish_time=None):
     return f"{seconds}s"  # Fallback: only seconds
 
 
+def format_duration(duration_value: Any) -> str:
+    """
+    Format a media duration value as HH:MM:SS.
+
+    :param duration_value: Raw FFprobe duration value.
+    :return: Duration formatted as HH:MM:SS.
+    """
+
+    try:  # Convert FFprobe duration seconds to a float.
+        total_seconds = int(round(float(duration_value)))  # Round duration to the nearest full second.
+    except (TypeError, ValueError):  # Handle missing or malformed durations.
+        total_seconds = 0  # Use a deterministic zero duration for missing metadata.
+
+    hours = total_seconds // 3600  # Calculate full hours.
+    minutes = (total_seconds % 3600) // 60  # Calculate remaining minutes.
+    seconds = total_seconds % 60  # Calculate remaining seconds.
+
+    return f"{hours:02d}:{minutes:02d}:{seconds:02d}"  # Return HH:MM:SS duration text.
+
+
 def get_stream_tags(stream: dict[str, Any]) -> dict[str, str]:
     """
     Extract string metadata tags from one FFprobe stream.
