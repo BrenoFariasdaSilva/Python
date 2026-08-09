@@ -349,6 +349,37 @@ def calculate_execution_time(start_time, finish_time=None):
     return f"{seconds}s"  # Fallback: only seconds
 
 
+def identify_language(stream: dict[str, Any]) -> str:
+    """
+    Identify a stream language from metadata and configured aliases.
+
+    :param stream: FFprobe stream metadata.
+    :return: Language display name or Unknown.
+    """
+
+    tags = get_stream_tags(stream)  # Read stream tag metadata.
+    language = tags.get("language", "").strip()  # Read language tag metadata.
+    title = tags.get("title", "").strip()  # Read title metadata.
+    normalized_language = language.casefold()  # Normalize language metadata for matching.
+    normalized_title = title.casefold()  # Normalize title metadata for matching.
+    title_tokens = set(re.split(r"[^0-9a-zA-ZÀ-ÿ]+", normalized_title))  # Split title metadata into searchable tokens.
+
+    for display_name, aliases in LANGUAGES_MAPPING.items():  # Compare every configured language alias.
+        for alias in aliases:  # Compare every alias for this display language.
+            normalized_alias = alias.casefold()  # Normalize the alias for case-insensitive matching.
+
+            if normalized_alias == normalized_language:  # Match exact language tag metadata.
+                return display_name  # Return the configured language display name.
+
+            if normalized_alias in title_tokens or (len(normalized_alias) > 2 and normalized_alias in normalized_title):  # Match title metadata safely.
+                return display_name  # Return the configured language display name.
+
+    if language and language.casefold() not in {"und", "unknown"}:  # Preserve defined non-English language tags.
+        return language  # Return the raw language tag when no configured alias matched.
+
+    return "Unknown"  # Return a deterministic unknown language value.
+
+
 def format_audio_track(stream: dict[str, Any], default_audio_stream: dict[str, Any] | None) -> str:
     """
     Format one audio stream for the JSON report.
