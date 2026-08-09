@@ -44,11 +44,16 @@ Assumptions & Notes:
 
 import atexit  # For playing a sound when the program finishes
 import datetime  # For getting the current date and time
+import json  # For reading FFprobe metadata and writing JSON reports
 import os  # For running a command in the terminal
 import platform  # For getting the operating system name
+import re  # For parsing movie directory names
+import shutil  # For locating FFprobe
+import subprocess  # For running FFprobe
 import sys  # For system-specific parameters and functions
 from colorama import Style  # For coloring the terminal
 from pathlib import Path  # For handling file paths
+from typing import Any  # For typing FFprobe JSON data
 
 
 # Macros:
