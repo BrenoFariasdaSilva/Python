@@ -5,12 +5,13 @@ Dubbed-Subtitled Movie Audio Tracks Length Matcher
 Author      : Breno Farias da Silva
 Created     : 2026-08-09
 Description :
-    Scan movie files under the dubbed and subtitled library folders, match
-    movies that exist in both trees, compare their real video durations, and
-    generate JSON reports for equal-length and different-length pairs.
+    Scan movie files under dubbed, subtitled, and dual-audio library folders,
+    match movies that exist in at least two source trees, compare their real
+    video durations, and generate JSON reports for equal-length and
+    different-length matches.
 
     Key features include:
-        - Recursive video discovery under E:\\Movies\\Dublado and E:\\Movies\\Legendado
+        - Recursive video discovery under E:\\Movies\\Dublado, E:\\Movies\\Legendado, and E:\\Movies\\Dual
         - Release-name parsing for movie title, year, and resolution
         - Deterministic fuzzy title matching with exact-year pairing
         - Video duration extraction through ffprobe at whole-second precision
@@ -72,6 +73,9 @@ VERBOSE = False  # Set to True to output verbose messages
 INPUT_DIRECTORY = "E:/Movies"  # Input directory containing movie category folders
 DUBLADO_DIRECTORY = os.path.join(INPUT_DIRECTORY, "Dublado")  # Dublado movie directory
 LEGENDADO_DIRECTORY = os.path.join(INPUT_DIRECTORY, "Legendado")  # Legendado movie directory
+DUAL_DIRECTORY = os.path.join(INPUT_DIRECTORY, "Dual")  # Dual movie directory
+SOURCE_NAMES = ("Dublado", "Legendado", "Dual")  # Source names in deterministic report order
+SOURCE_DIRECTORIES = {"Dublado": DUBLADO_DIRECTORY, "Legendado": LEGENDADO_DIRECTORY, "Dual": DUAL_DIRECTORY}  # Source directories by source name
 REPORTS_DIRECTORY = Path(__file__).resolve().parent / "Reports"  # Repository report output directory
 VIDEO_EXTENSIONS = {".avi", ".m2ts", ".m4v", ".mkv", ".mov", ".mp4", ".mpeg", ".mpg", ".ts", ".webm", ".wmv"}  # Supported movie file extensions
 TITLE_MATCH_THRESHOLD = 0.90  # Minimum normalized title similarity for a match
@@ -437,6 +441,7 @@ def discover_movie_files(directory_path: str) -> list[dict[str, object]]:
 
         movies.append(parsed_movie)  # Store parsed movie metadata
 
+    movies.sort(key=lambda movie: (str(movie["Year"]), str(movie["NormalizedMovieName"]), str(movie["Path"])))  # Sort movies deterministically
     return movies  # Return discovered movie records
 
 
@@ -454,41 +459,105 @@ def movie_similarity(dublado_movie: dict[str, object], legendado_movie: dict[str
     return difflib.SequenceMatcher(None, dublado_title, legendado_title).ratio()  # Return deterministic similarity score
 
 
-def select_movie_pairs(dublado_movies: list[dict[str, object]], legendado_movies: list[dict[str, object]]) -> list[tuple[dict[str, object], dict[str, object], float]]:
+def movie_record_key(movie: dict[str, object]) -> str:
     """
-    Select deterministic one-to-one Dublado and Legendado movie pairs.
+    Build a stable physical movie file key.
 
-    :param dublado_movies: Parsed Dublado movie metadata records.
-    :param legendado_movies: Parsed Legendado movie metadata records.
-    :return: Matched movie pairs with similarity scores.
+    :param movie: Parsed movie metadata.
+    :return: Stable physical movie file key.
     """
 
-    candidates = []  # Initialize eligible match candidates
-    for dublado_index, dublado_movie in enumerate(dublado_movies):  # Iterate Dublado movies with stable index
-        for legendado_index, legendado_movie in enumerate(legendado_movies):  # Iterate Legendado movies with stable index
-            if dublado_movie["Year"] != legendado_movie["Year"]:  # Verify release years match exactly
-                continue  # Skip movies from different years
+    return str(movie["Path"])  # Return stable physical file key
 
-            similarity = movie_similarity(dublado_movie, legendado_movie)  # Calculate normalized title similarity
-            if similarity < TITLE_MATCH_THRESHOLD:  # Verify similarity meets minimum threshold
-                continue  # Skip weak matches
 
-            candidates.append((similarity, dublado_index, legendado_index, dublado_movie, legendado_movie))  # Store eligible candidate
+def movie_group_sort_key(movie_group: dict[str, dict[str, object]]) -> str:
+    """
+    Build a deterministic sort key for a matched movie group.
 
-    candidates.sort(key=lambda candidate: (-candidate[0], str(candidate[3]["NormalizedMovieName"]), str(candidate[4]["NormalizedMovieName"]), str(candidate[3]["Path"]), str(candidate[4]["Path"])))  # Sort by best score with deterministic ties
-    used_dublado_indexes = set()  # Track paired Dublado records
-    used_legendado_indexes = set()  # Track paired Legendado records
-    selected_pairs = []  # Initialize selected one-to-one pairs
+    :param movie_group: Matched source movie group.
+    :return: Normalized movie group sort key.
+    """
 
-    for similarity, dublado_index, legendado_index, dublado_movie, legendado_movie in candidates:  # Iterate sorted candidates
-        if dublado_index in used_dublado_indexes or legendado_index in used_legendado_indexes:  # Verify neither side is already paired
-            continue  # Skip duplicate pairing
+    source_names = [source_name for source_name in SOURCE_NAMES if source_name in movie_group]  # Preserve configured source order
+    first_movie = movie_group[source_names[0]]  # Read first available source movie
+    return f"{first_movie['Year']}|{normalize_movie_title(str(first_movie['MovieName']))}|{movie_record_key(first_movie)}"  # Return stable group key
 
-        used_dublado_indexes.add(dublado_index)  # Mark Dublado movie as paired
-        used_legendado_indexes.add(legendado_index)  # Mark Legendado movie as paired
-        selected_pairs.append((dublado_movie, legendado_movie, similarity))  # Store final pair
 
-    return selected_pairs  # Return deterministic selected pairs
+def select_movie_groups(source_movies: dict[str, list[dict[str, object]]]) -> list[dict[str, dict[str, object]]]:
+    """
+    Select deterministic matched movie groups across configured sources.
+
+    :param source_movies: Parsed movie metadata records by source name.
+    :return: Matched movie groups containing at least two sources.
+    """
+
+    candidates: list[tuple[float, str, str, dict[str, object], dict[str, object]]] = []  # Initialize eligible match candidates
+    for left_source_index, left_source_name in enumerate(SOURCE_NAMES):  # Iterate source names in deterministic order
+        for right_source_name in SOURCE_NAMES[left_source_index + 1:]:  # Iterate later source names for cross-source pairs
+            left_movies = source_movies.get(left_source_name, [])  # Read left source movies
+            right_movies = source_movies.get(right_source_name, [])  # Read right source movies
+
+            for left_movie in left_movies:  # Iterate left source movies
+                for right_movie in right_movies:  # Iterate right source movies
+                    if left_movie["Year"] != right_movie["Year"]:  # Verify release years match exactly
+                        continue  # Skip movies from different years
+
+                    similarity = movie_similarity(left_movie, right_movie)  # Calculate normalized title similarity
+                    if similarity < TITLE_MATCH_THRESHOLD:  # Verify similarity meets minimum threshold
+                        continue  # Skip weak matches
+
+                    candidates.append((similarity, left_source_name, right_source_name, left_movie, right_movie))  # Store eligible candidate
+
+    candidates.sort(key=lambda candidate: (-candidate[0], candidate[1], candidate[2], str(candidate[3]["NormalizedMovieName"]), str(candidate[4]["NormalizedMovieName"]), str(candidate[3]["Path"]), str(candidate[4]["Path"])))  # Sort by best score with deterministic ties
+    movie_groups: list[dict[str, dict[str, object]]] = []  # Initialize matched movie groups
+    movie_group_by_key: dict[str, dict[str, dict[str, object]]] = {}  # Map physical movies to assigned groups
+
+    for candidate in candidates:  # Iterate sorted candidates
+        left_source_name = candidate[1]  # Read left source name
+        right_source_name = candidate[2]  # Read right source name
+        left_movie = candidate[3]  # Read left movie record
+        right_movie = candidate[4]  # Read right movie record
+        left_key = movie_record_key(left_movie)  # Build left movie key
+        right_key = movie_record_key(right_movie)  # Build right movie key
+        left_group = movie_group_by_key.get(left_key)  # Read existing left movie group
+        right_group = movie_group_by_key.get(right_key)  # Read existing right movie group
+
+        if left_group is None and right_group is None:  # Verify both movies are unassigned
+            movie_group = {left_source_name: left_movie, right_source_name: right_movie}  # Create new matched group
+            movie_groups.append(movie_group)  # Store new matched group
+            movie_group_by_key[left_key] = movie_group  # Assign left movie to group
+            movie_group_by_key[right_key] = movie_group  # Assign right movie to group
+            continue  # Continue candidate processing
+
+        if left_group is not None and right_group is None:  # Verify only left movie is assigned
+            if right_source_name not in left_group:  # Verify right source is absent from group
+                left_group[right_source_name] = right_movie  # Add right movie to existing group
+                movie_group_by_key[right_key] = left_group  # Assign right movie to group
+            continue  # Continue candidate processing
+
+        if left_group is None and right_group is not None:  # Verify only right movie is assigned
+            if left_source_name not in right_group:  # Verify left source is absent from group
+                right_group[left_source_name] = left_movie  # Add left movie to existing group
+                movie_group_by_key[left_key] = right_group  # Assign left movie to group
+            continue  # Continue candidate processing
+
+        if left_group is right_group:  # Verify both movies already share one group
+            continue  # Continue candidate processing
+
+        if left_group is None or right_group is None:  # Verify both groups exist before merging
+            continue  # Continue candidate processing
+
+        if any(source_name in left_group for source_name in right_group):  # Verify groups have no source collision
+            continue  # Continue candidate processing
+
+        for source_name, grouped_movie in right_group.items():  # Iterate merged source movies
+            left_group[source_name] = grouped_movie  # Add merged source movie
+            movie_group_by_key[movie_record_key(grouped_movie)] = left_group  # Reassign merged movie to final group
+        movie_groups.remove(right_group)  # Remove merged group shell
+
+    matched_groups = [movie_group for movie_group in movie_groups if len(movie_group) >= 2]  # Keep groups with at least two sources
+    matched_groups.sort(key=movie_group_sort_key)  # Sort groups deterministically
+    return matched_groups  # Return selected movie groups
 
 
 def get_video_duration_seconds(movie_path: str) -> int | None:
@@ -537,41 +606,67 @@ def format_duration(duration_seconds: int | None) -> str:
     return f"{hours:02d}:{minutes:02d}:{seconds:02d}"  # Return HH:MM:SS duration
 
 
-def merge_pair_value(dublado_value: object, legendado_value: object) -> object:
+def merge_source_values(source_names: list[str], source_values: dict[str, object]) -> object:
     """
-    Preserve pair values when Dublado and Legendado records differ.
+    Preserve source values when matched source records differ.
 
-    :param dublado_value: Dublado value.
-    :param legendado_value: Legendado value.
-    :return: Single shared value or a side-specific value mapping.
+    :param source_names: Source names to include.
+    :param source_values: Values by source name.
+    :return: Single shared value or a source-specific value mapping.
     """
 
-    if dublado_value == legendado_value:  # Verify values are identical
-        return dublado_value  # Return single shared value
-    return {"Dublado": dublado_value, "Legendado": legendado_value}  # Return side-specific values
+    values = [source_values[source_name] for source_name in source_names]  # Read values in source order
+    if all(value == values[0] for value in values):  # Verify all values are identical
+        return values[0]  # Return single shared value
+    return {source_name: source_values[source_name] for source_name in source_names}  # Return source-specific values
 
 
-def build_report_record(dublado_movie: dict[str, object], legendado_movie: dict[str, object], dublado_duration: int | None, legendado_duration: int | None) -> dict[str, object]:
+def build_third_movie_record(source_name: str, movie: dict[str, object], duration: int | None) -> dict[str, object]:
     """
-    Build a report record for a matched movie pair.
+    Build a supplemental third movie record.
 
-    :param dublado_movie: Parsed Dublado movie metadata.
-    :param legendado_movie: Parsed Legendado movie metadata.
-    :param dublado_duration: Dublado whole-second duration.
-    :param legendado_duration: Legendado whole-second duration.
+    :param source_name: Source name for the supplemental movie.
+    :param movie: Parsed movie metadata for the supplemental movie.
+    :param duration: Whole-second duration for the supplemental movie.
+    :return: Structured supplemental movie record.
+    """
+
+    third_movie: dict[str, object] = {  # Build supplemental third movie record
+        "Source": source_name,  # Store source name
+        "Path": movie["Path"],  # Store actual movie file path
+        "Resolution": movie["Resolution"],  # Store parsed resolution
+        "Length": format_duration(duration),  # Store formatted duration
+    }  # Finish supplemental third movie record
+    return third_movie  # Return supplemental third movie record
+
+
+def build_report_record(movie_group: dict[str, dict[str, object]], source_durations: dict[str, int | None], primary_sources: list[str], third_source: str | None) -> dict[str, object]:
+    """
+    Build a report record for a matched movie group.
+
+    :param movie_group: Matched source movie group.
+    :param source_durations: Whole-second durations by source name.
+    :param primary_sources: Source names represented in top-level fields.
+    :param third_source: Optional unmatched third source name.
     :return: Structured JSON report record.
     """
 
-    dublado_length = format_duration(dublado_duration)  # Format Dublado duration
-    legendado_length = format_duration(legendado_duration)  # Format Legendado duration
-    report_record = {  # Build report record with required top-level fields
-        "MovieName": merge_pair_value(dublado_movie["MovieName"], legendado_movie["MovieName"]),  # Preserve title values
-        "Year": dublado_movie["Year"],  # Store exact matched release year
-        "Resolution": merge_pair_value(dublado_movie["Resolution"], legendado_movie["Resolution"]),  # Preserve resolution values
-        "Length": merge_pair_value(dublado_length, legendado_length),  # Preserve duration values
-        "DubladoPath": dublado_movie["Path"],  # Store actual Dublado file path
-        "LegendadoPath": legendado_movie["Path"],  # Store actual Legendado file path
-    }  # Finish report record
+    movie_names: dict[str, object] = {source_name: movie_group[source_name]["MovieName"] for source_name in primary_sources}  # Build movie names by source
+    resolutions: dict[str, object] = {source_name: movie_group[source_name]["Resolution"] for source_name in primary_sources}  # Build resolutions by source
+    lengths: dict[str, object] = {source_name: format_duration(source_durations[source_name]) for source_name in primary_sources}  # Build lengths by source
+    report_record: dict[str, object] = {  # Build report record with required top-level fields
+        "MovieName": merge_source_values(primary_sources, movie_names),  # Preserve title values
+        "Year": movie_group[primary_sources[0]]["Year"],  # Store exact matched release year
+        "Resolution": merge_source_values(primary_sources, resolutions),  # Preserve resolution values
+        "Length": merge_source_values(primary_sources, lengths),  # Preserve duration values
+    }  # Finish initial report record
+
+    for source_name in primary_sources:  # Iterate primary sources for path fields
+        report_record[f"{source_name}Path"] = movie_group[source_name]["Path"]  # Store actual source file path
+
+    if third_source is not None:  # Verify supplemental third source exists
+        report_record["ThirdMovie"] = build_third_movie_record(third_source, movie_group[third_source], source_durations[third_source])  # Store supplemental third movie
+
     return report_record  # Return report record
 
 
@@ -604,39 +699,76 @@ def write_json_report(report_path: Path, report_records: list[dict[str, object]]
         report_file.write("\n")  # End file with newline
 
 
+def select_primary_sources(source_durations: dict[str, int | None]) -> list[str]:
+    """
+    Select same-length primary sources for a matched movie group.
+
+    :param source_durations: Whole-second durations by source name.
+    :return: Primary source names with matching durations, or an empty list.
+    """
+
+    duration_sources: dict[int, list[str]] = {}  # Initialize source names by duration
+    for source_name in SOURCE_NAMES:  # Iterate source names in deterministic order
+        if source_name not in source_durations:  # Verify source exists in duration mapping
+            continue  # Skip absent source
+
+        duration = source_durations[source_name]  # Read source duration
+        if duration is None:  # Verify duration is available
+            continue  # Skip unavailable duration
+
+        duration_sources.setdefault(duration, []).append(source_name)  # Group source by duration
+
+    matching_source_groups = [source_names for source_names in duration_sources.values() if len(source_names) >= 2]  # Keep duration groups with at least two sources
+    if not matching_source_groups:  # Verify same-length source groups exist
+        return []  # Return empty primary source list
+
+    matching_source_groups.sort(key=lambda source_names: (-len(source_names), [SOURCE_NAMES.index(source_name) for source_name in source_names]))  # Sort largest group first with deterministic ties
+    return matching_source_groups[0]  # Return selected primary sources
+
+
 def generate_movie_overlap_reports() -> None:
     """
-    Generate Dublado and Legendado overlap reports grouped by movie duration.
+    Generate source overlap reports grouped by movie duration.
 
     :return: None.
     """
 
-    print(f"{BackgroundColors.GREEN}Scanning Dublado movies in: {BackgroundColors.CYAN}{DUBLADO_DIRECTORY}{Style.RESET_ALL}")  # Log Dublado scan path
-    dublado_movies = discover_movie_files(DUBLADO_DIRECTORY)  # Discover Dublado movie files
+    source_movies: dict[str, list[dict[str, object]]] = {}  # Initialize discovered movies by source
+    for source_name, directory_path in SOURCE_DIRECTORIES.items():  # Iterate configured source directories
+        print(f"{BackgroundColors.GREEN}Scanning {source_name} movies in: {BackgroundColors.CYAN}{directory_path}{Style.RESET_ALL}")  # Log source scan path
+        source_movies[source_name] = discover_movie_files(directory_path)  # Discover source movie files
 
-    print(f"{BackgroundColors.GREEN}Scanning Legendado movies in: {BackgroundColors.CYAN}{LEGENDADO_DIRECTORY}{Style.RESET_ALL}")  # Log Legendado scan path
-    legendado_movies = discover_movie_files(LEGENDADO_DIRECTORY)  # Discover Legendado movie files
+        for movie in source_movies[source_name]:  # Iterate discovered source movies
+            movie["Source"] = source_name  # Store source name on parsed movie
 
-    matched_pairs = select_movie_pairs(dublado_movies, legendado_movies)  # Match movies by year and fuzzy title
+    matched_groups = select_movie_groups(source_movies)  # Match movies by year and fuzzy title across sources
     same_length_movies = []  # Initialize equal-duration report records
     different_length_movies = []  # Initialize different-duration report records
 
-    for dublado_movie, legendado_movie, similarity in matched_pairs:  # Iterate matched movie pairs
-        verbose_output(true_string=f"{BackgroundColors.GREEN}Matched {BackgroundColors.CYAN}{dublado_movie['Path']}{BackgroundColors.GREEN} with {BackgroundColors.CYAN}{legendado_movie['Path']}{BackgroundColors.GREEN} at {similarity:.3f}{Style.RESET_ALL}")  # Log matched pair
-        dublado_duration = get_video_duration_seconds(str(dublado_movie["Path"]))  # Read Dublado video duration
-        legendado_duration = get_video_duration_seconds(str(legendado_movie["Path"]))  # Read Legendado video duration
-        report_record = build_report_record(dublado_movie, legendado_movie, dublado_duration, legendado_duration)  # Build output record
+    for movie_group in matched_groups:  # Iterate matched movie groups
+        source_durations: dict[str, int | None] = {}  # Initialize durations by source
+        for source_name in SOURCE_NAMES:  # Iterate source names in deterministic order
+            if source_name not in movie_group:  # Verify source exists in group
+                continue  # Skip absent source
 
-        if dublado_duration is not None and dublado_duration == legendado_duration:  # Verify durations are available and equal
+            source_durations[source_name] = get_video_duration_seconds(str(movie_group[source_name]["Path"]))  # Read source video duration
+
+        primary_sources = select_primary_sources(source_durations)  # Select same-length primary sources
+        if primary_sources:  # Verify at least two durations match
+            third_sources = [source_name for source_name in SOURCE_NAMES if source_name in movie_group and source_name not in primary_sources]  # Identify unmatched supplemental sources
+            third_source = third_sources[0] if third_sources else None  # Select supplemental third source when present
+            report_record = build_report_record(movie_group, source_durations, primary_sources, third_source)  # Build equal-duration report record
             same_length_movies.append(report_record)  # Store equal-duration record
-        else:  # Handle different or unavailable durations
+        else:  # Handle groups without matching durations
+            primary_sources = [source_name for source_name in SOURCE_NAMES if source_name in movie_group]  # Select all available sources
+            report_record = build_report_record(movie_group, source_durations, primary_sources, None)  # Build different-duration report record
             different_length_movies.append(report_record)  # Store different-duration record
 
     REPORTS_DIRECTORY.mkdir(parents=True, exist_ok=True)  # Create Reports directory when missing
     write_json_report(REPORTS_DIRECTORY / "movies_same_length.json", same_length_movies)  # Write equal-duration report
     write_json_report(REPORTS_DIRECTORY / "movies_different_length.json", different_length_movies)  # Write different-duration report
 
-    print(f"{BackgroundColors.GREEN}Matched movie pairs: {BackgroundColors.CYAN}{len(matched_pairs)}{Style.RESET_ALL}")  # Log total matched pairs
+    print(f"{BackgroundColors.GREEN}Matched movie groups: {BackgroundColors.CYAN}{len(matched_groups)}{Style.RESET_ALL}")  # Log total matched groups
     print(f"{BackgroundColors.GREEN}Same length report records: {BackgroundColors.CYAN}{len(same_length_movies)}{Style.RESET_ALL}")  # Log equal-duration count
     print(f"{BackgroundColors.GREEN}Different length report records: {BackgroundColors.CYAN}{len(different_length_movies)}{Style.RESET_ALL}")  # Log different-duration count
 
@@ -681,7 +813,7 @@ def main():
     
     start_time = datetime.datetime.now()  # Get the start time of the program
     
-    generate_movie_overlap_reports()  # Generate Dublado and Legendado movie overlap reports
+    generate_movie_overlap_reports()  # Generate Dublado, Legendado, and Dual movie overlap reports
 
     finish_time = datetime.datetime.now()  # Get the finish time of the program
     
