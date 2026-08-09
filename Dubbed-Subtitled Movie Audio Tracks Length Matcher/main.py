@@ -348,6 +348,36 @@ def calculate_execution_time(start_time, finish_time=None):
     return f"{seconds}s"  # Fallback: only seconds
 
 
+def discover_movie_files(directory_path: str) -> list[dict[str, object]]:
+    """
+    Recursively discover movie files under a directory.
+
+    :param directory_path: Directory path to scan.
+    :return: Parsed movie metadata records.
+    """
+
+    movies = []  # Initialize parsed movie list
+    root_path = Path(directory_path)  # Convert directory string to Path
+    if not root_path.exists():  # Verify scan directory exists
+        print(f"{BackgroundColors.RED}Directory not found: {BackgroundColors.CYAN}{directory_path}{Style.RESET_ALL}")  # Log missing directory
+        return movies  # Return empty list when directory is absent
+
+    for movie_path in root_path.rglob("*"):  # Traverse directory tree recursively
+        if not movie_path.is_file():  # Verify current path is a file
+            continue  # Skip folders
+
+        if movie_path.suffix.casefold() not in VIDEO_EXTENSIONS:  # Verify file extension is a movie extension
+            continue  # Skip subtitles and sidecar files
+
+        parsed_movie = parse_movie_file(movie_path)  # Parse candidate movie file
+        if parsed_movie is None:  # Verify parsing succeeded
+            continue  # Skip unparsable movie file
+
+        movies.append(parsed_movie)  # Store parsed movie metadata
+
+    return movies  # Return discovered movie records
+
+
 def movie_similarity(dublado_movie: dict[str, object], legendado_movie: dict[str, object]) -> float:
     """
     Calculate normalized title similarity for two parsed movies.
