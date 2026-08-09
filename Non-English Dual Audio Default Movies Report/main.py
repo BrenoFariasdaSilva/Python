@@ -349,6 +349,23 @@ def calculate_execution_time(start_time, finish_time=None):
     return f"{seconds}s"  # Fallback: only seconds
 
 
+def get_streams_by_type(metadata: dict[str, Any], codec_type: str) -> list[dict[str, Any]]:
+    """
+    Return streams matching one FFprobe codec type.
+
+    :param metadata: Parsed FFprobe metadata.
+    :param codec_type: FFprobe stream codec type.
+    :return: Ordered stream metadata list.
+    """
+
+    streams_value = metadata.get("streams", [])  # Read the FFprobe stream list.
+
+    if not isinstance(streams_value, list):  # Detect malformed stream metadata.
+        return []  # Return an empty stream list.
+
+    return [stream for stream in streams_value if isinstance(stream, dict) and stream.get("codec_type") == codec_type]  # Return streams with the requested codec type.
+
+
 def find_default_audio_stream(audio_streams: list[dict[str, Any]]) -> dict[str, Any] | None:
     """
     Find the audio stream used as the default stream.
