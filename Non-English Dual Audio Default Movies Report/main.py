@@ -349,6 +349,26 @@ def calculate_execution_time(start_time, finish_time=None):
     return f"{seconds}s"  # Fallback: only seconds
 
 
+def parse_movie_directory_name(directory_name: str) -> dict[str, str]:
+    """
+    Parse movie name, year, and resolution from one directory name.
+
+    :param directory_name: Movie directory name using MovieName Year Resolution Language format.
+    :return: Parsed movie metadata.
+    """
+
+    match = re.match(r"^(?P<MovieName>.+)\s+(?P<Year>(?:19|20)\d{2})\s+(?P<Resolution>\d{3,4}p|[48]k)\b", directory_name, re.IGNORECASE)  # Parse the final movie metadata tokens.
+
+    if match is None:  # Detect directory names outside the expected pattern.
+        return {"MovieName": directory_name, "Year": "", "Resolution": ""}  # Preserve the directory name when parsing is unavailable.
+
+    return {  # Return normalized parsed fields.
+        "MovieName": match.group("MovieName").strip(),  # Preserve title numbers before the year token.
+        "Year": match.group("Year").strip(),  # Preserve the parsed release year.
+        "Resolution": match.group("Resolution").strip(),  # Preserve the parsed resolution value.
+    }  # Close the parsed metadata mapping.
+
+
 def find_movie_file(movie_directory: Path) -> Path | None:
     """
     Find the single direct video file in one movie directory.
