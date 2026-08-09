@@ -349,6 +349,17 @@ def calculate_execution_time(start_time, finish_time=None):
     return f"{seconds}s"  # Fallback: only seconds
 
 
+def validate_ffprobe_available() -> None:
+    """
+    Validate that FFprobe is available through the system PATH.
+
+    :return: None.
+    """
+
+    if shutil.which("ffprobe") is None:  # Detect missing FFprobe executable.
+        raise RuntimeError("Required executable not found in PATH: ffprobe.")  # Stop execution with a clear dependency error.
+
+
 def parse_movie_directory_name(directory_name: str) -> dict[str, str]:
     """
     Parse movie name, year, and resolution from one directory name.
