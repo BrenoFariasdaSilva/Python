@@ -348,6 +348,20 @@ def calculate_execution_time(start_time, finish_time=None):
     return f"{seconds}s"  # Fallback: only seconds
 
 
+def movie_similarity(dublado_movie: dict[str, object], legendado_movie: dict[str, object]) -> float:
+    """
+    Calculate normalized title similarity for two parsed movies.
+
+    :param dublado_movie: Parsed Dublado movie metadata.
+    :param legendado_movie: Parsed Legendado movie metadata.
+    :return: Similarity ratio between normalized titles.
+    """
+
+    dublado_title = str(dublado_movie["NormalizedMovieName"])  # Read normalized Dublado title
+    legendado_title = str(legendado_movie["NormalizedMovieName"])  # Read normalized Legendado title
+    return difflib.SequenceMatcher(None, dublado_title, legendado_title).ratio()  # Return deterministic similarity score
+
+
 def select_movie_pairs(dublado_movies: list[dict[str, object]], legendado_movies: list[dict[str, object]]) -> list[tuple[dict[str, object], dict[str, object], float]]:
     """
     Select deterministic one-to-one Dublado and Legendado movie pairs.
