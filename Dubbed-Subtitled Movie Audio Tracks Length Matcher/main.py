@@ -348,6 +348,20 @@ def calculate_execution_time(start_time, finish_time=None):
     return f"{seconds}s"  # Fallback: only seconds
 
 
+def report_sort_key(report_record: dict[str, object]) -> str:
+    """
+    Build a deterministic case-insensitive report sort key.
+
+    :param report_record: Structured JSON report record.
+    :return: Normalized sort key.
+    """
+
+    movie_name = report_record["MovieName"]  # Read report movie name field
+    if isinstance(movie_name, dict):  # Verify movie name contains side-specific values
+        movie_name = movie_name.get("Dublado", next(iter(movie_name.values()), ""))  # Prefer Dublado title for sorting
+    return normalize_movie_title(str(movie_name))  # Return normalized sort text
+
+
 def write_json_report(report_path: Path, report_records: list[dict[str, object]]) -> None:
     """
     Write report records as deterministic human-readable JSON.
