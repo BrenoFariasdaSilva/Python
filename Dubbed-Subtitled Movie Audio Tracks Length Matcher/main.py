@@ -348,6 +348,35 @@ def calculate_execution_time(start_time, finish_time=None):
     return f"{seconds}s"  # Fallback: only seconds
 
 
+def get_video_duration_seconds(movie_path: str) -> int | None:
+    """
+    Read a video duration with ffprobe at whole-second precision.
+
+    :param movie_path: Actual movie file path.
+    :return: Whole-second duration or None when unavailable.
+    """
+
+    try:  # Guard ffprobe execution so one bad file does not stop report generation
+        result = subprocess.run(  # Execute ffprobe for duration metadata
+            ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", movie_path],  # Pass ffprobe arguments without shell parsing
+            capture_output=True,  # Capture stdout and stderr
+            text=True,  # Decode process output as text
+            timeout=60,  # Bound metadata read time
+        )  # Finish ffprobe execution
+        if result.returncode != 0:  # Verify ffprobe completed successfully
+            verbose_output(true_string=f"{BackgroundColors.YELLOW}ffprobe failed for: {BackgroundColors.CYAN}{movie_path}{Style.RESET_ALL}")  # Log ffprobe failure
+            return None  # Return unavailable duration
+
+        duration_text = result.stdout.strip()  # Normalize ffprobe output
+        if not duration_text:  # Verify duration output exists
+            return None  # Return unavailable duration
+
+        return int(round(float(duration_text)))  # Return whole-second duration
+    except Exception:  # Handle missing ffprobe, timeout, or malformed duration output
+        verbose_output(true_string=f"{BackgroundColors.YELLOW}Unable to read duration for: {BackgroundColors.CYAN}{movie_path}{Style.RESET_ALL}")  # Log duration failure
+        return None  # Return unavailable duration
+
+
 def format_duration(duration_seconds: int | None) -> str:
     """
     Format whole seconds as HH:MM:SS.
