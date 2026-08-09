@@ -349,6 +349,22 @@ def calculate_execution_time(start_time, finish_time=None):
     return f"{seconds}s"  # Fallback: only seconds
 
 
+def find_external_subtitles(movie_directory: Path) -> list[str]:
+    """
+    Find external SRT subtitle files in one movie directory.
+
+    :param movie_directory: Directory containing movie sidecar files.
+    :return: Ordered external subtitle track text list.
+    """
+
+    subtitle_files = sorted(  # Collect direct external SRT files deterministically.
+        (candidate for candidate in movie_directory.iterdir() if candidate.is_file() and candidate.suffix.casefold() == ".srt"),  # Keep only SRT sidecar files.
+        key=lambda candidate: candidate.name.casefold(),  # Sort subtitle filenames case-insensitively.
+    )  # Close the external subtitle collection.
+
+    return [f"External: {subtitle_file.name}" for subtitle_file in subtitle_files]  # Return formatted external subtitle entries.
+
+
 def build_movie_report_entry(movie_directory: Path, metadata: dict[str, Any]) -> dict[str, Any]:
     """
     Build one movie report entry from directory and media metadata.
