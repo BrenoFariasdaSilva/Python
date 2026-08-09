@@ -348,6 +348,43 @@ def calculate_execution_time(start_time, finish_time=None):
     return f"{seconds}s"  # Fallback: only seconds
 
 
+def generate_movie_overlap_reports() -> None:
+    """
+    Generate Dublado and Legendado overlap reports grouped by movie duration.
+
+    :return: None.
+    """
+
+    print(f"{BackgroundColors.GREEN}Scanning Dublado movies in: {BackgroundColors.CYAN}{DUBLADO_DIRECTORY}{Style.RESET_ALL}")  # Log Dublado scan path
+    dublado_movies = discover_movie_files(DUBLADO_DIRECTORY)  # Discover Dublado movie files
+
+    print(f"{BackgroundColors.GREEN}Scanning Legendado movies in: {BackgroundColors.CYAN}{LEGENDADO_DIRECTORY}{Style.RESET_ALL}")  # Log Legendado scan path
+    legendado_movies = discover_movie_files(LEGENDADO_DIRECTORY)  # Discover Legendado movie files
+
+    matched_pairs = select_movie_pairs(dublado_movies, legendado_movies)  # Match movies by year and fuzzy title
+    same_length_movies = []  # Initialize equal-duration report records
+    different_length_movies = []  # Initialize different-duration report records
+
+    for dublado_movie, legendado_movie, similarity in matched_pairs:  # Iterate matched movie pairs
+        verbose_output(true_string=f"{BackgroundColors.GREEN}Matched {BackgroundColors.CYAN}{dublado_movie['Path']}{BackgroundColors.GREEN} with {BackgroundColors.CYAN}{legendado_movie['Path']}{BackgroundColors.GREEN} at {similarity:.3f}{Style.RESET_ALL}")  # Log matched pair
+        dublado_duration = get_video_duration_seconds(str(dublado_movie["Path"]))  # Read Dublado video duration
+        legendado_duration = get_video_duration_seconds(str(legendado_movie["Path"]))  # Read Legendado video duration
+        report_record = build_report_record(dublado_movie, legendado_movie, dublado_duration, legendado_duration)  # Build output record
+
+        if dublado_duration is not None and dublado_duration == legendado_duration:  # Verify durations are available and equal
+            same_length_movies.append(report_record)  # Store equal-duration record
+        else:  # Handle different or unavailable durations
+            different_length_movies.append(report_record)  # Store different-duration record
+
+    REPORTS_DIRECTORY.mkdir(parents=True, exist_ok=True)  # Create Reports directory when missing
+    write_json_report(REPORTS_DIRECTORY / "movies_same_length.json", same_length_movies)  # Write equal-duration report
+    write_json_report(REPORTS_DIRECTORY / "movies_different_length.json", different_length_movies)  # Write different-duration report
+
+    print(f"{BackgroundColors.GREEN}Matched movie pairs: {BackgroundColors.CYAN}{len(matched_pairs)}{Style.RESET_ALL}")  # Log total matched pairs
+    print(f"{BackgroundColors.GREEN}Same length report records: {BackgroundColors.CYAN}{len(same_length_movies)}{Style.RESET_ALL}")  # Log equal-duration count
+    print(f"{BackgroundColors.GREEN}Different length report records: {BackgroundColors.CYAN}{len(different_length_movies)}{Style.RESET_ALL}")  # Log different-duration count
+
+
 def play_sound():
     """
     Plays a sound when the program finishes and skips if the operating system is Windows.
