@@ -349,6 +349,30 @@ def calculate_execution_time(start_time, finish_time=None):
     return f"{seconds}s"  # Fallback: only seconds
 
 
+def find_movie_file(movie_directory: Path) -> Path | None:
+    """
+    Find the single direct video file in one movie directory.
+
+    :param movie_directory: Directory containing one movie and sidecar files.
+    :return: Movie file path when exactly one safe candidate exists.
+    """
+
+    video_files = sorted(  # Collect direct video file candidates deterministically.
+        (candidate for candidate in movie_directory.iterdir() if candidate.is_file() and candidate.suffix.casefold() in SUPPORTED_VIDEO_EXTENSIONS),  # Keep only supported video extensions.
+        key=lambda candidate: candidate.name.casefold(),  # Sort candidates by case-insensitive filename.
+    )  # Close the deterministic candidate collection.
+
+    if len(video_files) == 1:  # Detect the unambiguous movie file case.
+        return video_files[0]  # Return the only movie file candidate.
+
+    if len(video_files) > 1:  # Detect ambiguous movie file candidates.
+        print(f"{BackgroundColors.YELLOW}[WARNING] Multiple video files found in {movie_directory}. Skipping directory.{Style.RESET_ALL}")  # Report the deterministic skip.
+        return None  # Skip ambiguous movie directories.
+
+    print(f"{BackgroundColors.YELLOW}[WARNING] No video file found in {movie_directory}. Skipping directory.{Style.RESET_ALL}")  # Report the missing video file.
+    return None  # Skip directories without video files.
+
+
 def run_ffprobe_metadata(movie_file: Path) -> dict[str, Any]:
     """
     Read media format and stream metadata from one movie file.
