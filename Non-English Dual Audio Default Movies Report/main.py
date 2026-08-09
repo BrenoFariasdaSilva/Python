@@ -349,6 +349,35 @@ def calculate_execution_time(start_time, finish_time=None):
     return f"{seconds}s"  # Fallback: only seconds
 
 
+def format_audio_track(stream: dict[str, Any], default_audio_stream: dict[str, Any] | None) -> str:
+    """
+    Format one audio stream for the JSON report.
+
+    :param stream: FFprobe audio stream metadata.
+    :param default_audio_stream: Default audio stream metadata.
+    :return: Human-readable audio track text.
+    """
+
+    tags = get_stream_tags(stream)  # Read audio metadata tags.
+    language = identify_language(stream)  # Identify the audio language.
+    raw_language = tags.get("language", "").strip()  # Read the raw language tag.
+    title = tags.get("title", "").strip()  # Read the audio title metadata.
+    parts = [language]  # Start the audio display with the identified language.
+
+    if raw_language and raw_language.casefold() != language.casefold():  # Detect a distinct raw language tag.
+        parts.append(f"({raw_language})")  # Add the raw language tag.
+
+    if title and title.casefold() not in {language.casefold(), raw_language.casefold()}:  # Detect useful title metadata.
+        parts.append(f"- {title}")  # Add the track title.
+
+    track_text = " ".join(parts).strip()  # Build the audio track text.
+
+    if default_audio_stream is stream:  # Detect the selected default audio stream.
+        track_text = f"{track_text} (Default)"  # Mark only the default stream.
+
+    return track_text  # Return formatted audio track text.
+
+
 def format_subtitle_track(stream: dict[str, Any]) -> str:
     """
     Format one internal subtitle stream for the JSON report.
