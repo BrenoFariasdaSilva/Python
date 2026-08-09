@@ -348,6 +348,21 @@ def calculate_execution_time(start_time, finish_time=None):
     return f"{seconds}s"  # Fallback: only seconds
 
 
+def write_json_report(report_path: Path, report_records: list[dict[str, object]]) -> None:
+    """
+    Write report records as deterministic human-readable JSON.
+
+    :param report_path: JSON report path.
+    :param report_records: Structured report records.
+    :return: None.
+    """
+
+    sorted_records = sorted(report_records, key=report_sort_key)  # Sort records deterministically by movie name
+    with report_path.open("w", encoding="utf-8") as report_file:  # Open report file for UTF-8 JSON writing
+        json.dump(sorted_records, report_file, ensure_ascii=False, indent=4)  # Write human-readable JSON content
+        report_file.write("\n")  # End file with newline
+
+
 def generate_movie_overlap_reports() -> None:
     """
     Generate Dublado and Legendado overlap reports grouped by movie duration.
