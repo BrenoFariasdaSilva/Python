@@ -1,49 +1,45 @@
 """
 ================================================================================
-<PROJECT OR SCRIPT TITLE>
+Dubbed-Subtitled Movie Audio Tracks Length Matcher
 ================================================================================
 Author      : Breno Farias da Silva
-Created     : <YYYY-MM-DD>
+Created     : 2026-08-09
 Description :
-    <Provide a concise and complete overview of what this script does.>
-    <Mention its purpose, scope, and relevance to the larger project.>
+    Scan movie files under the dubbed and subtitled library folders, match
+    movies that exist in both trees, compare their real video durations, and
+    generate JSON reports for equal-length and different-length pairs.
 
     Key features include:
-        - <Feature 1 — e.g., automatic data loading and preprocessing>
-        - <Feature 2 — e.g., model training and evaluation>
-        - <Feature 3 — e.g., visualization or report generation>
-        - <Feature 4 — e.g., logging or notification system>
-        - <Feature 5 — e.g., integration with other modules or datasets>
+        - Recursive video discovery under E:\\Movies\\Dublado and E:\\Movies\\Legendado
+        - Release-name parsing for movie title, year, and resolution
+        - Deterministic fuzzy title matching with exact-year pairing
+        - Video duration extraction through ffprobe at whole-second precision
+        - Structured JSON report generation in the local Reports directory
 
 Usage:
-    1. <Explain any configuration steps before running, such as editing variables or paths.>
-    2. <Describe how to execute the script — typically via Makefile or Python.>
-        $ make <target>   or   $ python <script_name>.py
-    3. <List what outputs are expected or where results are saved.>
+    1. Ensure the input folders exist under E:\\Movies and ffprobe is available on PATH.
+    2. Run the script with Make or Python.
+        $ make run   or   $ python main.py
+    3. Review the generated report files inside the Reports directory.
 
 Outputs:
-    - <Output file or directory 1 — e.g., results.csv>
-    - <Output file or directory 2 — e.g., Feature_Analysis/plots/>
-    - <Output file or directory 3 — e.g., logs/output.txt>
+    - Reports/movies_same_length.json
+    - Reports/movies_different_length.json
 
 TODOs:
-    - <Add a task or improvement — e.g., implement CLI argument parsing.>
-    - <Add another improvement — e.g., extend support to Parquet files.>
-    - <Add optimization — e.g., parallelize evaluation loop.>
-    - <Add robustness — e.g., error handling or data validation.>
+    - Add CLI arguments if the input root or report output path must vary.
+    - Extend supported video extensions if another real container format is needed.
+    - Add optional unmatched-movie reporting if library reconciliation needs it.
 
 Dependencies:
-    - Python >= <version>
-    - <Library 1 — e.g., pandas>
-    - <Library 2 — e.g., numpy>
-    - <Library 3 — e.g., scikit-learn>
-    - <Library 4 — e.g., matplotlib, seaborn, tqdm, colorama>
+    - Python >= 3.10
+    - colorama
+    - ffprobe available on PATH
 
 Assumptions & Notes:
-    - <List any key assumptions — e.g., last column is the target variable.>
-    - <Mention data format — e.g., CSV files only.>
-    - <Mention platform or OS-specific notes — e.g., sound disabled on Windows.>
-    - <Note on output structure or reusability.>
+    - Movie identity is determined from parsed movie title plus four-digit year.
+    - Subtitle and other sidecar files are ignored by explicit video-extension filtering.
+    - Reports are written relative to the repository directory that contains this script.
 """
 
 import atexit  # For playing a sound when the program finishes
