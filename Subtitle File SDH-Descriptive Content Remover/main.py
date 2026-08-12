@@ -68,7 +68,7 @@ class BackgroundColors:  # Colors for the terminal
 
 # Execution Constants:
 VERBOSE = False  # Set to True to output verbose messages
-INPUT_DIR = Path("./Input")  # Directory searched recursively for source SRT files
+INPUT_DIRECTORY = Path("./Input")  # Directory searched recursively for source SRT files
 SRT_TIMESTAMP_PATTERN = re.compile(r"^\d{2}:\d{2}:\d{2},\d{3}\s+-->\s+\d{2}:\d{2}:\d{2},\d{3}(?:\s+.*)?$")  # SRT timestamp validation pattern
 SUBTITLE_FORMATTING_TAG_PATTERN = re.compile(r"</?(?:i|b|u|font)(?:\s+[^<>]*)?>", re.IGNORECASE)  # Recognized SRT formatting tag pattern
 EMPTY_SUBTITLE_FORMATTING_TAG_PATTERN = re.compile(r"<(i|b|u|font)(?:\s+[^<>]*)?>\s*</\1>", re.IGNORECASE)  # Recognized empty SRT formatting tag pattern
@@ -698,9 +698,9 @@ def display_relative_path(filepath: Path, input_dir: Path) -> str:
     :return: Display path.
     """
 
-    try:  # Prefer paths relative to INPUT_DIR
+    try:  # Prefer paths relative to INPUT_DIRECTORY
         return filepath.relative_to(input_dir).as_posix()  # Return relative display path
-    except ValueError:  # Fall back when path is outside INPUT_DIR
+    except ValueError:  # Fall back when path is outside INPUT_DIRECTORY
         return filepath.as_posix()  # Return absolute display path
 
 
@@ -764,7 +764,7 @@ def main():
     
     start_time = datetime.datetime.now()  # Get the start time of the program
     
-    input_dir = Path(resolve_full_trailing_space_path(str(INPUT_DIR))).resolve()  # Resolve INPUT_DIR path safely
+    input_dir = Path(resolve_full_trailing_space_path(str(INPUT_DIRECTORY))).resolve()  # Resolve INPUT_DIRECTORY path safely
     discovered_count = 0  # Count discovered SRT files
     cleaned_count = 0  # Count files with generated outputs
     unchanged_count = 0  # Count files without SDH content

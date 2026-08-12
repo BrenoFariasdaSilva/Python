@@ -19,7 +19,7 @@ class BackgroundColors:  # Colors for the terminal
 
 # Execution Constants:
 VERBOSE = False  # Set to True to output verbose messages
-INPUT_DIR = "./Input"  # The directory where the .mp3 files are located
+INPUT_DIRECTORY = "./Input"  # The directory where the .mp3 files are located
 
 # Sound Constants:
 SOUND_COMMANDS = {
@@ -258,7 +258,7 @@ def fix_apostrophes(text):
     )  # Convert uppercase letters after apostrophes to lowercase
 
 
-def organize_mp3_files(input_dir=INPUT_DIR):
+def organize_mp3_files(input_dir=INPUT_DIRECTORY):
     """
     Organizes all .mp3 files from the ./Input directory into folders by artist inside the same directory
     and cleans the song names.
@@ -328,9 +328,9 @@ def main():
         f"{BackgroundColors.CLEAR_TERMINAL}{BackgroundColors.BOLD}{BackgroundColors.GREEN}Welcome to the {BackgroundColors.CYAN}MP3 Musics Organizer{BackgroundColors.GREEN}!{Style.RESET_ALL}"
     )  # Output the welcome message
 
-    if not verify_filepath_exists(INPUT_DIR):
+    if not verify_filepath_exists(INPUT_DIRECTORY):
         print(
-            f"{BackgroundColors.RED}Input directory {BackgroundColors.CYAN}{INPUT_DIR}{BackgroundColors.RED} does not exist. Please create it and add your .mp3 files.{Style.RESET_ALL}"
+            f"{BackgroundColors.RED}Input directory {BackgroundColors.CYAN}{INPUT_DIRECTORY}{BackgroundColors.RED} does not exist. Please create it and add your .mp3 files.{Style.RESET_ALL}"
         )
         return  # If the input directory does not exist, output an error message and return
 

@@ -22,7 +22,7 @@ class BackgroundColors:  # Colors for the terminal
 VERBOSE = False  # Set to True to output verbose messages
 
 # Path Constants:
-INPUT_DIR = "Input"  # The directory where the MP3 files are stored
+INPUT_DIRECTORY = "Input"  # The directory where the MP3 files are stored
 OUTPUT_DIR = "Output"  # The directory where the split MP3 files will be stored
 TIMESTAMP_DIR = "Timestamps"  # The directory where the timestamp files are stored
 PROCESSED_PREFIX = "Processed - "  # The prefix to mark files as processed
@@ -341,11 +341,11 @@ def list_valid_mp3_files():
     """
 
     verbose_output(
-        f"{BackgroundColors.GREEN}Listing all MP3 files in the {BackgroundColors.CYAN}{INPUT_DIR}{BackgroundColors.YELLOW} directory...{Style.RESET_ALL}"
+        f"{BackgroundColors.GREEN}Listing all MP3 files in the {BackgroundColors.CYAN}{INPUT_DIRECTORY}{BackgroundColors.YELLOW} directory...{Style.RESET_ALL}"
     )  # Output the verbose message
 
     mp3_files = [
-        f for f in os.listdir(INPUT_DIR) if f.lower().endswith(".mp3")
+        f for f in os.listdir(INPUT_DIRECTORY) if f.lower().endswith(".mp3")
     ]  # List of all MP3 files in the Input directory
     valid_files = []  # List of valid MP3 files with matching timestamp files
 
@@ -568,9 +568,9 @@ def mark_as_processed(mp3_file, timestamp_file):
         f"{BackgroundColors.GREEN}Marking the MP3 file and timestamp file as processed...{Style.RESET_ALL}"
     )  # Output the verbose message
 
-    processed_mp3 = os.path.join(INPUT_DIR, PROCESSED_PREFIX + mp3_file)  # Path to the processed MP3 file
+    processed_mp3 = os.path.join(INPUT_DIRECTORY, PROCESSED_PREFIX + mp3_file)  # Path to the processed MP3 file
     if not mp3_file.startswith(PROCESSED_PREFIX):  # If the MP3 file doesn't start with the processed prefix
-        os.rename(os.path.join(INPUT_DIR, mp3_file), processed_mp3)  # Rename the MP3 file to mark it as processed
+        os.rename(os.path.join(INPUT_DIRECTORY, mp3_file), processed_mp3)  # Rename the MP3 file to mark it as processed
         print(
             f"{BackgroundColors.GREEN}✅ Marked as processed: {BackgroundColors.CYAN}{processed_mp3}{Style.RESET_ALL}"
         )
@@ -656,7 +656,7 @@ def main():
         write_updated_timestamps(timestamps, timestamps_file)  # Write the updated timestamps to the timestamp file
 
         print(f"\n{BackgroundColors.BOLD}Splitting {mp3_file}...{Style.RESET_ALL}")  # Output the splitting message
-        if split_mp3(os.path.join(INPUT_DIR, mp3_file), timestamps_file, output_subdir):  # Split the MP3 file
+        if split_mp3(os.path.join(INPUT_DIRECTORY, mp3_file), timestamps_file, output_subdir):  # Split the MP3 file
             mark_as_processed(mp3_file, timestamps_file)  # Mark the MP3 file and timestamp file as processed
         else:  # If an error occurs while splitting the MP3 file
             print(

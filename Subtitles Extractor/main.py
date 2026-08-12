@@ -16,7 +16,7 @@ Description :
         - Notification sound on completion (optional)
 
 Usage:
-    1. Place video files in the INPUT_DIR directory (default: ./Input/).
+    1. Place video files in the INPUT_DIRECTORY directory (default: ./Input/).
     2. Ensure ffmpeg and ffprobe are installed and available in PATH.
     3. Run the script via Makefile or Python:
             $ make <target>   or   $ python main.py
@@ -39,7 +39,7 @@ Dependencies:
     - ffmpeg, ffprobe (external)
 
 Assumptions & Notes:
-    - Video files are placed in INPUT_DIR or its subdirectories
+    - Video files are placed in INPUT_DIRECTORY or its subdirectories
     - ffmpeg and ffprobe must be installed and in PATH
     - Output .srt files are saved in the same directory as the video
     - Sound notification is disabled on Windows
@@ -72,7 +72,7 @@ class BackgroundColors:  # Colors for the terminal
 
 # Execution Constants:
 VERBOSE = False  # Set to True to output verbose messages
-INPUT_DIR = "./Input/"  # The input directory path
+INPUT_DIRECTORY = "./Input/"  # The input directory path
 VIDEO_FILE_EXTENSIONS = [".mkv", ".mp4", ".avi"]  # List of video file extensions to process
 SRT_OPTIONS = {  # Dictionary of languages and their possible subtitle codes
     "Portuguese": ["pt-BR", "pt", "pt-PT"],  # Portuguese subtitle codes
@@ -483,9 +483,9 @@ def main():
     start_time = datetime.datetime.now()
 
     # Step 1: Find all video files recursively
-    video_files = find_video_files(INPUT_DIR, VIDEO_FILE_EXTENSIONS)
+    video_files = find_video_files(INPUT_DIRECTORY, VIDEO_FILE_EXTENSIONS)
     if not video_files:
-        print(f"{BackgroundColors.YELLOW}No video files found in {BackgroundColors.CYAN}{INPUT_DIR}{Style.RESET_ALL}")
+        print(f"{BackgroundColors.YELLOW}No video files found in {BackgroundColors.CYAN}{INPUT_DIRECTORY}{Style.RESET_ALL}")
         return
 
     print(f"{BackgroundColors.GREEN}Found {len(video_files)} video file(s) to process.{Style.RESET_ALL}")

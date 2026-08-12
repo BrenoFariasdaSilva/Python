@@ -18,7 +18,7 @@ Description :
         - Logging system with colored terminal output
 
 Usage:
-    1. Set the INPUT_DIR constant to the directory containing movie folders.
+    1. Set the INPUT_DIRECTORY constant to the directory containing movie folders.
     2. Optionally enable AUTO_FIX to automatically move misplaced movies.
     3. Run the script:
         $ make run   or   $ python main.py
@@ -44,7 +44,7 @@ Assumptions & Notes:
     - Input directory contains subdirectories: Dual, Dublado, English, Legendado, Nacional
     - Movies are stored as directories (not files)
     - Movie names should contain the appropriate tag (e.g., "Movie.Name.2024.Dual")
-    - Paths in JSON report are relative to INPUT_DIR
+    - Paths in JSON report are relative to INPUT_DIRECTORY
 """
 
 import atexit  # For playing a sound when the program finishes
@@ -73,7 +73,7 @@ class BackgroundColors:  # Colors for the terminal
 # Execution Constants:
 VERBOSE = False  # Set to True to output verbose messages
 AUTO_FIX = True  # Set to True to automatically move misplaced movies
-INPUT_DIR = r"E:\Movies"  # The root directory containing the movie type folders
+INPUT_DIRECTORY = r"E:\Movies"  # The root directory containing the movie type folders
 
 # Movie Type Directories:
 MOVIE_TYPES = ["Dual", "Dublado", "English", "Legendado", "Nacional"]
@@ -355,18 +355,18 @@ def verify_directory_structure():
     """
 
     verbose_output(
-        f"{BackgroundColors.GREEN}Verifying directory structure at: {BackgroundColors.CYAN}{INPUT_DIR}{Style.RESET_ALL}"
+        f"{BackgroundColors.GREEN}Verifying directory structure at: {BackgroundColors.CYAN}{INPUT_DIRECTORY}{Style.RESET_ALL}"
     )
 
-    if not verify_filepath_exists(INPUT_DIR):
+    if not verify_filepath_exists(INPUT_DIRECTORY):
         print(
-            f"{BackgroundColors.RED}Error: Input directory {BackgroundColors.CYAN}{INPUT_DIR}{BackgroundColors.RED} does not exist!{Style.RESET_ALL}"
+            f"{BackgroundColors.RED}Error: Input directory {BackgroundColors.CYAN}{INPUT_DIRECTORY}{BackgroundColors.RED} does not exist!{Style.RESET_ALL}"
         )
         return False
 
     missing_dirs = []
     for movie_type in MOVIE_TYPES:
-        type_dir = os.path.join(INPUT_DIR, movie_type)
+        type_dir = os.path.join(INPUT_DIRECTORY, movie_type)
         if not verify_filepath_exists(type_dir):
             missing_dirs.append(movie_type)
 
@@ -425,7 +425,7 @@ def scan_movies_in_directory(type_dir, expected_type):
             # No tag found
             results["unfound"].append({
                 "name": item,
-                "path": get_relative_path(item_path, INPUT_DIR),
+                "path": get_relative_path(item_path, INPUT_DIRECTORY),
                 "current_location": expected_type
             })
             verbose_output(
@@ -435,7 +435,7 @@ def scan_movies_in_directory(type_dir, expected_type):
             # Wrong directory
             results["misplaced"].append({
                 "name": item,
-                "path": get_relative_path(item_path, INPUT_DIR),
+                "path": get_relative_path(item_path, INPUT_DIRECTORY),
                 "detected_type": detected_type,
                 "current_location": expected_type,
                 "should_be_in": detected_type
@@ -462,8 +462,8 @@ def move_movie(movie_info, destination_type):
     :return: True if successful, False otherwise
     """
 
-    source_path = os.path.join(INPUT_DIR, movie_info["path"])
-    dest_dir = os.path.join(INPUT_DIR, destination_type)
+    source_path = os.path.join(INPUT_DIRECTORY, movie_info["path"])
+    dest_dir = os.path.join(INPUT_DIRECTORY, destination_type)
     dest_path = os.path.join(dest_dir, movie_info["name"])
 
     try:
@@ -537,7 +537,7 @@ def generate_report(all_misplaced, all_unfound):
 
     report = {
         "scan_date": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "input_directory": INPUT_DIR,
+        "input_directory": INPUT_DIRECTORY,
         "auto_fix_enabled": AUTO_FIX,
         "summary": {
             "total_misplaced": len(all_misplaced),
@@ -597,7 +597,7 @@ def verify_movies():
 
     # Scan each movie type directory
     for movie_type in MOVIE_TYPES:
-        type_dir = os.path.join(INPUT_DIR, movie_type)
+        type_dir = os.path.join(INPUT_DIRECTORY, movie_type)
         print(
             f"\n{BackgroundColors.BOLD}{BackgroundColors.CYAN}Checking {movie_type} directory...{Style.RESET_ALL}"
         )
@@ -675,7 +675,7 @@ def main():
         f"{BackgroundColors.BOLD}{BackgroundColors.CYAN}Configuration:{Style.RESET_ALL}"
     )
     print(
-        f"{BackgroundColors.GREEN}  - Input Directory: {BackgroundColors.CYAN}{INPUT_DIR}{Style.RESET_ALL}"
+        f"{BackgroundColors.GREEN}  - Input Directory: {BackgroundColors.CYAN}{INPUT_DIRECTORY}{Style.RESET_ALL}"
     )
     print(
         f"{BackgroundColors.GREEN}  - Auto-Fix: {BackgroundColors.CYAN}{AUTO_FIX}{Style.RESET_ALL}"

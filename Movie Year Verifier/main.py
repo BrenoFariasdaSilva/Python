@@ -71,7 +71,7 @@ class BackgroundColors:  # Colors for the terminal
 VERBOSE = False  # Set to True to output verbose messages
 
 # Input/Output Constants:
-INPUT_DIR = r"E:\Movies"  # Root input folder that contains movie-type subfolders
+INPUT_DIRECTORY = r"E:\Movies"  # Root input folder that contains movie-type subfolders
 LOGS_DIR = "./Logs"  # Directory where logs and reports are stored
 REPORT_FILE = f"{LOGS_DIR}/{Path(__file__).stem}_movie_year_report.json"
 
@@ -165,7 +165,7 @@ def main():
 
     Path(LOGS_DIR).mkdir(parents=True, exist_ok=True)  # Ensure logs directory exists
 
-    report = scan_movies_for_missing_years(INPUT_DIR, REPORT_FILE)  # Scan movies and create report for files missing a 4-digit year (YYYY)
+    report = scan_movies_for_missing_years(INPUT_DIRECTORY, REPORT_FILE)  # Scan movies and create report for files missing a 4-digit year (YYYY)
 
     scanned = report.get("summary", {}).get("scanned", 0)  # Get the total number of scanned files from the report summary
     missing = report.get("summary", {}).get("missing", 0)  # Get the total number of files missing a year from the report summary

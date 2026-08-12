@@ -17,7 +17,7 @@ Description :
       - Optional notification sound upon completion
 
 Usage:
-   1. Configure the INPUT_DIR and ensure DEEPL_API_KEYS is set in the .env file.
+   1. Configure the INPUT_DIRECTORY and ensure DEEPL_API_KEYS is set in the .env file.
    2. Execute the script using Python:
       $ python <script_name>.py
    3. Translated SRT files are saved in the same directory with '_ptBR' appended.
@@ -88,7 +88,7 @@ DESCRIPTIVE_SUBTITLES_REMOVAL = (
     True  # Set to True to remove descriptive lines (e.g., [music], (laughs)) from SRT before translation
 )
 DEEPL_API_KEYS = {}  # DeepL API accounts (will be loaded in load_dotenv function)
-INPUT_DIR = f"./Input/"  # Directory containing the input SRT files
+INPUT_DIRECTORY = f"./Input/"  # Directory containing the input SRT files
 OUTPUT_DIR = Path("./Output")  # Base output directory
 TARGET_LANG = "PT-BR"  # DeepL target language code
 SCRIPT_DIR = Path(__file__).resolve().parent  # Directory containing this script
@@ -1552,7 +1552,7 @@ def main():
     """
     Main function.
 
-    Processes all .srt files in the INPUT_DIR. Each file is translated using DeepL API
+    Processes all .srt files in the INPUT_DIRECTORY. Each file is translated using DeepL API
     from DeepL-detected source language to Brazilian Portuguese. Translated files are saved in the same directory
     with '_ptBR' appended to the filename.
 
@@ -1567,7 +1567,7 @@ def main():
 
     ensure_env_file()  # Ensure .env file exists
 
-    input_dir = resolve_from_script_dir(INPUT_DIR)  # Resolve configured input from script location
+    input_dir = resolve_from_script_dir(INPUT_DIRECTORY)  # Resolve configured input from script location
     output_dir = resolve_from_script_dir(OUTPUT_DIR)  # Resolve configured output from script location
     use_configured_output = is_path_inside(input_dir, SCRIPT_DIR)  # Internal inputs keep configured output layout
 

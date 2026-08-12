@@ -23,7 +23,7 @@ Description :
    subtitle disposition.
 
 Usage:
-   1. Set the INPUT_DIR path and ensure FFmpeg/FFprobe are installed.
+   1. Set the INPUT_DIRECTORY path and ensure FFmpeg/FFprobe are installed.
    2. Configure the LANGUAGES dictionary with allowed subtitle titles/languages.
    3. Run the script:
          $ python default_subtitle_switcher.py
@@ -82,7 +82,7 @@ class BackgroundColors:  # Colors for the terminal
 
 # Execution Constants:
 VERBOSE = False  # Set to True to output verbose messages
-INPUT_DIR = r"./Input"  # Path to the directory with video files
+INPUT_DIRECTORY = r"./Input"  # Path to the directory with video files
 DELETE_OLD_FILES = True  # Set to True to replace original files with cleaned versions
 DELETE_OTHER_SUBTITLES = False  # Set to True to delete other subtitle tracks after setting the default
 FILES_FORMAT = (".mkv", ".mp4", ".avi", ".mov")  # Tuple of video file extensions to process
@@ -565,7 +565,7 @@ def set_default_subtitle(full_path):
 
 def process_videos_in_directory():
     """
-    Processes all video files in the specified INPUT_DIR, removing unwanted
+    Processes all video files in the specified INPUT_DIRECTORY, removing unwanted
     subtitle tracks and optionally setting the preferred default subtitle in the cleaned file.
 
     :param: None
@@ -573,11 +573,11 @@ def process_videos_in_directory():
     """
 
     verbose_output(
-        f"{BackgroundColors.GREEN}Processing video files in directory: {BackgroundColors.CYAN}{INPUT_DIR}{Style.RESET_ALL}"
+        f"{BackgroundColors.GREEN}Processing video files in directory: {BackgroundColors.CYAN}{INPUT_DIRECTORY}{Style.RESET_ALL}"
     )  # Output the verbose message
 
     video_files = []  # List to hold all video file paths
-    for root, _, files in os.walk(INPUT_DIR):  # Walk through the input directory
+    for root, _, files in os.walk(INPUT_DIRECTORY):  # Walk through the input directory
         for file in files:  # Loop through all files
             if file.lower().endswith(FILES_FORMAT):  # Check for video file extensions
                 video_files.append(os.path.join(root, file))  # Add the full file path to the list

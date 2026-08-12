@@ -19,7 +19,7 @@ Description :
         - Integration with ffmpeg for audio track manipulation
 
 Usage:
-    1. Set the INPUT_DIR constant to the folder containing your video files.
+    1. Set the INPUT_DIRECTORY constant to the folder containing your video files.
     2. Modify DESIRED_LANGUAGES to include the languages you want to keep.
     3. Execute the script:
         $ python main.py
@@ -76,7 +76,7 @@ class BackgroundColors:  # Colors for the terminal
 
 # Execution Constants:
 VERBOSE = False  # Set to True to output verbose messages
-INPUT_DIR = "./Input/"  # Root directory to search for videos
+INPUT_DIRECTORY = "./Input/"  # Root directory to search for videos
 VIDEO_FILE_EXTENSIONS = [".mkv", ".mp4", ".avi"]  # List of video file extensions to process
 IGNORE_DIRS = ["Backup"]  # List of directory name keywords to ignore (case-insensitive)
 IGNORE_FILE_PATTERNS = [
@@ -1818,13 +1818,13 @@ def main():
 
     install_ffmpeg_and_ffprobe()  # Ensure ffmpeg and ffprobe are installed
 
-    if not verify_filepath_exists(INPUT_DIR):  # If the input directory does not exist
-        print(f"{BackgroundColors.RED}Input directory not found: {BackgroundColors.CYAN}{INPUT_DIR}{Style.RESET_ALL}")
+    if not verify_filepath_exists(INPUT_DIRECTORY):  # If the input directory does not exist
+        print(f"{BackgroundColors.RED}Input directory not found: {BackgroundColors.CYAN}{INPUT_DIRECTORY}{Style.RESET_ALL}")
         return  # Exit the program
 
-    videos = find_videos(INPUT_DIR, VIDEO_FILE_EXTENSIONS)  # Find all videos in the input directory
+    videos = find_videos(INPUT_DIRECTORY, VIDEO_FILE_EXTENSIONS)  # Find all videos in the input directory
     if not videos:  # If no videos were found
-        print(f"{BackgroundColors.YELLOW}No video files found in {INPUT_DIR}{Style.RESET_ALL}")
+        print(f"{BackgroundColors.YELLOW}No video files found in {INPUT_DIRECTORY}{Style.RESET_ALL}")
         return  # Exit the program
 
     pbar = None  # Initialize pbar variable to None
@@ -1832,7 +1832,7 @@ def main():
     try:  # Begin outer try block to ensure cleanup
         pbar = create_progress_bar(
             videos,  # Iterable to wrap in progress bar
-            desc=f"{BackgroundColors.GREEN}Processing Video Files from {BackgroundColors.CYAN}{INPUT_DIR}{BackgroundColors.GREEN}...{Style.RESET_ALL}",  # Description shown on the left
+            desc=f"{BackgroundColors.GREEN}Processing Video Files from {BackgroundColors.CYAN}{INPUT_DIRECTORY}{BackgroundColors.GREEN}...{Style.RESET_ALL}",  # Description shown on the left
             bar_format=f"{{l_bar}}{BackgroundColors.CYAN}{{bar}}{Style.RESET_ALL}{{r_bar}}",  # Color only the progress bar itself in cyan
         )  # Create tqdm safely via factory
 
@@ -1841,7 +1841,7 @@ def main():
         try:  # Iterate over files and handle user interruptions
             for video in iterator:  # Iterate over chosen iterator (tqdm or list)
                 try:  # Attempt to compute the path to display in the progress bar
-                    rel_path = os.path.relpath(video, INPUT_DIR)  # Compute relative path from INPUT_DIR
+                    rel_path = os.path.relpath(video, INPUT_DIRECTORY)  # Compute relative path from INPUT_DIRECTORY
                 except Exception:  # Fallback when relpath computation fails
                     rel_path = os.path.basename(video)  # Use basename as safe fallback
                 if pbar is not None and hasattr(pbar, "set_description"):  # Update tqdm description only if available

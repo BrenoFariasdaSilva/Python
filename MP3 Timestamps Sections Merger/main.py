@@ -22,7 +22,7 @@ class BackgroundColors:  # Colors for the terminal
 VERBOSE = False  # Set to True to output verbose messages
 
 # Path Constants:
-INPUT_DIR = "Input"  # The directory where the MP3 files are stored
+INPUT_DIRECTORY = "Input"  # The directory where the MP3 files are stored
 OUTPUT_DIR = "Output"  # The directory where the split MP3 files will be stored
 TIMESTAMP_DIR = "Timestamps"  # The directory where the timestamp files are stored
 PROCESSED_PREFIX = "Processed - "  # The prefix to mark files as processed
@@ -317,8 +317,8 @@ def mark_as_processed(mp3_file="", timestamp_file=""):
     if not mp3_file:  # If mp3 filename not provided
         return  # Nothing to do
 
-    src_mp3 = os.path.join(INPUT_DIR, mp3_file)  # Compute source mp3 path
-    dest_mp3 = os.path.join(INPUT_DIR, PROCESSED_PREFIX + mp3_file)  # Compute processed mp3 destination path
+    src_mp3 = os.path.join(INPUT_DIRECTORY, mp3_file)  # Compute source mp3 path
+    dest_mp3 = os.path.join(INPUT_DIRECTORY, PROCESSED_PREFIX + mp3_file)  # Compute processed mp3 destination path
     if os.path.exists(src_mp3) and not mp3_file.startswith(PROCESSED_PREFIX):  # If source exists and is not already processed
         os.replace(src_mp3, dest_mp3)  # Rename source to processed path
 
@@ -355,10 +355,10 @@ def list_valid_mp3_files():
     :return: List of valid MP3 filenames.
     """
 
-    if not os.path.isdir(INPUT_DIR):  # If input directory does not exist
+    if not os.path.isdir(INPUT_DIRECTORY):  # If input directory does not exist
         return []  # Return empty list
 
-    mp3_files = [f for f in os.listdir(INPUT_DIR) if f.lower().endswith('.mp3')]  # List all mp3 files in input dir
+    mp3_files = [f for f in os.listdir(INPUT_DIRECTORY) if f.lower().endswith('.mp3')]  # List all mp3 files in input dir
     valid = []  # Prepare list for valid mp3 files that have timestamps
 
     for f in mp3_files:  # Iterate mp3 files
@@ -389,14 +389,14 @@ def main():
 
     mp3_files = list_valid_mp3_files()  # Get MP3 files with matching timestamp files
     if not mp3_files:  # If no files to process
-        print(f"{BackgroundColors.RED}No valid MP3 files found in {INPUT_DIR} with corresponding timestamps in {TIMESTAMP_DIR}.{Style.RESET_ALL}")  # Inform user and exit
+        print(f"{BackgroundColors.RED}No valid MP3 files found in {INPUT_DIRECTORY} with corresponding timestamps in {TIMESTAMP_DIR}.{Style.RESET_ALL}")  # Inform user and exit
         return  # Exit main
 
     for mp3_file in mp3_files:  # Iterate each valid mp3 file
         print(f"\n{BackgroundColors.BOLD}Processing {mp3_file}...{Style.RESET_ALL}")  # Announce processing of the file
         base = os.path.splitext(mp3_file)[0]  # Compute base name without extension
         ts_path = os.path.join(TIMESTAMP_DIR, f"{base}.txt")  # Compute timestamp file path
-        src_mp3_path = os.path.join(INPUT_DIR, mp3_file)  # Compute source mp3 full path
+        src_mp3_path = os.path.join(INPUT_DIRECTORY, mp3_file)  # Compute source mp3 full path
 
         try:  # Wrap per-file processing to continue on errors
             timestamps = parse_timestamps(ts_path)  # Parse timestamps (ignoring track names)

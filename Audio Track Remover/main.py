@@ -18,7 +18,7 @@ Description :
       - Sound notification when the script finishes (optional)
 
 Usage:
-   1. Set the INPUT_DIR path and verify FFmpeg is installed on your system.
+   1. Set the INPUT_DIRECTORY path and verify FFmpeg is installed on your system.
    2. Run the script via terminal:
          $ python remove_audio_tracks.py
    3. Cleaned video files will be saved with the suffix "_clean" unless
@@ -66,7 +66,7 @@ class BackgroundColors:  # Colors for the terminal
 
 # Execution Constants:
 VERBOSE = False  # Set to True to output verbose messages
-INPUT_DIR = r"./Input"  # Path to the directory with video files
+INPUT_DIRECTORY = r"./Input"  # Path to the directory with video files
 DELETE_OLD_FILES = False  # Set to True to replace original files with cleaned versions
 
 # Sound Constants:
@@ -538,7 +538,7 @@ def remove_other_audio_tracks(file_path, pbar=None):
 
 def process_videos_in_directory():
     """
-    Processes all video files in the specified INPUT_DIR, removing all non-default
+    Processes all video files in the specified INPUT_DIRECTORY, removing all non-default
     audio tracks from each.
 
     :param: None
@@ -547,7 +547,7 @@ def process_videos_in_directory():
 
     # First, collect all video files
     video_files = []
-    for root, _, files in os.walk(INPUT_DIR):  # Walk through the input directory
+    for root, _, files in os.walk(INPUT_DIRECTORY):  # Walk through the input directory
         for file in files:  # Loop through all files
             if file.lower().endswith((".mkv", ".mp4", ".avi", ".mov")):  # Check for video file extensions
                 full_path = os.path.join(root, file)  # Get the full file path
@@ -569,7 +569,7 @@ def process_videos_in_directory():
                 remove_other_audio_tracks(full_path, pbar)  # Remove non-default audio tracks
                 pbar.update(1)  # Update progress bar
     else:
-        print(f"{BackgroundColors.YELLOW}No video files found in {INPUT_DIR}{Style.RESET_ALL}")
+        print(f"{BackgroundColors.YELLOW}No video files found in {INPUT_DIRECTORY}{Style.RESET_ALL}")
 
 
 def play_sound():
