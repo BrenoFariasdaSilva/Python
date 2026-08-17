@@ -60,6 +60,7 @@ import subprocess  # Execute FFmpeg, FFprobe, and sound commands.
 import uuid  # Generate collision-resistant temporary output filenames.
 from collections.abc import Mapping  # Type configuration mappings.
 from concurrent.futures import Future, ThreadPoolExecutor  # Run media extraction tasks concurrently.
+from numbers import Real  # Narrow numeric-like values before float coercion.
 from pathlib import Path  # Resolve and manipulate filesystem paths.
 from typing import Any, TypeAlias  # Define reusable static types.
 
@@ -444,6 +445,23 @@ def to_seconds(obj: object) -> float | None:  # Define the to_seconds operation.
     return None  # Report unsupported value types.
 
 
+def coerce_float(value: object) -> float | None:  # Define the coerce_float operation.
+    """
+    Convert common float-compatible values to a floating-point number.
+
+    :param value: Numeric or textual value to convert.
+    :return: Floating-point value, or None when conversion fails.
+    """
+
+    if isinstance(value, (Real, str, bytes, bytearray)):  # Accept values that float() can consume directly.
+        try:  # Guard the conversion against invalid text values.
+            return float(value)  # Convert the narrowed value to floating-point.
+        except (TypeError, ValueError):  # Recover from invalid numeric text.
+            return None  # Report that conversion failed.
+
+    return None  # Report unsupported value types.
+
+
 def calculate_execution_time(start_time: object, finish_time: object | None = None) -> str:  # Define the calculate_execution_time operation.
     """
     Calculate a human-readable execution duration.
@@ -457,9 +475,9 @@ def calculate_execution_time(start_time: object, finish_time: object | None = No
         total_seconds = to_seconds(start_time)  # Convert the direct duration to seconds.
 
         if total_seconds is None:  # Detect an unsupported direct duration type.
-            try:  # Attempt final numeric coercion.
-                total_seconds = float(start_time)  # Convert a numeric-compatible value to seconds.
-            except (TypeError, ValueError):  # Recover from unsupported numeric conversion.
+            total_seconds = coerce_float(start_time)  # Convert a common float-compatible value to seconds.
+
+            if total_seconds is None:  # Recover from unsupported numeric conversion.
                 total_seconds = 0.0  # Use zero seconds as the deterministic fallback.
     else:  # Interpret both arguments as start and finish timestamps.
         start_seconds = to_seconds(start_time)  # Convert the start value to seconds.
@@ -468,9 +486,12 @@ def calculate_execution_time(start_time: object, finish_time: object | None = No
         if start_seconds is not None and finish_seconds is not None:  # Validate both timestamp conversions.
             total_seconds = finish_seconds - start_seconds  # Calculate elapsed seconds.
         else:  # Recover when either timestamp conversion is unsupported.
-            try:  # Attempt direct numeric coercion for both values.
-                total_seconds = float(finish_time) - float(start_time)  # Calculate a numerically coerced duration.
-            except (TypeError, ValueError):  # Recover from unsupported numeric conversion.
+            start_seconds = coerce_float(start_time)  # Convert a common float-compatible start value.
+            finish_seconds = coerce_float(finish_time)  # Convert a common float-compatible finish value.
+
+            if start_seconds is not None and finish_seconds is not None:  # Validate both numeric conversions.
+                total_seconds = finish_seconds - start_seconds  # Calculate a numerically coerced duration.
+            else:  # Recover from unsupported numeric conversion.
                 total_seconds = 0.0  # Use zero seconds as the deterministic fallback.
 
     if total_seconds < 0:  # Normalize inverted timestamps to a positive duration.
