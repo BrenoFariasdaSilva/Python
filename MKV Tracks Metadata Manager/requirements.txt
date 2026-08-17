@@ -1,4 +1,0 @@
-colorama==0.4.6
-langdetect==1.0.9
-openai-whisper==20250625
-tqdm==4.70.0
