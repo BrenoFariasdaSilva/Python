@@ -5,13 +5,13 @@ Audio Track Offset Syncronization
 Author      : Breno Farias da Silva
 Created     : 2026-07-11
 Description :
-    Extract configured audio tracks from two MKV sources, estimate their temporal
+    Extract configured audio tracks from two media sources, estimate their temporal
     offset through waveform cross-correlation, and create a synchronized MP3 copy.
     Subtitle streams from both sources are extracted concurrently while the audio
     workflow runs, with codec-aware output formats and isolated temporary files.
 
     Key features include:
-        - Direct MKV paths or directories containing exactly one MKV file.
+        - Direct MKV or MP4 paths, or directories containing exactly one supported media file.
         - Zero-based audio-track selection validated through FFprobe.
         - Parallel audio and subtitle extraction through ThreadPoolExecutor.
         - FFT-based offset estimation through librosa, NumPy, and SciPy.
@@ -26,10 +26,10 @@ Usage:
     3. Run the script with: python main.py
 
 Outputs:
-    - original.mp3 beside the reference MKV file.
-    - to_syncronize.mp3 beside the target MKV file.
-    - syncronized.mp3 beside both configured MKV files when directories differ.
-    - Extracted subtitle files beside their source MKV files.
+    - original.mp3 beside the reference media file.
+    - to_syncronize.mp3 beside the target media file.
+    - syncronized.mp3 beside both configured media files when directories differ.
+    - Extracted subtitle files beside their source media files.
 
 Dependencies:
     - Python >= 3.10
@@ -116,6 +116,7 @@ TO_SYNCRONIZE_FILE: dict[str, object] = {  # Configure the target MKV source and
 SAMPLE_RATE = 8_000  # Configure the analysis sample rate in hertz.
 ANALYSIS_DURATION_SECONDS = 300  # Limit waveform analysis to the first five minutes.
 MINIMUM_OFFSET_SECONDS = 0.001  # Ignore offsets smaller than one millisecond.
+SUPPORTED_MEDIA_SUFFIXES = {".mkv", ".mp4"}  # Accept Matroska and MP4 containers for source media.
 
 REFERENCE_AUDIO_FILENAME = "original.mp3"  # Configure the extracted reference-audio filename.
 TO_SYNCRONIZE_AUDIO_FILENAME = "to_syncronize.mp3"  # Configure the extracted target-audio filename.
@@ -584,11 +585,11 @@ def validate_dependencies() -> None:  # Define the validate_dependencies operati
 
 def resolve_file_configuration(configuration: Mapping[str, object], configuration_name: str) -> tuple[Path, int]:  # Define the resolve_file_configuration operation.
     """
-    Resolve one configured MKV path and zero-based audio-track index.
+    Resolve one configured media path and zero-based audio-track index.
 
     :param configuration: Mapping containing path and optional index values.
     :param configuration_name: Display name used in validation errors.
-    :return: Resolved MKV path and validated audio-track index.
+    :return: Resolved media path and validated audio-track index.
     """
 
     path_value = configuration.get("path")  # Read the configured media path.
@@ -615,44 +616,47 @@ def resolve_file_configuration(configuration: Mapping[str, object], configuratio
             f"{configured_path}"  # Include the normalized missing path.
         )
 
+    supported_extensions = ", ".join(sorted(SUPPORTED_MEDIA_SUFFIXES))  # Format supported media extensions for user-facing errors.
+
     if configured_path.is_file():  # Handle a directly configured media file.
-        if configured_path.suffix.casefold() != ".mkv":  # Validate the extension case-insensitively.
-            raise ValueError(  # Reject direct files that are not MKV containers.
-                f"File configured in {configuration_name} is not an MKV file: "  # Identify the invalid configuration.
+        if configured_path.suffix.casefold() not in SUPPORTED_MEDIA_SUFFIXES:  # Validate supported container extensions case-insensitively.
+            raise ValueError(  # Reject direct files that are not supported media containers.
+                f"File configured in {configuration_name} is not a supported media file "  # Identify the invalid configuration.
+                f"({supported_extensions}): "  # Describe the supported media extensions.
                 f"{configured_path}"  # Include the rejected file path.
             )
 
-        mkv_path = configured_path  # Preserve the validated direct MKV path.
-    elif configured_path.is_dir():  # Handle a directory expected to contain one direct MKV file.
-        mkv_files = sorted(  # Collect direct MKV children in deterministic order.
-            (  # Build a filtered generator of direct MKV files.
+        mkv_path = configured_path  # Preserve the validated direct media path.
+    elif configured_path.is_dir():  # Handle a directory expected to contain one direct supported media file.
+        mkv_files = sorted(  # Collect direct supported-media children in deterministic order.
+            (  # Build a filtered generator of direct supported-media files.
                 candidate  # Preserve each matching candidate path.
                 for candidate in configured_path.iterdir()  # Inspect direct directory children only.
-                if candidate.is_file() and candidate.suffix.casefold() == ".mkv"  # Retain case-insensitive MKV files.
+                if candidate.is_file() and candidate.suffix.casefold() in SUPPORTED_MEDIA_SUFFIXES  # Retain case-insensitive supported media files.
             ),
             key=lambda candidate: candidate.name.casefold(),  # Sort filenames case-insensitively.
         )
 
-        if not mkv_files:  # Detect a directory without a direct MKV file.
-            raise FileNotFoundError(  # Stop execution when no MKV candidate exists.
-                "No MKV file was found directly inside the directory configured "  # Describe the missing media condition.
+        if not mkv_files:  # Detect a directory without a direct supported media file.
+            raise FileNotFoundError(  # Stop execution when no supported media candidate exists.
+                "No supported media file was found directly inside the directory configured "  # Describe the missing media condition.
                 f"in {configuration_name}: {configured_path}"  # Identify the affected directory.
             )
 
-        if len(mkv_files) > 1:  # Detect an ambiguous directory with multiple direct MKV files.
-            matches = "\n".join(  # Format every ambiguous MKV filename.
+        if len(mkv_files) > 1:  # Detect an ambiguous directory with multiple direct supported media files.
+            matches = "\n".join(  # Format every ambiguous supported-media filename.
                 f"  - {candidate.name}"  # Format one matching filename.
-                for candidate in mkv_files  # Iterate through all matching MKV files.
+                for candidate in mkv_files  # Iterate through all matching supported media files.
             )
-            raise ValueError(  # Require the user to select one exact MKV path.
-                "Multiple MKV files were found directly inside the directory "  # Describe the ambiguity.
+            raise ValueError(  # Require the user to select one exact media path.
+                "Multiple supported media files were found directly inside the directory "  # Describe the ambiguity.
                 f"configured in {configuration_name}: {configured_path}\n"  # Identify the affected directory.
-                f"Specify the exact MKV file instead. Matches:\n{matches}"  # List all ambiguous candidates.
+                f"Specify the exact file instead. Matches:\n{matches}"  # List all ambiguous candidates.
             )
 
-        mkv_path = mkv_files[0]  # Select the only direct MKV file.
+        mkv_path = mkv_files[0]  # Select the only direct supported media file.
         print(  # Report directory-to-file resolution.
-            f"{configuration_name}: directory resolved to MKV file: "  # Identify the configuration source.
+            f"{configuration_name}: directory resolved to media file: "  # Identify the configuration source.
             f"{mkv_path}"  # Include the resolved MKV path.
         )
     else:  # Handle special filesystem objects that are neither regular files nor directories.
