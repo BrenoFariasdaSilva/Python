@@ -10,3 +10,6 @@
 [submodule "Datasets-Features-Compatibility"]
 	path = Datasets-Features-Compatibility
 	url = https://github.com/BrenoFariasdaSilva/Datasets-Features-Compatibility.git
+[submodule "MKV Tracks Metadata Manager"]
+	path = MKV Tracks Metadata Manager
+	url = git@github.com:BrenoFariasdaSilva/MKV-Tracks-Metadata-Manager.git
