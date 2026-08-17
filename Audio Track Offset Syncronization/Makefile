@@ -1,9 +1,13 @@
 # Variables
 VENV := venv
-OS := $(shell uname 2>/dev/null || echo Windows)
+ifeq ($(OS),Windows_NT)
+	HOST_OS := Windows
+else
+	HOST_OS := $(shell uname 2>/dev/null || echo Unknown)
+endif
 
 # Detect correct Python and Pip commands based on OS
-ifeq ($(OS), Windows) # Windows
+ifeq ($(HOST_OS), Windows) # Windows
 	PYTHON := $(VENV)/Scripts/python.exe
 	PIP := $(VENV)/Scripts/pip.exe
 	PYTHON_CMD := python
@@ -28,7 +32,7 @@ ENSURE_LOG_DIR := @mkdir -p $(LOG_DIR) 2>/dev/null || $(PYTHON_CMD) -c "import o
 # On Unix-like systems: supports DETACH variable
 #   - If DETACH is set, runs the script in detached mode and tails the log file
 #   - Else, runs the script normally
-ifeq ($(OS), Windows) # Windows
+ifeq ($(HOST_OS), Windows) # Windows
 RUN_AND_LOG = $(PYTHON) $(1)
 else
 RUN_AND_LOG = \ # Unix-like
