@@ -614,10 +614,10 @@ def scan_input_directory(ffmpeg_executable: str, input_dir_string: str) -> Path:
     logger.write(f"{BackgroundColors.GREEN}Report: {BackgroundColors.CYAN}{report_path}{Style.RESET_ALL}")  # Display the JSON report destination
     logger.write("")  # Keep one blank line before the progress bar
 
-    progress_bar = tqdm(media_files, total=len(media_files), unit="file", dynamic_ncols=True, file=sys.__stdout__)  # Render one inline-updated progress bar for this input directory
+    progress_bar = tqdm(media_files, total=len(media_files), unit="file", dynamic_ncols=True, file=sys.__stdout__, colour="green")  # Render one green inline-updated progress bar for this input directory
 
     for media_path in progress_bar:  # Process supported media files sequentially in deterministic path order
-        progress_bar.set_description(f"Scanning: {media_path.name}")  # Show the current filename inline on the same progress-bar row
+        progress_bar.set_description(f"{BackgroundColors.GREEN}Scanning: {BackgroundColors.CYAN}{media_path.name}{BackgroundColors.GREEN}")  # Keep hardcoded progress text green and the current filename cyan
 
         try:  # Isolate per-file failures so one unreadable media file does not abort the remaining library scan
             scan_result = scan_media_file(ffmpeg_executable, media_path, input_dir)  # Read the complete media file through FFmpeg and capture integrity errors
