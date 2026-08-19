@@ -78,10 +78,10 @@ Stream = dict[str, Any]  # Represent one FFprobe stream dictionary.
 MediaInfo = dict[str, Any]  # Represent parsed FFprobe media information.
 
 ORIGINAL_ROOT = Path(r"G:\\Series\\Breaking Bad")  # Preserve the configured lower-quality Dual source root providing PT-BR audio.
-TARGET_ROOT = Path(r"D:\\Sem Backup\\Download\\Torrent\\Completed\\Breaking Bad 1080p")  # Preserve the configured higher-quality target root providing video and English audio.
-OUTPUT_ROOT = Path(r"G:\\Series\\Breaking Bad 1080p Dual")  # Store generated high-quality Dual outputs on G: instead of consuming limited D: free space.
-ERASE_TARGET_FILES = False  # Set to True to delete each processed higher-quality target media file only after its new output is safely generated.
 ERASE_ORIGINAL_FILES = False  # Set to True to delete each processed lower-quality original media file only after its new output is safely generated.
+TARGET_ROOT = Path(r"D:\\Sem Backup\\Download\\Torrent\\Completed\\Breaking Bad 1080p")  # Preserve the configured higher-quality target root providing video and English audio.
+ERASE_TARGET_FILES = True  # Set to True to delete each processed higher-quality target media file only after its new output is safely generated.
+OUTPUT_ROOT = Path(r"G:\\Series\\Breaking Bad 1080p Dual")  # Store generated high-quality Dual outputs on G: instead of consuming limited D: free space.
 FFMPEG = "ffmpeg"  # Select the configured FFmpeg executable.
 FFPROBE = "ffprobe"  # Select the configured FFprobe executable.
 UPDATED_SUFFIX = "-updated"  # Append the configured suffix to generated MKV files.
