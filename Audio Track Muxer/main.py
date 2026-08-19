@@ -89,11 +89,11 @@ Stream = dict[str, Any]  # Represent one FFprobe stream dictionary.
 MediaInfo = dict[str, Any]  # Represent parsed FFprobe media information.
 MatchedMediaPair = tuple[Path, Path, Path]  # Represent target media, matching original media, and the generated output path.
 
-ORIGINAL_ROOT = Path(r"G:\\Series\\Breaking Bad")  # Preserve the configured lower-quality Dual source root providing PT-BR audio.
+ORIGINAL_ROOT = Path(r"G:\\Series\\Breaking Bad OLD")  # Preserve the configured lower-quality Dual source root providing PT-BR audio.
 ERASE_ORIGINAL_FILES = False  # Set to True to delete each processed lower-quality original media file only after its new output is safely generated.
 TARGET_ROOT = Path(r"D:\\Sem Backup\\Download\\Torrent\\Completed\\Breaking Bad 1080p")  # Preserve the configured higher-quality target root providing video and English audio.
-ERASE_TARGET_FILES = False  # Set to True to delete each processed higher-quality target media file only after its new output is safely generated.
-OUTPUT_ROOT = Path(r"G:\\Series\\Breaking Bad 1080p Dual")  # Store generated high-quality Dual outputs on G: instead of consuming limited D: free space.
+ERASE_TARGET_FILES = True  # Set to True to delete each processed higher-quality target media file only after its new output is safely generated.
+OUTPUT_ROOT = Path(r"D:\\Sem Backup\\Download\\Torrent\\Completed\\Breaking Bad 1080p Dual")  # Store generated high-quality Dual outputs on G: instead of consuming limited D: free space.
 FFMPEG = "ffmpeg"  # Select the configured FFmpeg executable.
 FFPROBE = "ffprobe"  # Select the configured FFprobe executable.
 UPDATED_SUFFIX = "-updated"  # Append the configured suffix to generated MKV files.
@@ -1337,21 +1337,21 @@ def validate_output_storage() -> None:
     required_with_reserve = max(0, peak_additional_bytes) + reserve_bytes  # Require only the simulated peak additional allocation plus the configured free-space reserve.
     gib = 1024 ** 3  # Define the binary gigabyte divisor used for readable storage diagnostics.
 
-    print("\nStorage preflight:")  # Announce the destination-drive capacity simulation.
-    print(f"  Output root             : {OUTPUT_ROOT}")  # Display the configured generated-output location.
-    print(f"  Matched media pairs     : {len(matched_pairs)}")  # Display all unambiguous common pairs regardless of existing-output skipping.
-    print(f"  Pairs requiring output  : {pairs_requiring_output}")  # Display how many pairs actually require allocation under the overwrite policy.
-    print(f"  Matched target size     : {target_bytes / gib:.2f} GiB")  # Display target sizes for outputs that will actually be generated or replaced.
-    print(f"  Estimated output total  : {estimated_output_bytes / gib:.2f} GiB")  # Display total output bytes without incorrectly requiring all of them as additional free space.
-    print(f"  ERASE_TARGET_FILES      : {ERASE_TARGET_FILES}")  # Display whether successful target files are configured for deletion.
-    print(f"  ERASE_ORIGINAL_FILES    : {ERASE_ORIGINAL_FILES}")  # Display whether successful original files are configured for deletion.
-    print(f"  Target reclaim on output: {reclaimable_target_bytes / gib:.2f} GiB")  # Display target deletion capacity that genuinely helps the output filesystem.
-    print(f"  Original reclaim output : {reclaimable_original_bytes / gib:.2f} GiB")  # Display original deletion capacity that genuinely helps the output filesystem.
-    print(f"  Replaceable outputs     : {replaceable_output_bytes / gib:.2f} GiB")  # Display existing output capacity reusable when OVERWRITE is enabled.
-    print(f"  Peak additional storage : {max(0, peak_additional_bytes) / gib:.2f} GiB")  # Display the maximum simulated extra allocation before per-pair cleanup.
-    print(f"  Current output free     : {disk_usage.free / gib:.2f} GiB")  # Display currently available destination-filesystem capacity.
-    print(f"  Required free reserve   : {MIN_FREE_SPACE_RESERVE_GB:.2f} GiB")  # Display the free-space reserve preserved throughout processing.
-    print(f"  Required peak free      : {required_with_reserve / gib:.2f} GiB")  # Display the actual peak free-space requirement after erasure-aware simulation.
+    print(f"\n{Fore.GREEN}Storage preflight:{Fore.RESET}")  # Announce the destination-drive capacity simulation with the hardcoded label in green.
+    print(f"{Fore.GREEN}  Output root             : {Fore.CYAN}{OUTPUT_ROOT}{Fore.RESET}")  # Display the configured generated-output location with the dynamic value in cyan.
+    print(f"{Fore.GREEN}  Matched media pairs     : {Fore.CYAN}{len(matched_pairs)}{Fore.RESET}")  # Display all unambiguous common pairs regardless of existing-output skipping.
+    print(f"{Fore.GREEN}  Pairs requiring output  : {Fore.CYAN}{pairs_requiring_output}{Fore.RESET}")  # Display how many pairs actually require allocation under the overwrite policy.
+    print(f"{Fore.GREEN}  Matched target size     : {Fore.CYAN}{target_bytes / gib:.2f} GiB{Fore.RESET}")  # Display target sizes for outputs that will actually be generated or replaced.
+    print(f"{Fore.GREEN}  Estimated output total  : {Fore.CYAN}{estimated_output_bytes / gib:.2f} GiB{Fore.RESET}")  # Display total output bytes without incorrectly requiring all of them as additional free space.
+    print(f"{Fore.GREEN}  ERASE_TARGET_FILES      : {Fore.CYAN}{ERASE_TARGET_FILES}{Fore.RESET}")  # Display whether successful target files are configured for deletion.
+    print(f"{Fore.GREEN}  ERASE_ORIGINAL_FILES    : {Fore.CYAN}{ERASE_ORIGINAL_FILES}{Fore.RESET}")  # Display whether successful original files are configured for deletion.
+    print(f"{Fore.GREEN}  Target reclaim on output: {Fore.CYAN}{reclaimable_target_bytes / gib:.2f} GiB{Fore.RESET}")  # Display target deletion capacity that genuinely helps the output filesystem.
+    print(f"{Fore.GREEN}  Original reclaim output : {Fore.CYAN}{reclaimable_original_bytes / gib:.2f} GiB{Fore.RESET}")  # Display original deletion capacity that genuinely helps the output filesystem.
+    print(f"{Fore.GREEN}  Replaceable outputs     : {Fore.CYAN}{replaceable_output_bytes / gib:.2f} GiB{Fore.RESET}")  # Display existing output capacity reusable when OVERWRITE is enabled.
+    print(f"{Fore.GREEN}  Peak additional storage : {Fore.CYAN}{max(0, peak_additional_bytes) / gib:.2f} GiB{Fore.RESET}")  # Display the maximum simulated extra allocation before per-pair cleanup.
+    print(f"{Fore.GREEN}  Current output free     : {Fore.CYAN}{disk_usage.free / gib:.2f} GiB{Fore.RESET}")  # Display currently available destination-filesystem capacity.
+    print(f"{Fore.GREEN}  Required free reserve   : {Fore.CYAN}{MIN_FREE_SPACE_RESERVE_GB:.2f} GiB{Fore.RESET}")  # Display the free-space reserve preserved throughout processing.
+    print(f"{Fore.GREEN}  Required peak free      : {Fore.CYAN}{required_with_reserve / gib:.2f} GiB{Fore.RESET}")  # Display the actual peak free-space requirement after erasure-aware simulation.
 
     if DRY_RUN:  # Preview mode creates no outputs and deletes no sources, so capacity must not block command inspection.
         print("  Storage enforcement     : skipped because DRY_RUN=True")  # Explain why the calculated real-run estimate is informational only.
