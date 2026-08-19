@@ -1147,7 +1147,14 @@ def process_root_movies(errors: list[str]) -> bool:
 
         return True  # Report that a direct target movie layout was detected even though it could not be processed.
 
-    progress_bar = tqdm(target_movies, total=len(target_movies), unit="file", dynamic_ncols=True, colour="green")  # Render one inline-updated progress bar for direct movie processing.
+    progress_bar = tqdm(  # Render one inline-updated progress bar for direct movie processing.
+        target_movies,
+        total=len(target_movies),
+        unit="file",
+        dynamic_ncols=True,
+        colour="green",
+        bar_format=f"{{l_bar}}{Fore.GREEN}{{bar}}{Fore.GREEN}| {{n_fmt}}/{{total_fmt}} [{{elapsed}}<{{remaining}}, {{rate_fmt}}{{postfix}}]{Fore.RESET}",
+    )  # Keep the percentage, bar, counters, timing, and rate green even after tqdm emits its own ANSI reset sequences.
 
     for target_media in progress_bar:  # Process direct target movies deterministically by filename.
         progress_bar.set_description(f"{Fore.GREEN}Muxing: {Fore.CYAN}{target_media.name}{Fore.GREEN}")  # Keep static progress text green and the current filename cyan.
@@ -1185,7 +1192,14 @@ def process_target_season(target_season: Path, original_season: Path, season_num
 
     output_season = OUTPUT_ROOT / target_season.name  # Preserve the target season folder name beneath the dedicated G: output root.
     target_media_files = iter_media_files(target_season)  # Collect the deterministic episode list once for progress accounting.
-    progress_bar = tqdm(target_media_files, total=len(target_media_files), unit="file", dynamic_ncols=True, colour="green")  # Render one inline-updated progress bar for this season.
+    progress_bar = tqdm(  # Render one inline-updated progress bar for this season.
+        target_media_files,
+        total=len(target_media_files),
+        unit="file",
+        dynamic_ncols=True,
+        colour="green",
+        bar_format=f"{{l_bar}}{Fore.GREEN}{{bar}}{Fore.GREEN}| {{n_fmt}}/{{total_fmt}} [{{elapsed}}<{{remaining}}, {{rate_fmt}}{{postfix}}]{Fore.RESET}",
+    )  # Keep the percentage, bar, counters, timing, and rate green even after tqdm emits its own ANSI reset sequences.
 
     for target_media in progress_bar:  # Process target media files in deterministic order.
         progress_bar.set_description(f"{Fore.GREEN}Muxing: {Fore.CYAN}{target_media.name}{Fore.GREEN}")  # Keep static progress text green and the current filename cyan.
