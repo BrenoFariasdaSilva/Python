@@ -18,6 +18,7 @@ Description :
         - Separate cross-input reports grouped by the exact input-directory set in
           which each repeated movie title occurs.
         - Accent/case/punctuation-insensitive movie-title comparison.
+        - Exact byte and GB size reporting for every duplicate movie occurrence.
         - UTF-8 JSON report generation under ./Outputs/.
 
 Usage:
@@ -44,6 +45,9 @@ Assumptions & Notes:
       configured input directory.
     - Cross reports contain titles present in two or more distinct input directories
       and are separated by the exact combination of input directories involved.
+    - Reported sizes sum all regular files recursively inside each matched movie
+      directory, avoiding assumptions about video-file extensions or filenames.
+    - size_bytes is exact; size_gb uses 1,000,000,000 bytes per decimal GB and is rounded to 9 decimals.
     - Windows drive colons are removed from report filenames because ':' is invalid.
 """
 
@@ -382,9 +386,52 @@ def validate_input_dirs(input_dirs):
     return validated_input_dirs  # Return the complete validated input-directory collection
 
 
+def calculate_directory_files_size(directory_path: str):
+    """
+    Calculate the combined size of all regular files inside one movie directory.
+
+    Directory contents are scanned recursively without following directory symlinks so
+    the report does not depend on any particular movie-file extension or filename.
+
+    :param directory_path: Matched movie directory whose contained files are measured.
+    :return: Tuple containing exact total bytes and the corresponding size in GB.
+    """
+
+    total_size_bytes = 0  # Initialize the exact accumulated byte count for all regular files under this movie directory
+
+    def handle_walk_error(error):  # Define a local handler for recoverable file-size traversal errors
+        verbose_output(  # Output file-size traversal diagnostics only when verbose logging is enabled
+            true_string=(  # Build the formatted file-size traversal warning message
+                f"{BackgroundColors.YELLOW}Warning: unable to measure files under "  # Begin the file-size traversal warning message
+                f"{BackgroundColors.CYAN}{getattr(error, 'filename', 'unknown path')}"  # Include the inaccessible path when available
+                f"{BackgroundColors.YELLOW}: {error}{Style.RESET_ALL}"  # Include the original filesystem traversal error description
+            )  # Finish the formatted file-size traversal warning message
+        )  # Finish the optional verbose warning output call
+
+    for current_root, _, file_names in os.walk(directory_path, onerror=handle_walk_error, followlinks=False):  # Recursively inspect regular files without following directory symlinks
+        file_names.sort(key=str.casefold)  # Sort discovered files for deterministic traversal and diagnostics
+        for file_name in file_names:  # Inspect every file discovered inside the current directory level
+            file_path = os.path.join(current_root, file_name)  # Build the complete path to the current file before measuring it
+            try:  # Attempt to inspect the current file without failing the entire duplicate scan on one inaccessible entry
+                if not os.path.isfile(file_path):  # Ignore non-regular filesystem entries that os.walk may surface as files
+                    continue  # Continue with the next discovered file entry
+                total_size_bytes += os.path.getsize(file_path)  # Add the current regular file's exact byte size to the movie-directory total
+            except OSError as error:  # Handle inaccessible, disappearing, or otherwise unmeasurable files safely
+                verbose_output(  # Output the individual file-size warning only when verbose logging is enabled
+                    true_string=(  # Build the formatted file-size warning message
+                        f"{BackgroundColors.YELLOW}Warning: unable to measure file "  # Begin the individual file-size warning message
+                        f"{BackgroundColors.CYAN}{file_path}"  # Include the complete path of the file that could not be measured
+                        f"{BackgroundColors.YELLOW}: {error}{Style.RESET_ALL}"  # Include the original filesystem error description
+                    )  # Finish the formatted individual file-size warning message
+                )  # Finish the optional verbose warning output call
+
+    size_gb = round(total_size_bytes / 1_000_000_000, 9)  # Convert exact bytes to decimal GB while retaining fine comparison precision
+    return total_size_bytes, size_gb  # Return both exact bytes and the human-comparable GB value for report serialization
+
+
 def scan_movie_directories(input_dir: str):
     """
-    Recursively scan one input directory and collect valid movie entries.
+    Recursively scan one input directory, collect movie entries, and measure sizes.
 
     :param input_dir: Root directory to scan.
     :return: Tuple containing parsed movie entries and total directory count.
@@ -410,6 +457,7 @@ def scan_movie_directories(input_dir: str):
 
             full_path = os.path.normpath(os.path.join(current_root, directory_name))  # Build the normalized path for the matched movie directory
             relative_path = os.path.relpath(full_path, input_dir)  # Build the matched directory path relative to its owning input directory
+            size_bytes, size_gb = calculate_directory_files_size(full_path)  # Measure all regular files contained by this matched movie directory for duplicate-size comparison
             movie_entries.append(  # Append the complete movie occurrence to this input directory's scan result
                 {  # Build the movie occurrence record
                     **metadata,  # Include all metadata parsed from the movie directory name
@@ -417,6 +465,8 @@ def scan_movie_directories(input_dir: str):
                     "directory_name": directory_name,  # Store the original matched directory basename
                     "relative_path": relative_path,  # Store the path relative to the owning input directory
                     "path": full_path,  # Store the normalized matched movie-directory path
+                    "size_bytes": size_bytes,  # Store the exact combined byte size of all regular files contained by this matched movie directory
+                    "size_gb": size_gb,  # Store the combined contained-file size in GB for direct duplicate-size comparison
                 }  # Finish the movie occurrence record
             )  # Finish appending the movie occurrence
 
@@ -474,6 +524,8 @@ def build_duplicate_group(normalized_name: str, entries):
                 "language": entry["language"],  # Store the canonical language label
                 "relative_path": entry["relative_path"],  # Store the path relative to the owning input directory
                 "path": entry["path"],  # Store the normalized matched movie-directory path
+                "size_bytes": entry["size_bytes"],  # Store the exact combined byte size for this duplicate movie-directory occurrence
+                "size_gb": entry["size_gb"],  # Store the combined contained-file size in GB so equal or different duplicate sizes are visible
             }  # Finish the serialized movie occurrence
             for entry in sorted_entries  # Serialize every sorted occurrence in the duplicate group
         ],  # Finish the serialized occurrence list
@@ -591,6 +643,7 @@ def build_comparison_metadata():
             "year",  # Document that release-year differences do not affect title matching
             "resolution",  # Document that resolution differences do not affect title matching
             "language",  # Document that language-label differences do not affect title matching
+            "file_size",  # Document that duplicate titles remain matches even when their measured stored sizes differ
             "letter_casing",  # Document that uppercase and lowercase differences do not affect title matching
             "accents",  # Document that accented and unaccented character variants are treated equally
             "punctuation",  # Document that punctuation differences do not affect title matching
