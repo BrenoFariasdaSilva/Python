@@ -873,93 +873,88 @@ def play_sound():
 
 def main():
     """
-    Scan INPUT_DIRS, write per-input duplicate reports, and write cross-input reports.
+    Scan INPUT_DIRS, write reports, and output a compact deterministic execution log.
 
     :param: None
     :return: None
     """
 
-    print(  # Output the program welcome message to the terminal and logger
-        f"{BackgroundColors.CLEAR_TERMINAL}{BackgroundColors.BOLD}{BackgroundColors.GREEN}Welcome to the {BackgroundColors.CYAN}Find Repeated Movies-Series{BackgroundColors.GREEN} program!{Style.RESET_ALL}",  # Include the project name using the configured terminal colors
-        end="\n\n",  # Add spacing after the welcome message
-    )  # Finish the welcome output call
-
     start_time = datetime.datetime.now()  # Capture the program start time for final execution-duration reporting
+    output_lines = [  # Initialize the complete normal execution log so it can be emitted in one write operation
+        f"{BackgroundColors.CLEAR_TERMINAL}{BackgroundColors.BOLD}{BackgroundColors.GREEN}Welcome to the {BackgroundColors.CYAN}Find Repeated Movies-Series{BackgroundColors.GREEN} program!{Style.RESET_ALL}",  # Add the program welcome line
+        "",  # Add exactly one blank line after the welcome message
+    ]  # Finish the initial execution-log line collection
 
     try:  # Execute the complete multi-input scan while preserving existing failure propagation behavior
         scan_results, cross_report_paths, cross_groups_by_scope = run_duplicate_movie_scans(INPUT_DIRS)  # Run all internal and cross-input duplicate analyses
 
-        for scan_result in scan_results:  # Display one independent summary for every configured input directory
-            print(  # Output the current input-directory summary heading
-                f"{BackgroundColors.BOLD}{BackgroundColors.GREEN}Input directory: "  # Begin the formatted input-directory summary line
-                f"{BackgroundColors.CYAN}{scan_result['input_dir']}{Style.RESET_ALL}"  # Include the configured input directory path
-            )  # Finish the input-directory heading output call
-            print(  # Output the number of matching movie directories found under this input root
-                f"{BackgroundColors.GREEN}Matching movie directories: "  # Begin the matching-directory count message
-                f"{BackgroundColors.CYAN}{len(scan_result['movie_entries'])}{Style.RESET_ALL}"  # Include the matching movie-directory count
-            )  # Finish the matching-directory output call
-            print(  # Output the number of movie titles duplicated inside this input root
-                f"{BackgroundColors.GREEN}Internal repeated movie names: "  # Begin the internal duplicate count message
-                f"{BackgroundColors.CYAN}{len(scan_result['duplicate_groups'])}{Style.RESET_ALL}"  # Include the internal duplicate-title count
-            )  # Finish the internal duplicate count output call
+        for scan_result in scan_results:  # Build one independent compact summary for every configured input directory
+            input_dir = scan_result["input_dir"]  # Read the configured input directory represented by the current scan result
+            output_lines.append(  # Append the current input-directory heading to the execution log
+                f"{BackgroundColors.BOLD}{BackgroundColors.GREEN}Input directory: {BackgroundColors.CYAN}{input_dir}{Style.RESET_ALL}"  # Include the configured input directory path
+            )  # Finish appending the current input-directory heading
+            output_lines.append(  # Append the matching movie-directory count for the current input root
+                f"{BackgroundColors.GREEN}Matching movie directories in {BackgroundColors.CYAN}{input_dir}{BackgroundColors.GREEN}: {BackgroundColors.CYAN}{len(scan_result['movie_entries'])}{Style.RESET_ALL}"  # Include both the owning input directory and matching movie-directory count
+            )  # Finish appending the matching movie-directory count
+            output_lines.append(  # Append the internal repeated-title count for the current input root
+                f"{BackgroundColors.GREEN}Internal repeated movie names in {BackgroundColors.CYAN}{input_dir}{BackgroundColors.GREEN}: {BackgroundColors.CYAN}{len(scan_result['duplicate_groups'])}{Style.RESET_ALL}"  # Include both the owning input directory and internal duplicate-title count
+            )  # Finish appending the internal repeated-title count
 
-            if scan_result["duplicate_groups"]:  # Display internal duplicate titles only when this input directory contains repeats
-                print(f"{BackgroundColors.YELLOW}Internal repeated movies:{Style.RESET_ALL}")  # Output the internal duplicate-list heading
-                for group in scan_result["duplicate_groups"]:  # Display every movie title repeated inside the current input directory
-                    print(  # Output one internal duplicate group summary line
-                        f"  {BackgroundColors.CYAN}{group['movie_name']}"  # Include the representative movie title
-                        f"{BackgroundColors.GREEN} ({group['occurrences']} occurrences){Style.RESET_ALL}"  # Include the total occurrences inside the current input directory
-                    )  # Finish the internal duplicate group output call
+            if scan_result["duplicate_groups"]:  # List internal duplicate titles only when the current input directory contains repeats
+                for duplicate_index, group in enumerate(scan_result["duplicate_groups"], start=1):  # Number every internal duplicate group starting from one
+                    output_lines.append(  # Append one numbered internal duplicate movie summary line
+                        f"  {duplicate_index}. {BackgroundColors.CYAN}{group['movie_name']}{BackgroundColors.GREEN} ({group['occurrences']} occurrences){Style.RESET_ALL}"  # Include list number, representative title, and occurrence count
+                    )  # Finish appending the numbered internal duplicate line
             else:  # Handle an input directory with no internal duplicate movie titles
-                print(f"{BackgroundColors.GREEN}No internal repeated movie names found.{Style.RESET_ALL}")  # Report that this input directory has no internal duplicates
+                output_lines.append(  # Append an explicit no-duplicates message for the current input directory
+                    f"{BackgroundColors.GREEN}No internal repeated movie names found in {BackgroundColors.CYAN}{input_dir}{BackgroundColors.GREEN}.{Style.RESET_ALL}"  # Identify the input directory that contains no internal repeats
+                )  # Finish appending the no-internal-duplicates message
 
-            print(  # Output the generated internal JSON report path
-                f"{BackgroundColors.GREEN}Internal JSON report written to: "  # Begin the internal report-path message
-                f"{BackgroundColors.CYAN}{scan_result['report_path']}{Style.RESET_ALL}"  # Include the generated internal report path
-            )  # Finish the internal report-path output call
-            print()  # Separate per-input summaries with one blank line
+            output_lines.append(  # Append the generated internal JSON report path
+                f"{BackgroundColors.GREEN}Internal JSON report written to: {BackgroundColors.CYAN}{scan_result['report_path']}{Style.RESET_ALL}"  # Include the generated internal report path
+            )  # Finish appending the internal report-path line
+            output_lines.append("")  # Add exactly one blank line after the current input-directory section
 
         total_cross_duplicate_groups = sum(len(groups) for groups in cross_groups_by_scope.values())  # Count all cross-input duplicate titles across exact report scopes
-        print(  # Output the total number of cross-input repeated movie titles
-            f"{BackgroundColors.GREEN}Cross-input repeated movie names: "  # Begin the cross-input duplicate count message
-            f"{BackgroundColors.CYAN}{total_cross_duplicate_groups}{Style.RESET_ALL}"  # Include the total cross-input duplicate-title count
-        )  # Finish the cross-input duplicate count output call
+        output_lines.append(  # Append the total number of cross-input repeated movie titles
+            f"{BackgroundColors.GREEN}Cross-input repeated movie names: {BackgroundColors.CYAN}{total_cross_duplicate_groups}{Style.RESET_ALL}"  # Include the total cross-input duplicate-title count
+        )  # Finish appending the cross-input duplicate count
 
-        if cross_groups_by_scope:  # Display and list generated cross reports when duplicates span distinct input directories
-            for input_dir_scope, duplicate_groups in cross_groups_by_scope.items():  # Display every exact cross-input report scope and its titles
-                print(  # Output the current cross-input scope heading
-                    f"{BackgroundColors.YELLOW}Cross duplicates in: "  # Begin the cross-input scope message
-                    f"{BackgroundColors.CYAN}{' | '.join(input_dir_scope)}{Style.RESET_ALL}"  # Include all configured input directories participating in this exact scope
-                )  # Finish the cross-input scope output call
-                for group in duplicate_groups:  # Display every duplicate movie title occurring across this exact input-directory combination
-                    print(  # Output one cross-input duplicate group summary line
-                        f"  {BackgroundColors.CYAN}{group['movie_name']}"  # Include the representative movie title
-                        f"{BackgroundColors.GREEN} ({group['occurrences']} occurrences across {group['input_dir_count']} input dirs){Style.RESET_ALL}"  # Include total occurrences and distinct input-directory count
-                    )  # Finish the cross-input duplicate group output call
+        if cross_groups_by_scope:  # List cross-input duplicate scopes when titles span distinct configured input directories
+            for input_dir_scope, duplicate_groups in cross_groups_by_scope.items():  # Build every exact cross-input report scope and its titles
+                output_lines.append(  # Append the current cross-input scope heading
+                    f"{BackgroundColors.YELLOW}Cross duplicates in: {BackgroundColors.CYAN}{' | '.join(input_dir_scope)}{Style.RESET_ALL}"  # Include all configured input directories participating in this exact scope
+                )  # Finish appending the cross-input scope heading
+                for duplicate_index, group in enumerate(duplicate_groups, start=1):  # Number every duplicate title inside the current cross-input scope
+                    output_lines.append(  # Append one numbered cross-input duplicate group summary line
+                        f"  {duplicate_index}. {BackgroundColors.CYAN}{group['movie_name']}{BackgroundColors.GREEN} ({group['occurrences']} occurrences across {group['input_dir_count']} input dirs){Style.RESET_ALL}"  # Include list number, title, occurrence count, and distinct input-directory count
+                    )  # Finish appending the numbered cross-input duplicate line
 
-            for report_path in cross_report_paths:  # Display every cross-input JSON report generated by the scan
-                print(  # Output one generated cross-input report path
-                    f"{BackgroundColors.GREEN}Cross JSON report written to: "  # Begin the cross-report path message
-                    f"{BackgroundColors.CYAN}{report_path}{Style.RESET_ALL}"  # Include the generated cross-input report path
-                )  # Finish the cross-report path output call
+            for report_path in cross_report_paths:  # Append every cross-input JSON report generated by the scan
+                output_lines.append(  # Append one generated cross-input report path
+                    f"{BackgroundColors.GREEN}Cross JSON report written to: {BackgroundColors.CYAN}{report_path}{Style.RESET_ALL}"  # Include the generated cross-input report path
+                )  # Finish appending the cross-input report-path line
         else:  # Handle the case where no movie title appears in two or more configured input directories
-            print(f"{BackgroundColors.GREEN}No cross-input repeated movie names found.{Style.RESET_ALL}")  # Report that no cross-input duplicate title exists
-    except Exception as error:  # Handle and report unexpected multi-input scan failures
-        print(  # Output the failure message to the terminal and logger
-            f"{BackgroundColors.RED}Failed to scan movie libraries: "  # Begin the formatted multi-input failure message
-            f"{BackgroundColors.CYAN}{error}{Style.RESET_ALL}"  # Include the original exception description
-        )  # Finish the failure output call
-        raise  # Re-raise the original exception after logging it
-    finally:  # Always finalize timing, completion output, and optional notification sound registration
+            output_lines.append(f"{BackgroundColors.GREEN}No cross-input repeated movie names found.{Style.RESET_ALL}")  # Append the explicit no-cross-input-duplicates message
+    except Exception as error:  # Handle and report unexpected multi-input scan failures while preserving the original exception
+        output_lines.append(  # Append the scan failure message before the timing footer is generated
+            f"{BackgroundColors.RED}Failed to scan movie libraries: {BackgroundColors.CYAN}{error}{Style.RESET_ALL}"  # Include the original exception description
+        )  # Finish appending the failure message
+        raise  # Re-raise the original exception after the finally block emits the complete accumulated execution log
+    finally:  # Always finalize timing, output formatting, completion reporting, and optional notification sound registration
         finish_time = datetime.datetime.now()  # Capture the program finish time
-        print(  # Output start, finish, and elapsed execution times
-            f"{BackgroundColors.GREEN}Start time: {BackgroundColors.CYAN}{start_time.strftime('%d/%m/%Y - %H:%M:%S')}\n"  # Include the formatted program start time
-            f"{BackgroundColors.GREEN}Finish time: {BackgroundColors.CYAN}{finish_time.strftime('%d/%m/%Y - %H:%M:%S')}\n"  # Include the formatted program finish time
-            f"{BackgroundColors.GREEN}Execution time: {BackgroundColors.CYAN}{calculate_execution_time(start_time, finish_time)}{Style.RESET_ALL}"  # Include the calculated human-readable execution duration
-        )  # Finish the execution-time output call
-        print(  # Output the final program completion message
-            f"{BackgroundColors.BOLD}{BackgroundColors.GREEN}Program finished.{Style.RESET_ALL}"  # Include the styled completion message
-        )  # Finish the completion output call
+        if output_lines and output_lines[-1] != "":  # Ensure exactly one blank line separates the scan results from the timing footer
+            output_lines.append("")  # Add the single required blank line before the timing footer
+        output_lines.extend(  # Append the complete timing and completion footer using the requested compact spacing
+            [  # Build the ordered footer lines
+                f"{BackgroundColors.GREEN}Start time: {BackgroundColors.CYAN}{start_time.strftime('%d/%m/%Y - %H:%M:%S')}{Style.RESET_ALL}",  # Append the formatted program start time
+                f"{BackgroundColors.GREEN}Finish time: {BackgroundColors.CYAN}{finish_time.strftime('%d/%m/%Y - %H:%M:%S')}{Style.RESET_ALL}",  # Append the formatted program finish time
+                f"{BackgroundColors.GREEN}Execution time: {BackgroundColors.CYAN}{calculate_execution_time(start_time, finish_time)}{Style.RESET_ALL}",  # Append the calculated human-readable execution duration
+                "",  # Add exactly one blank line before the final completion message
+                f"{BackgroundColors.BOLD}{BackgroundColors.GREEN}Program finished.{Style.RESET_ALL}",  # Append the final styled program completion message
+            ]  # Finish building the ordered footer lines
+        )  # Finish appending the timing and completion footer
+        sys.stdout.write("\n".join(output_lines) + "\n")  # Emit the complete normal execution log in one write call to prevent Logger-added blank lines between individual print calls
         if RUN_FUNCTIONS["Play Sound"]:  # Check whether the optional completion sound callback is enabled
             atexit.register(play_sound)  # Register the completion sound callback for process shutdown
 
