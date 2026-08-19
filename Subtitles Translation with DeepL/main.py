@@ -937,16 +937,17 @@ def render_translation_progress(progress_state: Dict[str, Any] | None, force: bo
     file_line = f"File    [{build_progress_bar(file_done, file_total)}] {file_percent:5.1f}% | {file_done:,}/{file_total:,} chars | ETA {file_eta}"  # Build file progress line
     overall_line = f"Overall [{build_progress_bar(overall_done, overall_total)}] {overall_percent:5.1f}% | {overall_done:,}/{overall_total:,} chars | Files {progress_state['completed_files']}/{progress_state['total_files']} | ETA {overall_eta}"  # Build overall progress line
 
-    if interactive:
-        stream = sys.__stdout__  # Write directly to terminal for in-place updates
+    stream = sys.__stdout__  # Read the original terminal stream once so Pylance can narrow the optional type safely
+
+    if interactive and stream is not None:
         if progress_state.get("progress_visible"):
             stream.write("\033[F\033[K\033[F\033[K")  # Clear previous two progress lines
         stream.write(f"{BackgroundColors.GREEN}{file_line}{Style.RESET_ALL}\n{BackgroundColors.CYAN}{overall_line}{Style.RESET_ALL}\n")  # Draw current progress lines
         stream.flush()  # Flush terminal output
         progress_state["progress_visible"] = True  # Mark progress as visible
     else:
-        print(file_line)  # Plain snapshot for redirected output
-        print(overall_line)  # Plain snapshot for redirected output
+        print(file_line)  # Plain snapshot for redirected output or environments without an original stdout stream
+        print(overall_line)  # Plain snapshot for redirected output or environments without an original stdout stream
 
     progress_state["last_snapshot_time"] = now  # Store snapshot time
 
@@ -960,8 +961,9 @@ def print_progress_event(progress_state: Dict[str, Any] | None, message: str) ->
     :return: None
     """
 
-    if progress_state and progress_state.get("interactive") and progress_state.get("progress_visible"):
-        stream = sys.__stdout__  # Direct terminal stream
+    stream = sys.__stdout__  # Read the original terminal stream once so Pylance can narrow the optional type safely
+
+    if progress_state and progress_state.get("interactive") and progress_state.get("progress_visible") and stream is not None:
         stream.write(f"{Style.RESET_ALL}\033[F\033[K\033[F\033[K")  # Reset color and clear active progress lines before standalone message
         stream.flush()  # Flush clear sequence
         progress_state["progress_visible"] = False  # Mark progress as hidden
