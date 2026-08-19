@@ -12,8 +12,8 @@ Description :
     into a constant final video frame.
 
     Key features include:
-        - Recursive processing of supported video files under ./Inputs/.
-        - Optional processing of one explicitly configured or command-line video file.
+        - Mixed INPUTS_DIRS entries supporting explicit video files and recursive directories.
+        - Optional command-line file and/or directory paths overriding configured inputs.
         - Independent USE_VIDEO and USE_AUDIO controls, enabled together by default.
         - Configurable minimum repeated subsection duration and confidence threshold.
         - Scale- and compression-tolerant video fingerprints based on low-frequency
@@ -25,18 +25,18 @@ Description :
         - Inline tqdm progress bars with green static text and cyan dynamic filenames.
 
 Usage:
-    1. Configure INPUT_DIR, INPUT_VIDEO_FILE, USE_VIDEO, USE_AUDIO,
-       MINIMUM_SUBSECTION_SIZE_S, and CONFIDENCE_PERCENTAGE as needed.
+    1. Configure INPUTS_DIRS, USE_VIDEO, USE_AUDIO, MINIMUM_SUBSECTION_SIZE_S,
+       and CONFIDENCE_PERCENTAGE as needed.
     2. Ensure FFmpeg and FFprobe are installed and available through the system PATH.
     3. Execute the script through the project Makefile or directly with Python:
         $ make run   or   $ python main.py
-    4. Optionally provide one video path on the command line to override
-       INPUT_VIDEO_FILE and INPUT_DIR:
-        $ python main.py "D:/Videos/Compilation.mkv"
-    5. Review one JSON report per processed video inside ./Outputs/.
+    4. Optionally provide one or more video files and/or directories on the command
+       line to override INPUTS_DIRS:
+        $ python main.py "D:/Videos/Compilation.mkv" "E:/Other Videos/"
+    5. Review one JSON report per processed video inside ./Reports/.
 
-Outputs:
-    - ./Outputs/<input-name>-duplicates.json containing duplicate subsection results.
+Reports:
+    - ./Reports/<input-name>-duplicates.json containing duplicate subsection results.
     - ./Logs/main.log containing permanent status, warning, and summary messages.
 
 TODOs:
@@ -56,8 +56,9 @@ Dependencies:
 
 Assumptions & Notes:
     - Duplicate detection is performed within each video independently.
-    - INPUT_VIDEO_FILE, when configured, takes precedence over INPUT_DIR.
-    - A command-line video path takes precedence over INPUT_VIDEO_FILE.
+    - INPUTS_DIRS may contain any mixture of video-file paths and directory paths.
+    - Directory entries are searched recursively while file entries are processed directly.
+    - Command-line input paths, when provided, replace INPUTS_DIRS for the current run.
     - At least one of USE_VIDEO or USE_AUDIO must be enabled.
     - Video comparison intentionally uses perceptual low-frequency structure instead
       of exact pixels so source-resolution differences, fitting, and normal encoding
@@ -120,9 +121,10 @@ class BackgroundColors:  # Colors for the terminal
 
 # Execution Constants:
 VERBOSE = False  # Set to True to output verbose messages
-INPUT_DIR = f"./Inputs/"  # Default directory recursively searched when no single video file is selected
-INPUT_VIDEO_FILE: str | None = None  # Optional single video path that takes precedence over INPUT_DIR when configured
-OUTPUT_DIR = Path("./Outputs/")  # Directory receiving one JSON report per processed input video
+INPUTS_DIRS: list[str | Path] = [  # Input paths; every entry may independently be either a video file or a directory searched recursively
+    f"./Inputs/",
+]
+OUTPUT_DIR = Path("./Reports/")  # Directory receiving one JSON report per processed input video
 USE_VIDEO = True  # Set to True to use perceptual video information when finding repeated subsections
 USE_AUDIO = True  # Set to True to use audio information when finding repeated subsections
 MINIMUM_SUBSECTION_SIZE_S = 5.0  # Minimum duplicate subsection duration in seconds
@@ -144,7 +146,7 @@ MAX_WINDOW_GAP_S = 0.50  # Maximum gap between qualifying minimum windows that m
 MAX_REPORTED_DUPLICATES_PER_FILE = 500  # Safety cap preventing pathological repetitive media from producing unbounded reports
 FFMPEG = "ffmpeg"  # FFmpeg executable name or path
 FFPROBE = "ffprobe"  # FFprobe executable name or path
-SUPPORTED_VIDEO_EXTENSIONS = frozenset(  # Supported video containers discovered beneath INPUT_DIR
+SUPPORTED_VIDEO_EXTENSIONS = frozenset(  # Supported video containers accepted from INPUTS_DIRS files and recursively discovered directories
     {
         ".3g2", ".3gp", ".avi", ".flv", ".m2ts", ".m4v", ".mkv", ".mk3d", ".mov",
         ".mp4", ".mpeg", ".mpg", ".mts", ".ogv", ".ts", ".vob", ".webm", ".wmv",
@@ -249,59 +251,130 @@ def validate_configuration() -> None:
         raise ValueError("VIDEO_FRAME_SIZE must be at least as large as the configured DCT sizes.")  # Prevent invalid DCT slices
 
 
-def parse_cli_video_file() -> str | None:
+def parse_cli_input_paths() -> list[str]:
     """
-    Parses an optional command-line video path.
+    Parses optional command-line file and/or directory paths.
 
-    :return: Command-line video path or None when no positional input was provided.
+    :return: Command-line input paths, or an empty list when configured INPUTS_DIRS should be used.
     """
 
-    parser = argparse.ArgumentParser(  # Create a minimal optional single-file command-line interface
+    parser = argparse.ArgumentParser(  # Create an optional multi-path command-line interface
         description="Find duplicate subsections inside video files using perceptual video and/or audio fingerprints."
     )
-    parser.add_argument(  # Add an optional positional path that overrides configured input constants
-        "video_file",
-        nargs="?",
-        help="Optional video file to process instead of INPUT_VIDEO_FILE or INPUT_DIR.",
+    parser.add_argument(  # Allow any mixture of explicit video files and directories
+        "input_paths",
+        nargs="*",
+        help="Optional video file(s) and/or directories to process instead of INPUTS_DIRS.",
     )
     arguments = parser.parse_args()  # Parse the current process arguments
 
-    return arguments.video_file  # Return the optional command-line path
+    return cast(list[str], arguments.input_paths)  # Narrow argparse's dynamic positional result into a predictable string list
 
 
-def collect_input_videos(cli_video_file: str | None) -> list[Path]:
+def collect_input_videos(cli_input_paths: list[str] | None = None) -> list[Path]:
     """
-    Resolves the requested single video or recursively discovers videos beneath INPUT_DIR.
+    Resolves configured or command-line paths and discovers all supported input videos.
 
-    :param cli_video_file: Optional command-line video path.
-    :return: Sorted list of input video files.
+    Every supplied path is detected independently:
+        - Supported video file: processed directly.
+        - Directory: searched recursively for supported video files.
+        - Missing or unsupported path: reported and skipped while other valid inputs continue.
+
+    :param cli_input_paths: Optional command-line paths that replace INPUTS_DIRS when non-empty.
+    :return: Sorted, deduplicated list of supported input video files.
     """
 
-    configured_single_file = cli_video_file or INPUT_VIDEO_FILE  # Apply command line, then configured single-file precedence
+    raw_input_paths: list[str | Path] = list(cli_input_paths) if cli_input_paths else list(INPUTS_DIRS)  # Command-line paths replace configured inputs only when provided
 
-    if configured_single_file:  # Process one explicitly selected file
-        video_path = Path(configured_single_file).expanduser()  # Normalize the requested input path
+    if not raw_input_paths:  # Require at least one configured or command-line path
+        raise ValueError("INPUTS_DIRS must contain at least one file or directory path.")  # Reject an empty workload configuration
 
-        if not video_path.is_file():  # Require the configured path to exist as a file
-            raise FileNotFoundError(f"Configured input video does not exist: {video_path}")  # Reject a missing single-file input
+    video_files_by_path: dict[str, Path] = {}  # Deduplicate videos found through overlapping directories and explicit file entries
+    input_issue_count = 0  # Count invalid or unsupported configured entries for the final no-input diagnostic
 
-        if video_path.suffix.lower() not in SUPPORTED_VIDEO_EXTENSIONS:  # Reject unsupported single-file containers
-            raise ValueError(f"Unsupported video extension for input file: {video_path}")  # Report the unsupported container
+    for raw_input_path in raw_input_paths:  # Detect and process each configured path independently
+        if not isinstance(raw_input_path, (str, os.PathLike)):  # Reject unsupported path value types explicitly
+            input_issue_count += 1  # Count the unusable configuration entry
+            log_line(
+                f"{BackgroundColors.YELLOW}Skipping invalid input path value: "
+                f"{BackgroundColors.CYAN}{raw_input_path!r}{Style.RESET_ALL}"
+            )  # Report the malformed configuration value
 
-        return [video_path]  # Return the explicitly selected video only
+            continue  # Continue processing other configured paths
 
-    input_directory = Path(INPUT_DIR).expanduser()  # Normalize the configured recursive input directory
+        input_path = Path(raw_input_path).expanduser()  # Normalize user-home notation while preserving file/directory auto-detection
 
-    if not input_directory.is_dir():  # Require the default input directory to exist
-        raise NotADirectoryError(f"INPUT_DIR does not exist or is not a directory: {input_directory}")  # Report the invalid input root
+        if not input_path.exists():  # Handle configured paths that do not currently exist
+            input_issue_count += 1  # Count the unavailable input entry
+            log_line(
+                f"{BackgroundColors.YELLOW}Skipping missing input path: "
+                f"{BackgroundColors.CYAN}{input_path}{Style.RESET_ALL}"
+            )  # Report the missing entry without blocking other valid inputs
 
-    video_files = [  # Recursively collect supported video files
-        path
-        for path in input_directory.rglob("*")
-        if path.is_file() and path.suffix.lower() in SUPPORTED_VIDEO_EXTENSIONS
-    ]
+            continue  # Continue processing remaining configured paths
 
-    return sorted(video_files, key=lambda path: str(path).casefold())  # Return deterministic case-insensitive path ordering
+        if input_path.is_file():  # Process an explicitly configured file directly
+            if input_path.suffix.lower() not in SUPPORTED_VIDEO_EXTENSIONS:  # Ignore existing non-video files safely
+                input_issue_count += 1  # Count the unsupported file entry
+                log_line(
+                    f"{BackgroundColors.YELLOW}Skipping unsupported input file: "
+                    f"{BackgroundColors.CYAN}{input_path}{Style.RESET_ALL}"
+                )  # Report why the existing file was ignored
+
+                continue  # Continue processing remaining configured paths
+
+            resolved_video_path = input_path.resolve()  # Canonicalize the explicit video path for deterministic deduplication
+            video_files_by_path[str(resolved_video_path).casefold()] = resolved_video_path  # Add or replace the same logical path once
+
+            continue  # This configured entry is complete
+
+        if input_path.is_dir():  # Recursively discover supported videos beneath a configured directory
+            discovered_count = 0  # Count new or repeated supported videos observed beneath this directory
+
+            try:  # Isolate traversal errors for one configured directory
+                for discovered_path in input_path.rglob("*"):  # Walk every descendant recursively
+                    if not discovered_path.is_file() or discovered_path.suffix.lower() not in SUPPORTED_VIDEO_EXTENSIONS:
+                        continue  # Ignore directories and unsupported files
+
+                    resolved_video_path = discovered_path.resolve()  # Canonicalize every discovered video
+                    video_files_by_path[str(resolved_video_path).casefold()] = resolved_video_path  # Deduplicate overlapping configured roots
+                    discovered_count += 1  # Count this supported discovery
+
+            except OSError as exception:  # Preserve other configured inputs when one directory cannot be traversed completely
+                input_issue_count += 1  # Count the failed directory traversal
+                log_line(
+                    f"{BackgroundColors.YELLOW}Failed to fully scan input directory: "
+                    f"{BackgroundColors.CYAN}{input_path}{BackgroundColors.YELLOW} - "
+                    f"{BackgroundColors.CYAN}{exception}{Style.RESET_ALL}"
+                )  # Report the concrete filesystem failure
+
+                continue  # Continue processing remaining configured paths
+
+            if discovered_count == 0:  # Make empty supported-video directories visible without treating them as fatal
+                log_line(
+                    f"{BackgroundColors.YELLOW}No supported video files found in input directory: "
+                    f"{BackgroundColors.CYAN}{input_path}{Style.RESET_ALL}"
+                )  # Report the empty directory result
+
+            continue  # This configured directory entry is complete
+
+        input_issue_count += 1  # Count uncommon filesystem objects that are neither regular files nor directories
+        log_line(
+            f"{BackgroundColors.YELLOW}Skipping unsupported filesystem input: "
+            f"{BackgroundColors.CYAN}{input_path}{Style.RESET_ALL}"
+        )  # Report the unsupported filesystem object
+
+    video_files = sorted(video_files_by_path.values(), key=lambda path: str(path).casefold())  # Produce deterministic processing order
+
+    if not video_files:  # Fail once, after every configured path has been inspected
+        configured_paths_text = ", ".join(str(path) for path in raw_input_paths)  # Build a useful workload diagnostic
+        issue_suffix = f" ({input_issue_count} invalid or unsupported input entries)" if input_issue_count else ""  # Preserve input issue count when relevant
+        raise RuntimeError(
+            f"No supported video files were resolved from INPUTS_DIRS/command-line inputs{issue_suffix}: "
+            f"{configured_paths_text}"
+        )  # Report the actual mixed-input configuration instead of incorrectly requiring a directory
+
+    return video_files  # Return every unique supported video resolved from files and/or directories
 
 
 def run_capture(command: list[str], command_name: str) -> subprocess.CompletedProcess[str]:
@@ -1173,17 +1246,31 @@ def sanitize_report_component(value: str) -> str:
 
 def build_report_path(video_path: Path) -> Path:
     """
-    Builds a collision-resistant report path for one input video.
+    Builds a readable report path for one input video under mixed INPUTS_DIRS configuration.
 
     :param video_path: Input video file.
     :return: JSON report path beneath OUTPUT_DIR.
     """
 
-    try:  # Prefer a relative path when processing files beneath INPUT_DIR
-        relative_path = video_path.resolve().relative_to(Path(INPUT_DIR).expanduser().resolve())  # Derive input-root-relative path
-        report_source = str(relative_path.with_suffix(""))  # Include subdirectories to avoid same-stem collisions
-    except (ValueError, OSError):  # Handle explicit files outside INPUT_DIR
-        report_source = video_path.stem  # Use the explicit input filename stem
+    resolved_video_path = video_path.resolve()  # Normalize the processed video once
+    report_source = video_path.stem  # Explicit-file inputs fall back to their filename stem
+
+    for raw_input_path in INPUTS_DIRS:  # Prefer root-relative naming when the video belongs to a configured directory
+        if not isinstance(raw_input_path, (str, os.PathLike)):  # Ignore malformed configured entries defensively
+            continue
+
+        configured_path = Path(raw_input_path).expanduser()  # Normalize the configured mixed input entry
+
+        if not configured_path.is_dir():  # Only directory inputs can provide a useful relative report path
+            continue
+
+        try:  # Test whether this video is beneath the configured directory
+            relative_path = resolved_video_path.relative_to(configured_path.resolve())  # Derive directory-relative video identity
+        except (ValueError, OSError):  # Continue when the video is outside this configured root
+            continue
+
+        report_source = str(relative_path.with_suffix(""))  # Include nested directories to reduce report-name collisions
+        break  # Use the first matching configured directory deterministically
 
     report_name = sanitize_report_component(report_source)  # Sanitize the path-derived report identity
     return OUTPUT_DIR / f"{report_name}-duplicates.json"  # Return the per-video JSON report destination
@@ -1398,11 +1485,8 @@ def main():
 
     start_time = datetime.datetime.now()  # Get the start time of the program
     validate_configuration()  # Validate detector constants before expensive media processing
-    cli_video_file = parse_cli_video_file()  # Read an optional command-line single-video override
-    input_videos = collect_input_videos(cli_video_file)  # Resolve the complete input workload
-
-    if not input_videos:  # Reject an empty default input directory explicitly
-        raise RuntimeError(f"No supported video files found under INPUT_DIR: {INPUT_DIR}")  # Prevent a silent no-op run
+    cli_input_paths = parse_cli_input_paths()  # Read optional command-line file and/or directory overrides
+    input_videos = collect_input_videos(cli_input_paths)  # Auto-detect and resolve the complete mixed input workload
 
     ffmpeg_executable = resolve_executable(FFMPEG)  # Resolve FFmpeg once for all input files
     ffprobe_executable = resolve_executable(FFPROBE)  # Resolve FFprobe once for all input files
