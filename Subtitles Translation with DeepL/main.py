@@ -1626,7 +1626,7 @@ def main():
 
             output_file.parent.mkdir(parents=True, exist_ok=True)  # Ensure output directory exists for this file
             progress_state.update({"file_total_characters": translatable_character_count, "file_translated_characters": 0, "file_start_time": time.monotonic(), "progress_visible": False, "last_snapshot_time": 0.0})  # Reset file progress only
-            print(f"\n{BackgroundColors.GREEN}File {BackgroundColors.CYAN}{file_number}/{planned_files}{BackgroundColors.GREEN}: {BackgroundColors.CYAN}{filename}{Style.RESET_ALL}")  # Print compact file header once
+            print(f"{BackgroundColors.GREEN}File {BackgroundColors.CYAN}{file_number}/{planned_files}{BackgroundColors.GREEN}: {BackgroundColors.CYAN}{filename}{Style.RESET_ALL}")  # Print compact file header once
             print(f"{BackgroundColors.GREEN}Characters: {BackgroundColors.CYAN}{translatable_character_count:,}{Style.RESET_ALL}")  # Print character total once
             render_translation_progress(progress_state, force=True)  # Render 0% progress
 
