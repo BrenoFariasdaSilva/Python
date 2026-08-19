@@ -41,6 +41,7 @@ Dependencies:
     - Python >= 3.10.
     - FFmpeg available through the configured FFMPEG command or executable path.
     - colorama.
+    - tqdm.
     - Project Logger module.
 
 Assumptions & Notes:
@@ -67,6 +68,7 @@ import sys  # For system-specific parameters and functions
 from colorama import Style  # For coloring the terminal
 from Logger import Logger  # For logging output to both terminal and file
 from pathlib import Path  # For handling file paths
+from tqdm import tqdm  # For inline per-input-directory scan progress
 
 
 # Macros:
@@ -379,7 +381,7 @@ def discover_media_files(input_dir: Path) -> tuple[list[Path], list[dict]]:
         """
 
         discovery_errors.append(discovery_error_record(error))  # Preserve the traversal problem in the generated JSON report
-        print(f"{BackgroundColors.YELLOW}Directory discovery error: {BackgroundColors.CYAN}{error}{Style.RESET_ALL}")  # Report the inaccessible directory in the terminal log
+        logger.write(f"{BackgroundColors.YELLOW}Directory discovery error: {BackgroundColors.CYAN}{error}{Style.RESET_ALL}")  # Report the inaccessible directory in the terminal log
 
     for current_path, _, filenames in os.walk(input_dir, onerror=handle_walk_error):  # Traverse every accessible subdirectory without following directory symlinks
         for filename in filenames:  # Inspect every file discovered in the current directory
@@ -602,16 +604,20 @@ def scan_input_directory(ffmpeg_executable: str, input_dir_string: str) -> Path:
     if not input_dir.is_dir():  # Reject missing paths and non-directory input roots before recursive discovery
         raise NotADirectoryError(f"Input directory does not exist or is not a directory: {input_dir}")  # Report the invalid configured input root
 
-    print(f"{BackgroundColors.BOLD}{BackgroundColors.GREEN}Discovering media files in: {BackgroundColors.CYAN}{input_dir}{Style.RESET_ALL}")  # Announce recursive discovery for the current input root
+    logger.write(f"{BackgroundColors.BOLD}{BackgroundColors.GREEN}Discovering media files in: {BackgroundColors.CYAN}{input_dir}{Style.RESET_ALL}")  # Announce recursive discovery for the current input root
+    logger.write("")  # Keep one blank line before the discovery result
     media_files, discovery_errors = discover_media_files(input_dir)  # Discover every supported media file and preserve traversal failures
     report_data = build_initial_report(input_dir_string, input_dir, report_path, discovery_errors, len(media_files))  # Initialize the root-specific JSON report
     write_json_report(report_path, report_data)  # Persist the initial report before the potentially long media scan begins
 
-    print(f"{BackgroundColors.GREEN}Found {BackgroundColors.CYAN}{len(media_files)}{BackgroundColors.GREEN} supported media files.{Style.RESET_ALL}")  # Report the number of files queued for integrity scanning
-    print(f"{BackgroundColors.GREEN}Report: {BackgroundColors.CYAN}{report_path}{Style.RESET_ALL}", end="\n\n")  # Display the JSON report destination
+    logger.write(f"{BackgroundColors.GREEN}Found {BackgroundColors.CYAN}{len(media_files)}{BackgroundColors.GREEN} supported media files.{Style.RESET_ALL}")  # Report the number of files queued for integrity scanning
+    logger.write(f"{BackgroundColors.GREEN}Report: {BackgroundColors.CYAN}{report_path}{Style.RESET_ALL}")  # Display the JSON report destination
+    logger.write("")  # Keep one blank line before the progress bar
 
-    for file_index, media_path in enumerate(media_files, start=1):  # Process supported media files sequentially in deterministic path order
-        print(f"{BackgroundColors.BOLD}[{file_index}/{len(media_files)}]{Style.RESET_ALL} {BackgroundColors.GREEN}Scanning: {BackgroundColors.CYAN}{media_path}{Style.RESET_ALL}")  # Display current scan progress and media path
+    progress_bar = tqdm(media_files, total=len(media_files), unit="file", dynamic_ncols=True, file=sys.__stdout__)  # Render one inline-updated progress bar for this input directory
+
+    for media_path in progress_bar:  # Process supported media files sequentially in deterministic path order
+        progress_bar.set_description(f"Scanning: {media_path.name}")  # Show the current filename inline on the same progress-bar row
 
         try:  # Isolate per-file failures so one unreadable media file does not abort the remaining library scan
             scan_result = scan_media_file(ffmpeg_executable, media_path, input_dir)  # Read the complete media file through FFmpeg and capture integrity errors
@@ -620,8 +626,10 @@ def scan_input_directory(ffmpeg_executable: str, input_dir_string: str) -> Path:
             if scan_result["status"] == "corrupt":  # Handle media files with FFmpeg error output or a non-zero exit code
                 report_data["corrupted_files"] += 1  # Increment the corrupted/suspicious media count
                 report_data["corruptions"].append(scan_result)  # Preserve full diagnostics for the affected media file
-                print(f"{BackgroundColors.RED}Corruption/error detected: {BackgroundColors.CYAN}{media_path}{Style.RESET_ALL}")  # Highlight the detected integrity issue in the terminal log
-                print(f"{BackgroundColors.RED}FFmpeg exit code: {BackgroundColors.CYAN}{scan_result['ffmpeg_exit_code']}{BackgroundColors.RED} | Error lines: {BackgroundColors.CYAN}{scan_result['error_line_count']}{Style.RESET_ALL}")  # Summarize FFmpeg's result without assuming non-zero exit is required for corruption
+                progress_bar.clear()  # Clear the inline bar before permanent error messages
+                logger.write(f"{BackgroundColors.RED}Corruption/error detected: {BackgroundColors.CYAN}{media_path}{Style.RESET_ALL}")  # Highlight the detected integrity issue in the terminal log
+                logger.write(f"{BackgroundColors.RED}FFmpeg exit code: {BackgroundColors.CYAN}{scan_result['ffmpeg_exit_code']}{BackgroundColors.RED} | Error lines: {BackgroundColors.CYAN}{scan_result['error_line_count']}{Style.RESET_ALL}")  # Summarize FFmpeg's result without assuming non-zero exit is required for corruption
+                progress_bar.refresh()  # Restore the inline bar after the permanent messages
             else:  # Handle media files that complete without FFmpeg error-level output
                 report_data["clean_files"] += 1  # Increment the clean media count
                 verbose_output(true_string=f"{BackgroundColors.GREEN}No FFmpeg integrity errors detected: {BackgroundColors.CYAN}{media_path}{Style.RESET_ALL}")  # Log clean results only in verbose mode
@@ -629,22 +637,26 @@ def scan_input_directory(ffmpeg_executable: str, input_dir_string: str) -> Path:
         except Exception as exception:  # Capture Python or subprocess failures that prevent a reliable FFmpeg integrity result
             report_data["scan_failures"] += 1  # Increment the failed scan count separately from confirmed corruption results
             report_data["failed_scans"].append(failed_scan_record(media_path, input_dir, exception))  # Preserve failure details in the JSON report
-            print(f"{BackgroundColors.RED}Failed to scan: {BackgroundColors.CYAN}{media_path}{Style.RESET_ALL}")  # Report the affected media path
-            print(f"{BackgroundColors.RED}{type(exception).__name__}: {BackgroundColors.CYAN}{exception}{Style.RESET_ALL}")  # Report the concrete failure reason
+            progress_bar.clear()  # Clear the inline bar before permanent failure messages
+            logger.write(f"{BackgroundColors.RED}Failed to scan: {BackgroundColors.CYAN}{media_path}{Style.RESET_ALL}")  # Report the affected media path
+            logger.write(f"{BackgroundColors.RED}{type(exception).__name__}: {BackgroundColors.CYAN}{exception}{Style.RESET_ALL}")  # Report the concrete failure reason
+            progress_bar.refresh()  # Restore the inline bar after the permanent messages
 
         write_json_report(report_path, report_data)  # Atomically checkpoint the report after every media file for interruption resilience
+
+    progress_bar.close()  # Finish the current input-directory progress bar cleanly
 
     finalize_report(report_data, report_start_time)  # Mark the input-root report complete and calculate its final duration
     write_json_report(report_path, report_data)  # Persist the completed report state after every queued media file has been handled
 
-    print(  # Output the final input-root scan summary
+    logger.write(  # Output the final input-root scan summary
         f"{BackgroundColors.GREEN}Finished input directory: {BackgroundColors.CYAN}{input_dir}\n"
         f"{BackgroundColors.GREEN}Scanned: {BackgroundColors.CYAN}{report_data['files_scanned']}{BackgroundColors.GREEN} | "
         f"Clean: {BackgroundColors.CYAN}{report_data['clean_files']}{BackgroundColors.GREEN} | "
         f"Corrupted: {BackgroundColors.CYAN}{report_data['corrupted_files']}{BackgroundColors.GREEN} | "
-        f"Failures: {BackgroundColors.CYAN}{report_data['scan_failures']}{Style.RESET_ALL}",
-        end="\n\n",
+        f"Failures: {BackgroundColors.CYAN}{report_data['scan_failures']}{Style.RESET_ALL}"
     )  # Display final counts for the current input root
+    logger.write("")  # Keep one blank line before the next input directory
 
     return report_path  # Return the completed JSON report path
 
@@ -759,10 +771,10 @@ def main():
     :return: None
     """
 
-    print(
-        f"{BackgroundColors.CLEAR_TERMINAL}{BackgroundColors.BOLD}{BackgroundColors.GREEN}Welcome to the {BackgroundColors.CYAN}Media File Integrity Scanner{BackgroundColors.GREEN} program!{Style.RESET_ALL}",
-        end="\n\n",
+    logger.write(
+        f"{BackgroundColors.CLEAR_TERMINAL}{BackgroundColors.BOLD}{BackgroundColors.GREEN}Welcome to the {BackgroundColors.CYAN}Media File Integrity Scanner{BackgroundColors.GREEN} program!{Style.RESET_ALL}"
     )  # Output the welcome message
+    logger.write("")  # Keep one blank line after the welcome message
 
     start_time = datetime.datetime.now()  # Get the start time of the program
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)  # Ensure the report output directory exists before processing input roots
@@ -770,15 +782,17 @@ def main():
     generated_reports: list[Path] = []  # Store report paths generated successfully during the current program execution
     input_failures: list[tuple[str, Exception]] = []  # Store configured input roots that could not be processed
 
-    print(f"{BackgroundColors.GREEN}FFmpeg: {BackgroundColors.CYAN}{ffmpeg_executable}{Style.RESET_ALL}", end="\n\n")  # Display the resolved FFmpeg executable used for every integrity scan
+    logger.write(f"{BackgroundColors.GREEN}FFmpeg: {BackgroundColors.CYAN}{ffmpeg_executable}{Style.RESET_ALL}")  # Display the resolved FFmpeg executable used for every integrity scan
+    logger.write("")  # Keep one blank line before the first input directory
 
     for input_dir in INPUT_DIRS:  # Process each configured movie root independently
         try:  # Prevent one unavailable input root from blocking integrity scans for the remaining configured roots
             generated_reports.append(scan_input_directory(ffmpeg_executable, input_dir))  # Scan the complete input root and preserve its generated report path
         except Exception as exception:  # Capture input-root configuration or discovery failures
             input_failures.append((input_dir, exception))  # Preserve the failed root and exception for the final program summary
-            print(f"{BackgroundColors.RED}Failed input directory: {BackgroundColors.CYAN}{input_dir}{Style.RESET_ALL}")  # Report the input root that could not be processed
-            print(f"{BackgroundColors.RED}{type(exception).__name__}: {BackgroundColors.CYAN}{exception}{Style.RESET_ALL}", end="\n\n")  # Report the concrete input-root failure reason
+            logger.write(f"{BackgroundColors.RED}Failed input directory: {BackgroundColors.CYAN}{input_dir}{Style.RESET_ALL}")  # Report the input root that could not be processed
+            logger.write(f"{BackgroundColors.RED}{type(exception).__name__}: {BackgroundColors.CYAN}{exception}{Style.RESET_ALL}")  # Report the concrete input-root failure reason
+            logger.write("")  # Keep one blank line after the failed input directory
 
     finish_time = datetime.datetime.now()  # Get the finish time of the program
 
