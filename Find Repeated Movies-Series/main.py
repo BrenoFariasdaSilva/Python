@@ -83,7 +83,7 @@ class BackgroundColors:  # Colors for the terminal
 # Execution Constants:
 VERBOSE = False  # Set to True to output verbose messages
 INPUT_DIRS = [f"E:/Movies/", f"F:/Movies/"]  # Root directories recursively scanned for movie directories
-OUTPUT_DIR = "./Outputs/"  # Directory where the JSON reports are written
+OUTPUT_DIR = "./Reports/"  # Directory where the JSON reports are written
 SUPPORTED_LANGUAGES = ("Dual", "Legendado", "Dublado", "Nacional", "English")  # Supported terminal language labels in movie-directory names
 MOVIE_DIRECTORY_PATTERN = re.compile(  # Compile the anchored movie-directory parsing expression once
     rf"^(?P<movie_name>.+?)\s+(?P<year>\d{{4}})\s+(?P<resolution>\d{{3,4}}p)\s+(?P<language>{'|'.join(SUPPORTED_LANGUAGES)})$",  # Capture title, year, resolution, and language from the directory-name suffix
