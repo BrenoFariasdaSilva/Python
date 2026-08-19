@@ -37,6 +37,8 @@ Dependencies:
     - Python >= 3.10.
     - FFmpeg.
     - FFprobe.
+    - colorama.
+    - tqdm.
 
 Assumptions & Notes:
     - Movie roots may contain one supported media file directly in each configured
@@ -71,11 +73,15 @@ import re  # Match season numbers and normalized language tokens.
 import shutil  # Copy external subtitle files with metadata preservation.
 import subprocess  # Execute FFmpeg and FFprobe commands.
 import unicodedata  # Remove diacritics from language and track metadata.
+from colorama import Fore, just_fix_windows_console  # Provide cross-platform terminal colors for tqdm progress output.
 from pathlib import Path  # Represent configured directories and media paths.
+from tqdm import tqdm  # Render inline-updated muxing progress bars.
 from typing import Any, Literal, cast  # Define precise JSON and language types.
 
 
 # Macros:
+
+just_fix_windows_console()  # Enable ANSI color support in compatible Windows terminals without wrapping redirected streams.
 
 LanguageClass = Literal["english", "ptbr"]  # Restrict supported audio language classes.
 FallbackAudioOrder = tuple[LanguageClass, LanguageClass] | None  # Define the optional source audio order.
@@ -433,21 +439,36 @@ def format_command(command: list[str]) -> str:
 
 def run_command(command: list[str]) -> None:
     """
-    Print and optionally execute a subprocess command.
+    Execute a subprocess command quietly and expose captured diagnostics only on failure.
 
     :param command: Subprocess command and argument list.
     :return: None.
     """
 
-    print("\nRunning:")  # Announce the next external command.
-    print(format_command(command))  # Display the complete command before execution.
-
     if DRY_RUN:  # Honor non-destructive command preview mode.
+        print("\nRunning:")  # Announce the command only when explicitly previewing it.
+        print(format_command(command))  # Display the complete dry-run command.
         print("DRY_RUN=True, command not executed.")  # Report that execution was intentionally skipped.
 
         return  # Stop before invoking the external process.
 
-    subprocess.run(command, check=True)  # Execute the command and propagate unsuccessful exit status.
+    result = subprocess.run(  # Execute FFmpeg without allowing routine muxing output to overwrite the tqdm progress bar.
+        command,  # Supply the prepared command.
+        check=False,  # Inspect the exit status explicitly so captured diagnostics can be included in the raised error.
+        capture_output=True,  # Suppress successful stdout/stderr while preserving failure diagnostics.
+        text=True,  # Decode captured FFmpeg output as text.
+        encoding="utf-8",  # Decode FFmpeg output consistently.
+        errors="replace",  # Replace malformed output bytes rather than hiding the actual FFmpeg failure.
+    )
+
+    if result.returncode != 0:  # Surface FFmpeg diagnostics only when the command failed.
+        diagnostic_output = (result.stderr or result.stdout or "").strip()  # Prefer FFmpeg stderr and fall back to stdout.
+        diagnostic_suffix = f"\n\nFFmpeg output:\n{diagnostic_output}" if diagnostic_output else ""  # Include captured details only when present.
+        raise RuntimeError(  # Preserve the failed command and FFmpeg diagnostics for the aggregated error report.
+            f"FFmpeg failed with exit code {result.returncode}.\n"
+            f"Command: {format_command(command)}"
+            f"{diagnostic_suffix}"
+        )
 
 
 def season_key(path: Path) -> int | None:
@@ -758,7 +779,8 @@ def copy_external_srts(target_media: Path, output_mkv: Path) -> None:
     if not subtitle_paths:  # Stop when the target media file has no matching external subtitles.
         return  # Complete without creating subtitle files.
 
-    print("\nExternal target SRT files to copy:")  # Announce external target subtitle copy operations.
+    if DRY_RUN:  # Keep copy diagnostics visible only when previewing filesystem changes.
+        print("\nExternal target SRT files to copy:")  # Announce dry-run external target subtitle copy operations.
     used_destinations: set[Path] = set()  # Track destinations selected during the current media file.
 
     for subtitle_number, subtitle_path in enumerate(subtitle_paths, start=1):  # Process external target subtitles in deterministic order.
@@ -770,9 +792,9 @@ def copy_external_srts(target_media: Path, output_mkv: Path) -> None:
             collision_number += 1  # Advance the collision suffix for another attempt.
 
         used_destinations.add(destination)  # Reserve the selected destination for this media file.
-        print(f"  {subtitle_path} -> {destination}")  # Display the planned external subtitle copy.
-
-        if not DRY_RUN:  # Perform filesystem changes only outside preview mode.
+        if DRY_RUN:  # Display per-file copy details only during command preview mode.
+            print(f"  {subtitle_path} -> {destination}")  # Display the planned external subtitle copy.
+        else:  # Perform the real copy silently so the tqdm progress bar remains the only routine per-file output.
             shutil.copy2(subtitle_path, destination)  # Copy target subtitle contents and filesystem metadata.
 
 
@@ -796,6 +818,8 @@ def build_ffmpeg_command(target_media: Path, original_media: Path, output_mkv: P
     command = [  # Initialize the FFmpeg mux command.
         FFMPEG,  # Select the configured FFmpeg executable.
         "-hide_banner",  # Suppress the FFmpeg startup banner.
+        "-loglevel",  # Configure FFmpeg console verbosity.
+        "error",  # Emit only actual FFmpeg errors; successful mux details remain hidden behind the tqdm bar.
         "-y" if OVERWRITE else "-n",  # Apply the configured output overwrite policy.
         "-i",  # Declare the higher-quality target media input.
         str(target_media),  # Supply the target media path as input zero.
@@ -963,13 +987,10 @@ def erase_processed_source_files(target_media: Path, original_media: Path, outpu
         unique_candidates.append((source_label, source_path))  # Retain the validated source candidate for the actual deletion phase.
 
     for source_label, source_path in unique_candidates:  # Delete validated source files only after every configured candidate passes pre-deletion checks.
-        print(f"\nErasing processed {source_label} media: {source_path}")  # Announce the destructive post-success cleanup operation.
         source_path.unlink()  # Delete only the matched processed media file while preserving sidecars and parent directories.
 
         if source_path.exists():  # Verify the filesystem no longer exposes the deleted source path.
             raise RuntimeError(f"Processed {source_label} media still exists after deletion attempt: {source_path}")  # Report an unexpected cleanup failure immediately.
-
-        print(f"Erased processed {source_label} media successfully.")  # Confirm successful deletion of the processed source media file.
 
 
 def build_output_media_path(target_media: Path, output_directory: Path | None = None) -> Path:
@@ -1074,15 +1095,18 @@ def process_media_pair(target_media: Path, original_media: Path, output_director
     output_mkv = build_output_media_path(target_media, destination_directory)  # Build the generated Matroska path using the shared output-path convention.
 
     if output_mkv.exists() and not OVERWRITE:  # Preserve an existing generated output when overwrite is disabled.
-        print(f"\nSkipping existing output: {output_mkv}")  # Report the skipped generated media file.
+        tqdm.write(f"Skipping existing output: {output_mkv}")  # Report the skipped output without corrupting an active tqdm row.
 
         return  # Stop processing the current media pair.
 
     validate_media_pair_output_storage(target_media, output_mkv)  # Recheck real free space immediately before this output so prior cleanup failures cannot invalidate the global estimate.
-    print("\n" + "=" * 100)  # Separate the current media pair from previous terminal output.
-    print(f"Target  : {target_media}")  # Display the higher-quality target media path.
-    print(f"Original: {original_media}")  # Display the lower-quality PT-BR source media path.
-    print(f"Output  : {output_mkv}")  # Display the generated output path on the configured output drive.
+
+    if DRY_RUN:  # Preserve detailed pair diagnostics only when explicitly previewing the workflow.
+        print("\n" + "=" * 100)  # Separate the current dry-run media pair from previous terminal output.
+        print(f"Target  : {target_media}")  # Display the higher-quality target media path.
+        print(f"Original: {original_media}")  # Display the lower-quality PT-BR source media path.
+        print(f"Output  : {output_mkv}")  # Display the generated output path on the configured output drive.
+
     command = build_ffmpeg_command(target_media, original_media, output_mkv)  # Build the complete FFmpeg mux command.
 
     if not DRY_RUN:  # Create destination folders only during real execution.
@@ -1123,29 +1147,27 @@ def process_root_movies(errors: list[str]) -> bool:
 
         return True  # Report that a direct target movie layout was detected even though it could not be processed.
 
-    if len(target_movies) == 1 and len(original_movies) == 1:  # Handle the unambiguous one-movie-per-root layout.
-        target_media = target_movies[0]  # Select the only direct higher-quality target movie file.
-        original_media = original_movies[0]  # Select the only direct original PT-BR source movie regardless of filename differences.
+    progress_bar = tqdm(target_movies, total=len(target_movies), unit="file", dynamic_ncols=True, colour="green")  # Render one inline-updated progress bar for direct movie processing.
 
-        try:  # Isolate the single movie processing failure for aggregated reporting.
-            process_media_pair(target_media, original_media, OUTPUT_ROOT)  # Mux the unambiguous movie pair into the dedicated output root.
-        except Exception as exception:  # Aggregate the movie failure without bypassing the common error summary.
-            errors.append(f"{target_media}\n{type(exception).__name__}: {exception}")  # Store the movie path and exception details.
+    for target_media in progress_bar:  # Process direct target movies deterministically by filename.
+        progress_bar.set_description(f"{Fore.GREEN}Muxing: {Fore.CYAN}{target_media.name}{Fore.GREEN}")  # Keep static progress text green and the current filename cyan.
 
-        return True  # Complete direct movie processing after the unique pair is handled.
-
-    for target_media in target_movies:  # Process multiple direct target movies deterministically by filename.
         try:  # Isolate filename resolution and movie processing failures.
-            original_media = resolve_original_media(ORIGINAL_ROOT, target_media)  # Resolve a same-named original movie without guessing among multiple files.
+            if len(target_movies) == 1 and len(original_movies) == 1:  # Preserve the unambiguous one-movie-per-root matching rule even when filenames differ.
+                original_media = original_movies[0]  # Select the only direct original PT-BR source movie.
+            else:  # Resolve multiple direct movies by their existing safe filename/stem matching rules.
+                original_media = resolve_original_media(ORIGINAL_ROOT, target_media)  # Resolve a same-named original movie without guessing among multiple files.
 
             if original_media is None:  # Handle a direct target movie without an unambiguous original filename or stem match.
-                print(f"\nSkipping target movie without a common original counterpart: {target_media}")  # Report the intentionally skipped non-common movie.
+                tqdm.write(f"Skipping target movie without a common original counterpart: {target_media}")  # Report the intentional skip without corrupting the active progress bar.
 
                 continue  # Continue with the next direct target movie.
 
             process_media_pair(target_media, original_media, OUTPUT_ROOT)  # Mux the resolved direct movie pair into the dedicated output root.
         except Exception as exception:  # Aggregate one direct movie failure without stopping the remaining files.
             errors.append(f"{target_media}\n{type(exception).__name__}: {exception}")  # Store the movie path and exception details.
+
+    progress_bar.close()  # Finalize the direct-movie progress row cleanly.
 
     return True  # Report that the direct movie layout was found and processed.
 
@@ -1162,19 +1184,25 @@ def process_target_season(target_season: Path, original_season: Path, season_num
     """
 
     output_season = OUTPUT_ROOT / target_season.name  # Preserve the target season folder name beneath the dedicated G: output root.
+    target_media_files = iter_media_files(target_season)  # Collect the deterministic episode list once for progress accounting.
+    progress_bar = tqdm(target_media_files, total=len(target_media_files), unit="file", dynamic_ncols=True, colour="green")  # Render one inline-updated progress bar for this season.
 
-    for target_media in iter_media_files(target_season):  # Process target media files in deterministic order.
+    for target_media in progress_bar:  # Process target media files in deterministic order.
+        progress_bar.set_description(f"{Fore.GREEN}Muxing: {Fore.CYAN}{target_media.name}{Fore.GREEN}")  # Keep static progress text green and the current filename cyan.
+
         try:  # Isolate episode resolution and processing failures.
             original_media = resolve_original_media(original_season, target_media, season_number)  # Match descriptive SxxExx targets to numeric source filenames such as "01.mp4".
 
             if original_media is None:  # Handle target episodes that do not exist in the matched original season.
-                print(f"\nSkipping target episode without a common original counterpart: {target_media}")  # Report the intentionally skipped non-common episode.
+                tqdm.write(f"Skipping target episode without a common original counterpart: {target_media}")  # Report the intentional skip without corrupting the active progress bar.
 
                 continue  # Continue with the next target episode because only common episodes should be processed.
 
             process_media_pair(target_media, original_media, output_season)  # Mux the common episode pair into the dedicated season output directory.
         except Exception as exception:  # Aggregate one episode failure without stopping the remaining season.
             errors.append(f"{target_media}\n{type(exception).__name__}: {exception}")  # Store the episode path and exception details.
+
+    progress_bar.close()  # Finalize the current season progress row cleanly.
 
 
 def matched_media_pairs() -> list[MatchedMediaPair]:
@@ -1380,14 +1408,14 @@ def main() -> None:
         season_number = season_key(target_season)  # Extract a target season number from forms such as "S02" or "Season 02".
 
         if season_number is None:  # Handle directories without a recognizable season number.
-            print(f"\nSkipping folder without season number: {target_season}")  # Report the skipped target directory.
+            print(f"Skipping folder without season number: {target_season}")  # Report the skipped target directory.
 
             continue  # Continue with the next target season directory.
 
         original_season = original_seasons.get(season_number)  # Resolve the matching lower-quality original season directory.
 
         if original_season is None:  # Handle target seasons without a common original counterpart.
-            print(f"\nSkipping target season without a common original counterpart: {target_season}")  # Report the intentionally skipped non-common season.
+            print(f"Skipping target season without a common original counterpart: {target_season}")  # Report the intentionally skipped non-common season.
 
             continue  # Continue with the next target season directory.
 
@@ -1404,7 +1432,7 @@ def main() -> None:
     if errors:  # Report all collected failures after processing every common media layout.
         print_processing_errors(errors)  # Print the aggregated error summary.
     else:  # Handle complete batch success.
-        print("\nFinished successfully.")  # Report successful completion.
+        print("Finished successfully.")  # Report successful completion.
 
 
 if __name__ == "__main__":  # Execute the program only when invoked as a script.
