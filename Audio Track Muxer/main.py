@@ -18,11 +18,13 @@ Description :
         - Non-forced target subtitle preservation with normalized metadata.
         - External target SRT discovery, collision-safe naming, and metadata copying.
         - Dedicated output root to avoid consuming target-drive free space.
+        - Optional post-success deletion of processed target and/or original source media files.
         - Dry-run support, overwrite control, storage preflight, and partial-output cleanup.
 
 Usage:
-    1. Configure ORIGINAL_ROOT, TARGET_ROOT, OUTPUT_ROOT, DRY_RUN, OVERWRITE, and
-       the optional FALLBACK_ORIGINAL_AUDIO_ORDER value.
+    1. Configure ORIGINAL_ROOT, TARGET_ROOT, OUTPUT_ROOT, DRY_RUN, OVERWRITE,
+       ERASE_TARGET_FILES, ERASE_ORIGINAL_FILES, and the optional
+       FALLBACK_ORIGINAL_AUDIO_ORDER value.
     2. Ensure FFmpeg and FFprobe are available through FFMPEG and FFPROBE.
     3. Execute the script with: python main.py
 
@@ -52,6 +54,11 @@ Assumptions & Notes:
       and chapter streams are not constrained by the target input container format.
     - Generated media is written under OUTPUT_ROOT instead of beside TARGET_ROOT,
       preventing large outputs from consuming free space on the target drive.
+    - ERASE_TARGET_FILES and ERASE_ORIGINAL_FILES delete only the matched source media
+      files after FFmpeg succeeds, the generated output is validated, and target SRT
+      copying completes successfully. Sidecar files and source directories are preserved.
+    - Source-file deletion is disabled during DRY_RUN and never occurs when an existing
+      output is skipped because OVERWRITE is disabled.
 """
 
 import json  # Parse FFprobe JSON output.
@@ -73,6 +80,8 @@ MediaInfo = dict[str, Any]  # Represent parsed FFprobe media information.
 ORIGINAL_ROOT = Path(r"G:\\Series\\Breaking Bad")  # Preserve the configured lower-quality Dual source root providing PT-BR audio.
 TARGET_ROOT = Path(r"D:\\Sem Backup\\Download\\Torrent\\Completed\\Breaking Bad 1080p")  # Preserve the configured higher-quality target root providing video and English audio.
 OUTPUT_ROOT = Path(r"G:\\Series\\Breaking Bad 1080p Dual")  # Store generated high-quality Dual outputs on G: instead of consuming limited D: free space.
+ERASE_TARGET_FILES = False  # Set to True to delete each processed higher-quality target media file only after its new output is safely generated.
+ERASE_ORIGINAL_FILES = False  # Set to True to delete each processed lower-quality original media file only after its new output is safely generated.
 FFMPEG = "ffmpeg"  # Select the configured FFmpeg executable.
 FFPROBE = "ffprobe"  # Select the configured FFprobe executable.
 UPDATED_SUFFIX = "-updated"  # Append the configured suffix to generated MKV files.
@@ -871,9 +880,95 @@ def validate_generated_output(output_mkv: Path) -> None:
         raise RuntimeError(f"FFmpeg created an empty output file: {output_mkv}")  # Report unusable zero-byte output.
 
 
+def validate_generated_output_for_source_erasure(output_mkv: Path) -> None:
+    """
+    Validate the generated output contains the required streams before deleting any source media.
+
+    :param output_mkv: Generated MKV path that must safely replace information from source media files.
+    :return: None.
+    """
+
+    output_info = probe_media(output_mkv)  # Re-open the completed output with FFprobe before permitting destructive source cleanup.
+    output_streams = extract_streams(output_info, output_mkv)  # Validate and extract the generated output stream dictionaries.
+    video_streams = [stream for stream in output_streams if stream.get("codec_type") == "video" and stream_disposition(stream).get("attached_pic") != 1]  # Retain actual output video streams while excluding attached artwork.
+    audio_streams = [stream for stream in output_streams if stream.get("codec_type") == "audio" and not is_commentary_audio(stream)]  # Retain non-commentary output audio streams used for language validation.
+    english_streams = [stream for stream in audio_streams if classify_language(stream) == "english"]  # Confirm the generated output contains the preserved English audio track.
+    ptbr_streams = [stream for stream in audio_streams if classify_language(stream) == "ptbr"]  # Confirm the generated output contains the injected PT-BR audio track.
+
+    if not video_streams:  # Reject source deletion when the completed output has no actual video stream.
+        raise RuntimeError(f"Generated output has no video stream; source files will not be erased: {output_mkv}")  # Preserve both sources when the replacement media is structurally incomplete.
+
+    if not english_streams:  # Reject source deletion when the required English audio cannot be confirmed in the completed output.
+        raise RuntimeError(f"Generated output has no identifiable English audio stream; source files will not be erased: {output_mkv}")  # Preserve both sources rather than deleting the only known English source.
+
+    if not ptbr_streams:  # Reject source deletion when the required PT-BR audio cannot be confirmed in the completed output.
+        raise RuntimeError(f"Generated output has no identifiable PT-BR audio stream; source files will not be erased: {output_mkv}")  # Preserve both sources rather than deleting the only known PT-BR source.
+
+
+def erase_processed_source_files(target_media: Path, original_media: Path, output_mkv: Path) -> None:
+    """
+    Delete configured source media files only after a generated replacement has been validated.
+
+    :param target_media: Higher-quality target media file eligible for deletion when ERASE_TARGET_FILES is enabled.
+    :param original_media: Lower-quality original media file eligible for deletion when ERASE_ORIGINAL_FILES is enabled.
+    :param output_mkv: Successfully generated output that must exist before source deletion is permitted.
+    :return: None.
+    """
+
+    if not ERASE_TARGET_FILES and not ERASE_ORIGINAL_FILES:  # Stop immediately when destructive source cleanup is disabled for both inputs.
+        return  # Preserve both source media files without unnecessary validation work.
+
+    if DRY_RUN:  # Prevent all destructive filesystem changes while command preview mode is enabled.
+        if ERASE_TARGET_FILES:  # Report the target deletion that would occur during a real successful run.
+            print(f"\nDRY_RUN=True, target media not erased: {target_media}")  # Preserve the target while making the configured action visible.
+
+        if ERASE_ORIGINAL_FILES:  # Report the original-source deletion that would occur during a real successful run.
+            print(f"\nDRY_RUN=True, original media not erased: {original_media}")  # Preserve the original while making the configured action visible.
+
+        return  # Complete preview-mode cleanup without touching either source file.
+
+    validate_generated_output(output_mkv)  # Reconfirm that the generated replacement still exists and is non-empty immediately before destructive cleanup.
+    validate_generated_output_for_source_erasure(output_mkv)  # Re-open and inspect the replacement to confirm required video, English, and PT-BR streams before deletion.
+    output_resolved = output_mkv.resolve()  # Resolve the generated output path for exact-path source-protection comparisons.
+    deletion_candidates: list[tuple[str, Path]] = []  # Initialize configured source files that may be safely erased after validation.
+
+    if ERASE_TARGET_FILES:  # Include the higher-quality target media when target cleanup is enabled.
+        deletion_candidates.append(("target", target_media))  # Queue the processed target media file for deletion.
+
+    if ERASE_ORIGINAL_FILES:  # Include the lower-quality original media when original cleanup is enabled.
+        deletion_candidates.append(("original", original_media))  # Queue the processed original source media file for deletion.
+
+    unique_candidates: list[tuple[str, Path]] = []  # Initialize path-deduplicated source deletion candidates.
+    seen_paths: set[Path] = set()  # Track resolved source paths to avoid deleting the same physical path twice.
+
+    for source_label, source_path in deletion_candidates:  # Validate every configured source path before deleting any of them.
+        source_resolved = source_path.resolve()  # Resolve the source path for output-protection and duplicate checks.
+
+        if source_resolved == output_resolved:  # Reject any configuration that could erase the newly generated replacement itself.
+            raise RuntimeError(f"Refusing to erase {source_label} media because it resolves to the generated output: {source_path}")  # Preserve the output and all sources on an unsafe path collision.
+
+        if source_resolved in seen_paths:  # Ignore a duplicate source path when both logical inputs resolve to the same physical file.
+            continue  # Avoid a second unlink attempt against an already queued physical source file.
+
+        if not source_path.is_file():  # Require every configured source file to still exist before beginning any destructive cleanup.
+            raise FileNotFoundError(f"Cannot erase processed {source_label} media because the source file no longer exists: {source_path}")  # Abort before deleting any remaining source candidate.
+
+        seen_paths.add(source_resolved)  # Reserve the validated physical source path against duplicate deletion.
+        unique_candidates.append((source_label, source_path))  # Retain the validated source candidate for the actual deletion phase.
+
+    for source_label, source_path in unique_candidates:  # Delete validated source files only after every configured candidate passes pre-deletion checks.
+        print(f"\nErasing processed {source_label} media: {source_path}")  # Announce the destructive post-success cleanup operation.
+        source_path.unlink()  # Delete only the matched processed media file while preserving sidecars and parent directories.
+
+        if source_path.exists():  # Verify the filesystem no longer exposes the deleted source path.
+            raise RuntimeError(f"Processed {source_label} media still exists after deletion attempt: {source_path}")  # Report an unexpected cleanup failure immediately.
+
+        print(f"Erased processed {source_label} media successfully.")  # Confirm successful deletion of the processed source media file.
+
+
 def process_media_pair(target_media: Path, original_media: Path, output_directory: Path | None = None) -> None:
     """
-    Mux one higher-quality target media file with PT-BR audio from its matching original source.
+    Mux one higher-quality target media file with PT-BR audio from its matching original source and optionally erase processed inputs.
 
     :param target_media: Higher-quality target media file providing video, English audio, subtitles, attachments, and chapters.
     :param original_media: Lower-quality original media file providing PT-BR audio.
@@ -910,6 +1005,7 @@ def process_media_pair(target_media: Path, original_media: Path, output_director
         raise  # Preserve the original processing failure for aggregation.
 
     copy_external_srts(target_media, output_mkv)  # Copy target external SRT files already synchronized to the higher-quality release.
+    erase_processed_source_files(target_media, original_media, output_mkv)  # Optionally erase processed source media only after output validation and subtitle copying succeed.
 
 
 def process_root_movies(errors: list[str]) -> bool:
