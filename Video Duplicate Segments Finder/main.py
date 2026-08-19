@@ -87,9 +87,24 @@ from colorama import Style  # For coloring the terminal
 from Logger import Logger  # For logging output to both terminal and file
 from pathlib import Path  # For handling file paths
 from scipy.fft import dctn  # For extracting scale-tolerant low-frequency visual structure
-from scipy.spatial import cKDTree  # For efficiently locating similar fingerprint samples
+from scipy.spatial import KDTree  # For efficiently locating similar fingerprint samples through SciPy's public typed API
 from tqdm import tqdm  # For inline-updated progress bars
+from typing import Any, TypeAlias, TypedDict, cast  # For explicit JSON, report, and NumPy typing used by Pylance
+from numpy.typing import NDArray  # For precise NumPy array annotations
 import numpy as np  # For numerical fingerprint extraction and similarity calculations
+
+
+# Type Aliases:
+FloatArray: TypeAlias = NDArray[np.float32]  # Float32 feature and similarity matrices
+Float64Array: TypeAlias = NDArray[np.float64]  # Float64 cumulative and high-precision calculation arrays
+IntArray: TypeAlias = NDArray[np.int64]  # Integer nearest-neighbor and qualifying-window index arrays
+
+
+# Typed Dictionaries:
+class ProbedMediaInfo(TypedDict):  # Validated FFprobe metadata used by the detector
+    duration_s: float  # Positive media duration in seconds
+    has_video: bool  # Whether the input contains at least one video stream
+    has_audio: bool  # Whether the input contains at least one audio stream
 
 
 # Macros:
@@ -315,7 +330,32 @@ def run_capture(command: list[str], command_name: str) -> subprocess.CompletedPr
     return result  # Return captured successful output to the caller
 
 
-def probe_media(ffprobe_executable: str, video_path: Path) -> dict:
+def parse_optional_float(value: object) -> float | None:
+    """
+    Safely converts a JSON-derived value into a finite float when possible.
+
+    :param value: Arbitrary JSON-derived value.
+    :return: Finite float or None when conversion is not valid.
+    """
+
+    if isinstance(value, bool) or value is None:  # Reject booleans and missing values explicitly
+        return None  # Prevent bool/None from being accepted as a duration
+
+    if not isinstance(value, (int, float, str)):  # Accept only normal JSON scalar number/string representations
+        return None  # Reject containers and unsupported objects before float conversion
+
+    try:  # Convert the validated scalar into a float
+        parsed_value = float(value)  # Parse numeric strings and JSON numbers consistently
+    except (TypeError, ValueError, OverflowError):  # Handle malformed or out-of-range numeric text
+        return None  # Report an unusable duration value
+
+    if not math.isfinite(parsed_value):  # Reject NaN and infinity
+        return None  # Keep downstream duration arithmetic finite
+
+    return parsed_value  # Return the validated finite float
+
+
+def probe_media(ffprobe_executable: str, video_path: Path) -> ProbedMediaInfo:
     """
     Reads duration and available stream types from one media file.
 
@@ -334,33 +374,41 @@ def probe_media(ffprobe_executable: str, video_path: Path) -> dict:
     result = run_capture(command, "FFprobe")  # Execute FFprobe and capture its JSON output
 
     try:  # Parse FFprobe JSON output defensively
-        media_info = json.loads(result.stdout)
+        parsed_media_info: object = json.loads(result.stdout)  # Treat untrusted JSON as object until its shape is validated
     except json.JSONDecodeError as exception:  # Handle malformed FFprobe output
         raise RuntimeError(f"FFprobe returned invalid JSON for: {video_path}") from exception  # Preserve the affected media path
 
-    streams = media_info.get("streams")  # Read the stream collection
-    stream_list = streams if isinstance(streams, list) else []  # Normalize absent stream metadata to an empty list
-    has_video = any(isinstance(stream, dict) and stream.get("codec_type") == "video" for stream in stream_list)  # Detect video
-    has_audio = any(isinstance(stream, dict) and stream.get("codec_type") == "audio" for stream in stream_list)  # Detect audio
-    duration_candidates: list[float] = []  # Collect valid container and stream durations
-    format_info = media_info.get("format")  # Read container metadata
+    if not isinstance(parsed_media_info, dict):  # Require the expected FFprobe JSON object root
+        raise RuntimeError(f"FFprobe returned an unexpected JSON structure for: {video_path}")  # Reject malformed root values
 
-    if isinstance(format_info, dict):  # Handle a dictionary-shaped format record
-        try:  # Parse the container duration when available
-            duration_candidates.append(float(format_info.get("duration")))
-        except (TypeError, ValueError):  # Ignore absent or malformed duration values
-            pass
+    media_info = cast(dict[str, Any], parsed_media_info)  # Narrow the validated JSON object for keyed access
+    raw_streams = media_info.get("streams")  # Read the stream collection
+    stream_list: list[dict[str, Any]] = []  # Initialize validated dictionary-shaped stream records
+
+    if isinstance(raw_streams, list):  # Inspect the stream list only when FFprobe returned an array
+        for raw_stream in raw_streams:  # Validate every stream record before using it
+            if isinstance(raw_stream, dict):  # Retain only dictionary-shaped stream objects
+                stream_list.append(cast(dict[str, Any], raw_stream))  # Narrow the validated stream dictionary
+
+    has_video = any(stream.get("codec_type") == "video" for stream in stream_list)  # Detect video
+    has_audio = any(stream.get("codec_type") == "audio" for stream in stream_list)  # Detect audio
+    duration_candidates: list[float] = []  # Collect valid container and stream durations
+    raw_format_info = media_info.get("format")  # Read container metadata
+
+    if isinstance(raw_format_info, dict):  # Handle a dictionary-shaped format record
+        format_info = cast(dict[str, Any], raw_format_info)  # Narrow the validated format dictionary
+        format_duration = parse_optional_float(format_info.get("duration"))  # Parse the optional container duration safely
+
+        if format_duration is not None:  # Preserve a valid container duration
+            duration_candidates.append(format_duration)  # Add the parsed duration candidate
 
     for stream in stream_list:  # Inspect per-stream durations as a fallback
-        if not isinstance(stream, dict):  # Ignore malformed stream records
-            continue
+        stream_duration = parse_optional_float(stream.get("duration"))  # Parse one optional stream duration safely
 
-        try:  # Parse one stream duration when available
-            duration_candidates.append(float(stream.get("duration")))
-        except (TypeError, ValueError):  # Ignore missing or malformed duration values
-            continue
+        if stream_duration is not None:  # Preserve only valid stream durations
+            duration_candidates.append(stream_duration)  # Add the parsed stream duration candidate
 
-    duration_candidates = [duration for duration in duration_candidates if math.isfinite(duration) and duration > 0]  # Retain positive finite durations only
+    duration_candidates = [duration for duration in duration_candidates if duration > 0]  # Retain positive finite durations only
 
     if not duration_candidates:  # Require a usable timeline duration
         raise RuntimeError(f"Could not determine a positive duration for: {video_path}")  # Reject media with unavailable timing information
@@ -368,7 +416,7 @@ def probe_media(ffprobe_executable: str, video_path: Path) -> dict:
     return {"duration_s": max(duration_candidates), "has_video": has_video, "has_audio": has_audio}  # Return normalized media metadata
 
 
-def normalize_rows(matrix: np.ndarray) -> np.ndarray:
+def normalize_rows(matrix: FloatArray) -> FloatArray:
     """
     L2-normalizes feature rows while preserving all-zero rows safely.
 
@@ -387,7 +435,7 @@ def normalize_rows(matrix: np.ndarray) -> np.ndarray:
     return normalized  # Return the safe normalized matrix
 
 
-def normalize_vector(vector: np.ndarray) -> np.ndarray:
+def normalize_vector(vector: FloatArray) -> FloatArray:
     """
     L2-normalizes one feature vector.
 
@@ -404,7 +452,7 @@ def normalize_vector(vector: np.ndarray) -> np.ndarray:
     return feature / norm  # Return a unit-length fingerprint
 
 
-def build_video_fingerprint(frame_bytes: bytes) -> np.ndarray:
+def build_video_fingerprint(frame_bytes: bytes) -> FloatArray:
     """
     Builds one perceptual video fingerprint from a normalized grayscale FFmpeg frame.
 
@@ -427,7 +475,8 @@ def build_video_fingerprint(frame_bytes: bytes) -> np.ndarray:
         return normalize_vector(flat_feature)  # Return a nonzero flat-frame representation
 
     normalized_frame = (frame - mean_value) / standard_deviation  # Remove brightness and contrast differences before structural analysis
-    luminance_dct = dctn(normalized_frame, type=2, norm="ortho")[:VIDEO_DCT_SIZE, :VIDEO_DCT_SIZE].reshape(-1)[1:]  # Retain low-frequency luminance structure
+    luminance_dct_matrix = np.asarray(dctn(normalized_frame, type=2, norm="ortho"), dtype=np.float32)  # Normalize SciPy DCT output into a typed NumPy array
+    luminance_dct = luminance_dct_matrix[:VIDEO_DCT_SIZE, :VIDEO_DCT_SIZE].reshape(-1)[1:]  # Retain low-frequency luminance structure
     gradient_y, gradient_x = np.gradient(normalized_frame)  # Calculate vertical and horizontal normalized-frame gradients
     edge_magnitude = np.hypot(gradient_x, gradient_y)  # Combine gradients into an edge-strength image
     edge_standard_deviation = float(edge_magnitude.std())  # Measure edge contrast
@@ -437,7 +486,8 @@ def build_video_fingerprint(frame_bytes: bytes) -> np.ndarray:
     else:  # Handle frames with effectively no edge variation
         edge_magnitude = edge_magnitude - edge_magnitude.mean()  # Preserve a stable near-zero edge surface
 
-    edge_dct = dctn(edge_magnitude, type=2, norm="ortho")[:VIDEO_EDGE_DCT_SIZE, :VIDEO_EDGE_DCT_SIZE].reshape(-1)[1:]  # Retain low-frequency edge structure
+    edge_dct_matrix = np.asarray(dctn(edge_magnitude, type=2, norm="ortho"), dtype=np.float32)  # Normalize SciPy DCT output into a typed NumPy array
+    edge_dct = edge_dct_matrix[:VIDEO_EDGE_DCT_SIZE, :VIDEO_EDGE_DCT_SIZE].reshape(-1)[1:]  # Retain low-frequency edge structure
     fingerprint = np.concatenate((luminance_dct, edge_dct)).astype(np.float32)  # Combine luminance and edge descriptors
 
     return normalize_vector(fingerprint)  # Return one unit-length perceptual video fingerprint
@@ -477,7 +527,7 @@ def subprocess_error_text(error_file) -> str:
     return error_file.read().decode("utf-8", errors="replace").strip()  # Decode diagnostics safely
 
 
-def extract_video_fingerprints(ffmpeg_executable: str, video_path: Path, duration_s: float) -> np.ndarray:
+def extract_video_fingerprints(ffmpeg_executable: str, video_path: Path, duration_s: float) -> FloatArray:
     """
     Extracts regularly spaced perceptual video fingerprints using FFmpeg decoding.
 
@@ -560,7 +610,7 @@ def build_audio_band_slices(window_sample_count: int) -> list[tuple[int, int]]:
     return band_slices  # Return all reusable frequency-band slices
 
 
-def build_audio_fingerprint(samples: np.ndarray, hann_window: np.ndarray, band_slices: list[tuple[int, int]]) -> np.ndarray:
+def build_audio_fingerprint(samples: FloatArray, hann_window: FloatArray, band_slices: list[tuple[int, int]]) -> FloatArray:
     """
     Builds one normalized spectral audio fingerprint.
 
@@ -595,7 +645,7 @@ def build_audio_fingerprint(samples: np.ndarray, hann_window: np.ndarray, band_s
     return normalize_vector(fingerprint)  # Return one unit-length audio fingerprint
 
 
-def extract_audio_fingerprints(ffmpeg_executable: str, video_path: Path, duration_s: float) -> np.ndarray:
+def extract_audio_fingerprints(ffmpeg_executable: str, video_path: Path, duration_s: float) -> FloatArray:
     """
     Extracts overlapping normalized audio fingerprints using FFmpeg mono PCM decoding.
 
@@ -678,7 +728,7 @@ def extract_audio_fingerprints(ffmpeg_executable: str, video_path: Path, duratio
     return normalize_rows(np.vstack(fingerprints))  # Return a consistently normalized audio fingerprint matrix
 
 
-def resolve_effective_modalities(media_info: dict, video_path: Path) -> tuple[bool, bool]:
+def resolve_effective_modalities(media_info: ProbedMediaInfo, video_path: Path) -> tuple[bool, bool]:
     """
     Resolves which requested modalities can actually be used for one input file.
 
@@ -687,8 +737,8 @@ def resolve_effective_modalities(media_info: dict, video_path: Path) -> tuple[bo
     :return: Tuple of effective video-enabled and audio-enabled flags.
     """
 
-    effective_video = USE_VIDEO and bool(media_info.get("has_video"))  # Enable requested video analysis only when a video stream exists
-    effective_audio = USE_AUDIO and bool(media_info.get("has_audio"))  # Enable requested audio analysis only when an audio stream exists
+    effective_video = USE_VIDEO and media_info["has_video"]  # Enable requested video analysis only when a video stream exists
+    effective_audio = USE_AUDIO and media_info["has_audio"]  # Enable requested audio analysis only when an audio stream exists
 
     if USE_VIDEO and not effective_video:  # Report a requested but unavailable video modality
         log_line(f"{BackgroundColors.YELLOW}Warning: no video stream available for video fingerprinting: {BackgroundColors.CYAN}{video_path}{Style.RESET_ALL}")  # Keep other requested modalities available
@@ -702,7 +752,7 @@ def resolve_effective_modalities(media_info: dict, video_path: Path) -> tuple[bo
     return effective_video, effective_audio  # Return the usable modality configuration for this file
 
 
-def align_fingerprint_matrices(video_features: np.ndarray | None, audio_features: np.ndarray | None) -> tuple[np.ndarray | None, np.ndarray | None, int]:
+def align_fingerprint_matrices(video_features: FloatArray | None, audio_features: FloatArray | None) -> tuple[FloatArray | None, FloatArray | None, int]:
     """
     Aligns requested modality matrices to the same number of timeline samples.
 
@@ -726,7 +776,7 @@ def align_fingerprint_matrices(video_features: np.ndarray | None, audio_features
     return video_features, audio_features, common_sample_count  # Return aligned modality matrices
 
 
-def build_candidate_feature_matrix(video_features: np.ndarray | None, audio_features: np.ndarray | None) -> np.ndarray:
+def build_candidate_feature_matrix(video_features: FloatArray | None, audio_features: FloatArray | None) -> FloatArray:
     """
     Builds a compact equal-modality-weight matrix for KD-tree candidate discovery.
 
@@ -735,7 +785,7 @@ def build_candidate_feature_matrix(video_features: np.ndarray | None, audio_feat
     :return: Normalized compact candidate feature matrix.
     """
 
-    modality_matrices: list[np.ndarray] = []  # Store compact enabled modality descriptors
+    modality_matrices: list[FloatArray] = []  # Store compact enabled modality descriptors
 
     if video_features is not None:  # Include a compact visual descriptor when video analysis is enabled
         compact_video = video_features[:, :min(VIDEO_CANDIDATE_DIMENSIONS, video_features.shape[1])]  # Retain stable leading low-frequency visual dimensions
@@ -754,7 +804,7 @@ def build_candidate_feature_matrix(video_features: np.ndarray | None, audio_feat
     return normalize_rows(combined_matrix)  # Normalize the final KD-tree feature vectors
 
 
-def sample_similarity(video_features: np.ndarray | None, audio_features: np.ndarray | None, first_index: int, second_index: int) -> float:
+def sample_similarity(video_features: FloatArray | None, audio_features: FloatArray | None, first_index: int, second_index: int) -> float:
     """
     Calculates equal-modality-weight cosine similarity for two timeline samples.
 
@@ -778,7 +828,7 @@ def sample_similarity(video_features: np.ndarray | None, audio_features: np.ndar
     return sum(similarities) / len(similarities) if similarities else 0.0  # Return equal-modality average similarity
 
 
-def discover_candidate_offsets(video_features: np.ndarray | None, audio_features: np.ndarray | None, minimum_samples: int) -> list[tuple[int, int]]:
+def discover_candidate_offsets(video_features: FloatArray | None, audio_features: FloatArray | None, minimum_samples: int) -> list[tuple[int, int]]:
     """
     Uses KD-tree nearest-neighbor voting to discover likely repeated temporal offsets.
 
@@ -795,10 +845,11 @@ def discover_candidate_offsets(video_features: np.ndarray | None, audio_features
         return []  # Stop before unnecessary nearest-neighbor work
 
     neighbor_count = min(MAX_NEIGHBORS_PER_SAMPLE + 1, sample_count)  # Include self plus the configured number of neighbors
-    tree = cKDTree(candidate_matrix)  # Build one efficient nearest-neighbor index
-    _, neighbor_indices = tree.query(candidate_matrix, k=neighbor_count)  # Query nearest candidate samples for the complete timeline
+    tree = KDTree(candidate_matrix)  # Build one efficient nearest-neighbor index through SciPy's public KDTree API
+    _, raw_neighbor_indices = tree.query(candidate_matrix, k=neighbor_count)  # Query nearest candidate samples for the complete timeline
+    neighbor_indices: IntArray = np.asarray(raw_neighbor_indices, dtype=np.int64)  # Normalize SciPy index output into a typed integer NumPy array
 
-    if neighbor_count == 1:  # Normalize cKDTree's one-neighbor shape defensively
+    if neighbor_count == 1:  # Normalize KDTree's one-neighbor shape defensively
         neighbor_indices = neighbor_indices.reshape(-1, 1)  # Convert one-dimensional results into rows
 
     candidate_threshold = max(0.0, (CONFIDENCE_PERCENTAGE - CANDIDATE_CONFIDENCE_MARGIN_PERCENTAGE) / 100.0)  # Use a looser candidate threshold than final validation
@@ -828,7 +879,7 @@ def discover_candidate_offsets(video_features: np.ndarray | None, audio_features
     return ranked_offsets[:MAX_CANDIDATE_OFFSETS]  # Limit expensive full-offset validation to the strongest candidates
 
 
-def offset_similarity_arrays(video_features: np.ndarray | None, audio_features: np.ndarray | None, offset: int) -> tuple[np.ndarray, np.ndarray | None, np.ndarray | None]:
+def offset_similarity_arrays(video_features: FloatArray | None, audio_features: FloatArray | None, offset: int) -> tuple[FloatArray, FloatArray | None, FloatArray | None]:
     """
     Calculates timeline-wide similarity arrays for one candidate temporal offset.
 
@@ -838,19 +889,23 @@ def offset_similarity_arrays(video_features: np.ndarray | None, audio_features: 
     :return: Combined, video-only, and audio-only similarity arrays.
     """
 
-    modality_arrays: list[np.ndarray] = []  # Store enabled similarity vectors
-    video_similarity: np.ndarray | None = None  # Initialize optional video similarity output
-    audio_similarity: np.ndarray | None = None  # Initialize optional audio similarity output
+    modality_arrays: list[FloatArray] = []  # Store enabled similarity vectors
+    video_similarity: FloatArray | None = None  # Initialize optional video similarity output
+    audio_similarity: FloatArray | None = None  # Initialize optional audio similarity output
 
     if video_features is not None:  # Calculate vectorized visual similarities
-        video_similarity = np.sum(video_features[:-offset] * video_features[offset:], axis=1)  # Compute cosine similarity at this offset
-        video_similarity = np.clip(video_similarity, 0.0, 1.0).astype(np.float32)  # Clamp numerical noise
-        modality_arrays.append(video_similarity)  # Include video in the equal-weight combined score
+        raw_video_similarity = np.sum(video_features[:-offset] * video_features[offset:], axis=1, dtype=np.float32)  # Compute cosine similarity at this offset
+        current_video_similarity: FloatArray = np.asarray(raw_video_similarity, dtype=np.float32)  # Normalize NumPy's reduction result into a typed array
+        current_video_similarity = current_video_similarity.clip(0.0, 1.0)  # Clamp numerical noise through the ndarray method
+        video_similarity = current_video_similarity  # Preserve the optional video-only similarity output
+        modality_arrays.append(current_video_similarity)  # Include video in the equal-weight combined score
 
     if audio_features is not None:  # Calculate vectorized audio similarities
-        audio_similarity = np.sum(audio_features[:-offset] * audio_features[offset:], axis=1)  # Compute cosine similarity at this offset
-        audio_similarity = np.clip(audio_similarity, 0.0, 1.0).astype(np.float32)  # Clamp numerical noise
-        modality_arrays.append(audio_similarity)  # Include audio in the equal-weight combined score
+        raw_audio_similarity = np.sum(audio_features[:-offset] * audio_features[offset:], axis=1, dtype=np.float32)  # Compute cosine similarity at this offset
+        current_audio_similarity: FloatArray = np.asarray(raw_audio_similarity, dtype=np.float32)  # Normalize NumPy's reduction result into a typed array
+        current_audio_similarity = current_audio_similarity.clip(0.0, 1.0)  # Clamp numerical noise through the ndarray method
+        audio_similarity = current_audio_similarity  # Preserve the optional audio-only similarity output
+        modality_arrays.append(current_audio_similarity)  # Include audio in the equal-weight combined score
 
     if not modality_arrays:  # Guard against an impossible empty modality set
         raise RuntimeError("No modality similarity arrays are available.")  # Reject invalid offset validation
@@ -859,7 +914,7 @@ def offset_similarity_arrays(video_features: np.ndarray | None, audio_features: 
     return combined_similarity, video_similarity, audio_similarity  # Return all requested confidence timelines
 
 
-def contiguous_groups(indices: np.ndarray, maximum_gap_samples: int) -> list[tuple[int, int]]:
+def contiguous_groups(indices: IntArray, maximum_gap_samples: int) -> list[tuple[int, int]]:
     """
     Groups sorted qualifying window starts while tolerating small gaps.
 
@@ -903,7 +958,7 @@ def format_timestamp(seconds: float) -> str:
     return f"{hours:02d}:{minutes:02d}:{remaining_seconds:06.3f}"  # Return a fixed-width millisecond timestamp
 
 
-def build_duplicate_record(start_sample: int, end_sample: int, offset: int, combined_similarity: np.ndarray, video_similarity: np.ndarray | None, audio_similarity: np.ndarray | None, duration_s: float) -> dict:
+def build_duplicate_record(start_sample: int, end_sample: int, offset: int, combined_similarity: FloatArray, video_similarity: FloatArray | None, audio_similarity: FloatArray | None, duration_s: float) -> dict:
     """
     Builds one JSON-serializable duplicate subsection record.
 
@@ -945,7 +1000,7 @@ def build_duplicate_record(start_sample: int, end_sample: int, offset: int, comb
     }
 
 
-def validate_candidate_offset(video_features: np.ndarray | None, audio_features: np.ndarray | None, offset: int, minimum_samples: int, duration_s: float) -> list[dict]:
+def validate_candidate_offset(video_features: FloatArray | None, audio_features: FloatArray | None, offset: int, minimum_samples: int, duration_s: float) -> list[dict]:
     """
     Fully validates one candidate temporal offset and returns qualifying repeated ranges.
 
@@ -962,9 +1017,9 @@ def validate_candidate_offset(video_features: np.ndarray | None, audio_features:
         return []  # Stop when this offset cannot fit a qualifying subsection
 
     threshold = CONFIDENCE_PERCENTAGE / 100.0  # Convert the final confidence threshold into a zero-to-one score
-    cumulative = np.concatenate((np.array([0.0], dtype=np.float64), np.cumsum(combined_similarity, dtype=np.float64)))  # Build cumulative similarity
+    cumulative: Float64Array = np.asarray(np.concatenate((np.array([0.0], dtype=np.float64), np.cumsum(combined_similarity, dtype=np.float64))), dtype=np.float64)  # Build and type cumulative similarity
     rolling_means = (cumulative[minimum_samples:] - cumulative[:-minimum_samples]) / minimum_samples  # Calculate every minimum-length window average
-    qualifying_starts = np.flatnonzero(rolling_means >= threshold)  # Locate windows that satisfy the requested average confidence
+    qualifying_starts: IntArray = np.asarray(np.flatnonzero(rolling_means >= threshold), dtype=np.int64)  # Locate and type qualifying window starts
     if qualifying_starts.size == 0:  # Stop when no minimum-sized region reaches the threshold
         return []
 
@@ -1067,7 +1122,7 @@ def deduplicate_duplicate_records(records: list[dict]) -> list[dict]:
     return sorted(selected_records, key=lambda record: (record["first"]["start_s"], record["second"]["start_s"], -record["duration_s"]))  # Return chronological output
 
 
-def find_duplicate_subsections(video_features: np.ndarray | None, audio_features: np.ndarray | None, duration_s: float) -> list[dict]:
+def find_duplicate_subsections(video_features: FloatArray | None, audio_features: FloatArray | None, duration_s: float) -> list[dict]:
     """
     Finds all validated repeated subsections from aligned video and/or audio fingerprints.
 
@@ -1165,9 +1220,9 @@ def process_video(ffmpeg_executable: str, ffprobe_executable: str, video_path: P
     log_line(f"{BackgroundColors.GREEN}Processing: {BackgroundColors.CYAN}{video_path}{Style.RESET_ALL}")  # Announce the current input video
     media_info = probe_media(ffprobe_executable, video_path)  # Read media duration and stream availability
     effective_video, effective_audio = resolve_effective_modalities(media_info, video_path)  # Resolve usable requested modalities
-    duration_s = float(media_info["duration_s"])  # Normalize the probed duration
-    video_features: np.ndarray | None = None  # Initialize optional video fingerprints
-    audio_features: np.ndarray | None = None  # Initialize optional audio fingerprints
+    duration_s = media_info["duration_s"]  # Read the already validated positive media duration
+    video_features: FloatArray | None = None  # Initialize optional video fingerprints
+    audio_features: FloatArray | None = None  # Initialize optional audio fingerprints
 
     if effective_video:  # Extract perceptual visual information when enabled and available
         video_features = extract_video_fingerprints(ffmpeg_executable, video_path, duration_s)  # Decode and fingerprint the video timeline
