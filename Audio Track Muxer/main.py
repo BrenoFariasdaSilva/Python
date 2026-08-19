@@ -5,9 +5,9 @@ Audio Track Muxer
 Author      : Breno Farias da Silva
 Created     : 2026-07-12
 Description :
-    Muxes video and attachments from higher-resolution target MKV files with
+    Muxes video and attachments from higher-resolution target media files with
     English and PT-BR audio plus non-forced subtitles from matching original
-    MKV files. Matching external SRT files are copied beside each output.
+    media files. Matching external SRT files are copied beside each output.
 
     Key features include:
         - Direct movie pairing and season/episode matching across configured roots.
@@ -23,7 +23,7 @@ Usage:
     3. Execute the script with: python main.py
 
 Outputs:
-    - One <media>-updated.mkv file beside each processed target MKV file.
+    - One <media>-updated.mkv file beside each processed target media file.
     - Matching external SRT files renamed beside the generated MKV output.
 
 Dependencies:
@@ -32,12 +32,14 @@ Dependencies:
     - FFprobe.
 
 Assumptions & Notes:
-    - Movie roots may contain one MKV directly in each configured root; those files
-      are paired even when their filenames differ.
+    - Movie roots may contain one supported media file directly in each configured
+      root; those files are paired even when their filenames and extensions differ.
     - Series season directory names contain a value such as "Season 01", and
       matching original and target episodes use equal filenames, ignoring case.
-    - The original MKV contains identifiable English and PT-BR audio tracks or
+    - The original media file contains identifiable English and PT-BR audio tracks or
       FALLBACK_ORIGINAL_AUDIO_ORDER is configured.
+    - Generated media always uses MKV so copied video, audio, subtitle, attachment, and
+      chapter streams are not constrained by the target input container format.
 """
 
 import json  # Parse FFprobe JSON output.
@@ -48,6 +50,8 @@ import unicodedata  # Remove diacritics from language and track metadata.
 from pathlib import Path  # Represent configured directories and media paths.
 from typing import Any, Literal, cast  # Define precise JSON and language types.
 
+
+# Macros:
 
 LanguageClass = Literal["english", "ptbr"]  # Restrict supported audio language classes.
 FallbackAudioOrder = tuple[LanguageClass, LanguageClass] | None  # Define the optional source audio order.
@@ -63,7 +67,30 @@ DRY_RUN = False  # Execute commands instead of only printing planned operations.
 OVERWRITE = False  # Preserve existing generated outputs when disabled.
 FALLBACK_ORIGINAL_AUDIO_ORDER: FallbackAudioOrder = None  # Preserve automatic audio language detection by default.
 
+SUPPORTED_MEDIA_EXTENSIONS = frozenset(  # Define input video container extensions accepted for source and target media files.
+    {
+        ".3g2",  # Support 3GPP2 video containers.
+        ".3gp",  # Support 3GPP video containers.
+        ".avi",  # Support Audio Video Interleave containers.
+        ".flv",  # Support Flash Video containers.
+        ".m2ts",  # Support Blu-ray MPEG-2 transport stream containers.
+        ".m4v",  # Support MPEG-4 video containers.
+        ".mkv",  # Support Matroska video containers.
+        ".mk3d",  # Support Matroska 3D video containers.
+        ".mov",  # Support QuickTime movie containers.
+        ".mp4",  # Support MPEG-4 Part 14 containers.
+        ".mpeg",  # Support MPEG program stream containers.
+        ".mpg",  # Support MPEG program stream containers.
+        ".mts",  # Support AVCHD MPEG transport stream containers.
+        ".ogv",  # Support Ogg video containers.
+        ".ts",  # Support MPEG transport stream containers.
+        ".vob",  # Support DVD Video Object containers.
+        ".webm",  # Support WebM video containers.
+        ".wmv",  # Support Windows Media Video containers.
+    }
+)
 
+# Functions Definitions:
 
 def normalize_text(value: str) -> str:
     """
@@ -448,16 +475,16 @@ def build_original_season_map() -> dict[int, Path]:
 
 
 
-def iter_mkv_files(directory: Path, include_updated: bool = False) -> list[Path]:
+def iter_media_files(directory: Path, include_updated: bool = False) -> list[Path]:
     """
-    Return sorted MKV files from a directory with case-insensitive extensions.
+    Return sorted supported media files from a directory.
 
     :param directory: Directory containing candidate media files.
     :param include_updated: Whether generated files with UPDATED_SUFFIX are included.
-    :return: Sorted list of matching MKV file paths.
+    :return: Sorted list of supported media file paths.
     """
 
-    media_files = [entry for entry in directory.iterdir() if entry.is_file() and entry.suffix.lower() == ".mkv"]  # Retain MKV files regardless of extension case.
+    media_files = [entry for entry in directory.iterdir() if entry.is_file() and entry.suffix.lower() in SUPPORTED_MEDIA_EXTENSIONS]  # Retain supported media files with case-insensitive extensions.
 
     if not include_updated:  # Exclude previously generated outputs by default.
         media_files = [entry for entry in media_files if not entry.stem.lower().endswith(UPDATED_SUFFIX.lower())]  # Remove files carrying the configured output suffix.
@@ -466,36 +493,46 @@ def iter_mkv_files(directory: Path, include_updated: bool = False) -> list[Path]
 
 
 
-def resolve_original_mkv(original_directory: Path, target_mkv: Path) -> Path | None:
+def resolve_original_media(original_directory: Path, target_media: Path) -> Path | None:
     """
-    Resolve the original MKV matching a target MKV filename inside one directory.
+    Resolve the original media file matching a target filename or stem inside one directory.
 
-    :param original_directory: Original media directory containing source MKV files.
-    :param target_mkv: Target MKV whose source counterpart is required.
-    :return: Matching original MKV path or None when no match exists.
+    :param original_directory: Original media directory containing source media files.
+    :param target_media: Target media file whose source counterpart is required.
+    :return: Matching original media path or None when no match exists.
     """
 
-    exact_match = original_directory / target_mkv.name  # Build the original path using the exact target filename.
+    exact_match = original_directory / target_media.name  # Build the original path using the exact target filename and extension.
 
-    if exact_match.is_file():  # Prefer the exact filesystem filename match.
+    if exact_match.is_file() and exact_match.suffix.lower() in SUPPORTED_MEDIA_EXTENSIONS:  # Prefer an exact supported filesystem filename match.
         return exact_match  # Return the exact matching original media file.
 
-    casefolded_name = target_mkv.name.casefold()  # Normalize the target filename for case-insensitive matching.
-    matching_files = [candidate for candidate in iter_mkv_files(original_directory, include_updated=True) if candidate.name.casefold() == casefolded_name]  # Locate case-insensitive original filename matches.
+    casefolded_name = target_media.name.casefold()  # Normalize the complete target filename for case-insensitive matching.
+    original_files = iter_media_files(original_directory, include_updated=True)  # Collect supported original media candidates from the requested directory.
+    matching_names = [candidate for candidate in original_files if candidate.name.casefold() == casefolded_name]  # Locate case-insensitive complete filename matches.
 
-    if len(matching_files) > 1:  # Reject ambiguous filenames on case-sensitive filesystems.
-        raise RuntimeError(f"Multiple original files match target media file: {target_mkv}")  # Prevent selecting an arbitrary original media file.
+    if len(matching_names) > 1:  # Reject ambiguous complete filenames on case-sensitive filesystems.
+        raise RuntimeError(f"Multiple original files match target media filename: {target_media}")  # Prevent selecting an arbitrary original media file.
 
-    return matching_files[0] if matching_files else None  # Return the unique match when available.
+    if matching_names:  # Prefer a unique complete filename match before comparing filename stems.
+        return matching_names[0]  # Return the unique case-insensitive complete filename match.
+
+    casefolded_stem = target_media.stem.casefold()  # Normalize the target filename without its container extension.
+    matching_stems = [candidate for candidate in original_files if candidate.stem.casefold() == casefolded_stem]  # Match equivalent media names even when container extensions differ.
+
+    if len(matching_stems) > 1:  # Reject ambiguous same-stem files across multiple source container formats.
+        raise RuntimeError(f"Multiple original files match target media stem: {target_media}")  # Prevent guessing between duplicate source representations.
+
+    return matching_stems[0] if matching_stems else None  # Return the unique same-stem match when available.
 
 
 
-def select_audio_tracks(original_mkv: Path, streams: list[Stream]) -> list[Stream]:
+def select_audio_tracks(original_media: Path, streams: list[Stream]) -> list[Stream]:
     """
     Select English and PT-BR non-commentary audio streams in output order.
 
-    :param original_mkv: Original MKV path used in validation errors.
-    :param streams: FFprobe stream dictionaries from the original MKV.
+    :param original_media: Original media path used in validation errors.
+    :param streams: FFprobe stream dictionaries from the original media file.
     :return: English and PT-BR audio streams in the required output order.
     """
 
@@ -517,7 +554,7 @@ def select_audio_tracks(original_mkv: Path, streams: list[Stream]) -> list[Strea
                 raise RuntimeError("Invalid FALLBACK_ORIGINAL_AUDIO_ORDER. Use None, ('english', 'ptbr'), or ('ptbr', 'english').")  # Reject unsupported fallback values.
 
             if len(audio_streams) < 2:  # Validate that both fallback positions exist.
-                raise RuntimeError(f"Not enough audio tracks in original file: {original_mkv}")  # Reject incomplete source audio layouts.
+                raise RuntimeError(f"Not enough audio tracks in original file: {original_media}")  # Reject incomplete source audio layouts.
 
             first_stream, second_stream = audio_streams[0], audio_streams[1]  # Select the first two eligible source audio streams.
 
@@ -541,15 +578,15 @@ def select_audio_tracks(original_mkv: Path, streams: list[Stream]) -> list[Strea
         detected_streams = "\n".join(debug_lines) if debug_lines else "No eligible audio streams were detected."  # Serialize detected stream diagnostics.
         raise RuntimeError(  # Report missing required language tracks.
             f"Could not detect both English and PT-BR audio tracks in:\n"  # Describe the language detection failure.
-            f"{original_mkv}\n\n"  # Include the affected original media path.
+            f"{original_media}\n\n"  # Include the affected original media path.
             f"Detected audio streams:\n{detected_streams}"  # Include stream metadata diagnostics.
         )
 
-    english_index = stream_index(english_stream, original_mkv)  # Validate the selected English global stream index.
-    ptbr_index = stream_index(ptbr_stream, original_mkv)  # Validate the selected Brazilian Portuguese global stream index.
+    english_index = stream_index(english_stream, original_media)  # Validate the selected English global stream index.
+    ptbr_index = stream_index(ptbr_stream, original_media)  # Validate the selected Brazilian Portuguese global stream index.
 
     if english_index == ptbr_index:  # Prevent duplicate mappings of one source audio stream.
-        raise RuntimeError(f"English and PT-BR resolved to the same stream in: {original_mkv}")  # Reject an invalid duplicate selection.
+        raise RuntimeError(f"English and PT-BR resolved to the same stream in: {original_media}")  # Reject an invalid duplicate selection.
 
     return [english_stream, ptbr_stream]  # Return English first and Brazilian Portuguese second.
 
@@ -559,7 +596,7 @@ def select_subtitle_tracks(streams: list[Stream]) -> list[Stream]:
     """
     Select every non-forced internal subtitle stream.
 
-    :param streams: FFprobe stream dictionaries from the original MKV.
+    :param streams: FFprobe stream dictionaries from the original media file.
     :return: Non-forced subtitle streams in source order.
     """
 
@@ -569,18 +606,18 @@ def select_subtitle_tracks(streams: list[Stream]) -> list[Stream]:
 
 
 
-def matching_external_srts(original_mkv: Path) -> list[Path]:
+def matching_external_srts(original_media: Path) -> list[Path]:
     """
-    Find non-forced external SRT files associated with an original MKV file.
+    Find non-forced external SRT files associated with an original media file.
 
-    :param original_mkv: Original MKV path used as the media filename prefix.
+    :param original_media: Original media path used as the media filename prefix.
     :return: Sorted matching external SRT paths.
     """
 
-    media_stem = original_mkv.stem.casefold()  # Normalize the media stem for case-insensitive matching.
+    media_stem = original_media.stem.casefold()  # Normalize the media stem for case-insensitive matching.
     candidates: list[Path] = []  # Initialize matching external subtitle paths.
 
-    for subtitle_path in original_mkv.parent.iterdir():  # Inspect files beside the original media file.
+    for subtitle_path in original_media.parent.iterdir():  # Inspect files beside the original media file.
         if not subtitle_path.is_file() or subtitle_path.suffix.lower() != ".srt":  # Ignore directories and non-SRT files.
             continue  # Continue with the next neighboring entry.
 
@@ -629,16 +666,16 @@ def external_subtitle_destination(output_mkv: Path, subtitle_path: Path, subtitl
 
 
 
-def copy_external_srts(original_mkv: Path, output_mkv: Path) -> None:
+def copy_external_srts(original_media: Path, output_mkv: Path) -> None:
     """
     Copy matching external SRT files beside a generated MKV output.
 
-    :param original_mkv: Original MKV path used to discover source SRT files.
+    :param original_media: Original media path used to discover source SRT files.
     :param output_mkv: Generated MKV path used for destination naming.
     :return: None.
     """
 
-    subtitle_paths = matching_external_srts(original_mkv)  # Discover associated non-forced external SRT files.
+    subtitle_paths = matching_external_srts(original_media)  # Discover associated non-forced external SRT files.
 
     if not subtitle_paths:  # Stop when the media file has no matching external subtitles.
         return  # Complete without creating subtitle files.
@@ -662,28 +699,28 @@ def copy_external_srts(original_mkv: Path, output_mkv: Path) -> None:
 
 
 
-def build_ffmpeg_command(target_mkv: Path, original_mkv: Path, output_mkv: Path) -> list[str]:
+def build_ffmpeg_command(target_media: Path, original_media: Path, output_mkv: Path) -> list[str]:
     """
     Build the FFmpeg mux command for one target and original media pair.
 
-    :param target_mkv: Higher-resolution target MKV providing video and attachments.
-    :param original_mkv: Original MKV providing English, PT-BR, and subtitle streams.
+    :param target_media: Higher-resolution target media file providing video and attachments.
+    :param original_media: Original media file providing English, PT-BR, and subtitle streams.
     :param output_mkv: Destination MKV path.
     :return: Complete FFmpeg command and argument list.
     """
 
-    original_info = probe_media(original_mkv)  # Read stream metadata from the original media file.
-    streams = extract_streams(original_info, original_mkv)  # Validate and extract original stream dictionaries.
-    audio_tracks = select_audio_tracks(original_mkv, streams)  # Select English and Brazilian Portuguese audio streams.
+    original_info = probe_media(original_media)  # Read stream metadata from the original media file.
+    streams = extract_streams(original_info, original_media)  # Validate and extract original stream dictionaries.
+    audio_tracks = select_audio_tracks(original_media, streams)  # Select English and Brazilian Portuguese audio streams.
     subtitle_tracks = select_subtitle_tracks(streams)  # Select every non-forced internal subtitle stream.
     command = [  # Initialize the FFmpeg mux command.
         FFMPEG,  # Select the configured FFmpeg executable.
         "-hide_banner",  # Suppress the FFmpeg startup banner.
         "-y" if OVERWRITE else "-n",  # Apply the configured output overwrite policy.
         "-i",  # Declare the target media input.
-        str(target_mkv),  # Supply the target media path as input zero.
+        str(target_media),  # Supply the target media path as input zero.
         "-i",  # Declare the original media input.
-        str(original_mkv),  # Supply the original media path as input one.
+        str(original_media),  # Supply the original media path as input one.
         "-map",  # Add a stream mapping directive.
         "0:v?",  # Preserve every video stream from the target media file when present.
         "-map",  # Add another stream mapping directive.
@@ -691,10 +728,10 @@ def build_ffmpeg_command(target_mkv: Path, original_mkv: Path, output_mkv: Path)
     ]
 
     for audio_track in audio_tracks:  # Map required original audio streams in output order.
-        command.extend(["-map", f"1:{stream_index(audio_track, original_mkv)}"])  # Map one validated global audio stream index from input one.
+        command.extend(["-map", f"1:{stream_index(audio_track, original_media)}"])  # Map one validated global audio stream index from input one.
 
     for subtitle_track in subtitle_tracks:  # Map non-forced original subtitle streams in source order.
-        command.extend(["-map", f"1:{stream_index(subtitle_track, original_mkv)}"])  # Map one validated global subtitle stream index from input one.
+        command.extend(["-map", f"1:{stream_index(subtitle_track, original_media)}"])  # Map one validated global subtitle stream index from input one.
 
     command.extend(  # Add container-level mapping and codec behavior.
         [  # Define metadata, chapter, and codec arguments.
@@ -771,16 +808,16 @@ def validate_generated_output(output_mkv: Path) -> None:
 
 
 
-def process_media_pair(target_mkv: Path, original_mkv: Path) -> None:
+def process_media_pair(target_media: Path, original_media: Path) -> None:
     """
-    Mux one target MKV with audio and subtitles from its matching original MKV.
+    Mux one target media file with audio and subtitles from its matching original media file.
 
-    :param target_mkv: Higher-resolution target MKV providing video and attachments.
-    :param original_mkv: Original MKV providing audio and subtitles.
+    :param target_media: Higher-resolution target media file providing video and attachments.
+    :param original_media: Original media file providing audio and subtitles.
     :return: None.
     """
 
-    output_mkv = target_mkv.with_name(f"{target_mkv.stem}{UPDATED_SUFFIX}{target_mkv.suffix}")  # Build the generated media path.
+    output_mkv = target_media.with_name(f"{target_media.stem}{UPDATED_SUFFIX}.mkv")  # Build a Matroska output path compatible with copied streams from supported input containers.
 
     if output_mkv.exists() and not OVERWRITE:  # Preserve an existing generated output when overwrite is disabled.
         print(f"\nSkipping existing output: {output_mkv}")  # Report the skipped generated media file.
@@ -788,10 +825,10 @@ def process_media_pair(target_mkv: Path, original_mkv: Path) -> None:
         return  # Stop processing the current media pair.
 
     print("\n" + "=" * 100)  # Separate the current media pair from previous terminal output.
-    print(f"Target  : {target_mkv}")  # Display the target media path.
-    print(f"Original: {original_mkv}")  # Display the original media path.
+    print(f"Target  : {target_media}")  # Display the target media path.
+    print(f"Original: {original_media}")  # Display the original media path.
     print(f"Output  : {output_mkv}")  # Display the generated media path.
-    command = build_ffmpeg_command(target_mkv, original_mkv, output_mkv)  # Build the complete FFmpeg mux command.
+    command = build_ffmpeg_command(target_media, original_media, output_mkv)  # Build the complete FFmpeg mux command.
 
     try:  # Isolate FFmpeg execution for partial-output cleanup.
         run_command(command)  # Execute or preview the FFmpeg mux operation.
@@ -804,57 +841,57 @@ def process_media_pair(target_mkv: Path, original_mkv: Path) -> None:
 
         raise  # Preserve the original processing failure for aggregation.
 
-    copy_external_srts(original_mkv, output_mkv)  # Copy associated non-forced external SRT files.
+    copy_external_srts(original_media, output_mkv)  # Copy associated non-forced external SRT files.
 
 
 
 def process_root_movies(errors: list[str]) -> bool:
     """
-    Process eligible movie MKV files located directly inside the configured roots.
+    Process eligible movie media files located directly inside the configured roots.
 
     :param errors: Shared error list receiving movie processing failures.
-    :return: True when at least one direct target MKV file is available for processing.
+    :return: True when at least one direct target media file is available for processing.
     """
 
-    target_movies = iter_mkv_files(TARGET_ROOT)  # Collect direct target MKV files while excluding generated outputs.
+    target_movies = iter_media_files(TARGET_ROOT)  # Collect direct target media files while excluding generated outputs.
 
     if not target_movies:  # Report that the configured roots do not use the direct movie layout.
         return False  # Allow the caller to continue with season-based series processing.
 
-    original_movies = iter_mkv_files(ORIGINAL_ROOT)  # Collect direct original MKV files while excluding generated outputs.
+    original_movies = iter_media_files(ORIGINAL_ROOT)  # Collect direct original media files while excluding generated outputs.
 
-    if not original_movies:  # Handle a target movie layout without any direct original MKV file.
-        errors.append(f"No original movie MKV files found directly in: {ORIGINAL_ROOT}")  # Record the missing source movie files.
+    if not original_movies:  # Handle a target movie layout without any direct original media file.
+        errors.append(f"No original movie media files found directly in: {ORIGINAL_ROOT}")  # Record the missing source movie files.
 
         return True  # Report that a direct target movie layout was detected even though it could not be processed.
 
     if len(target_movies) == 1 and len(original_movies) == 1:  # Handle the unambiguous one-movie-per-root layout.
-        target_mkv = target_movies[0]  # Select the only direct target movie file.
-        original_mkv = original_movies[0]  # Select the only direct original movie file regardless of filename differences.
+        target_media = target_movies[0]  # Select the only direct target movie file.
+        original_media = original_movies[0]  # Select the only direct original movie file regardless of filename differences.
 
         try:  # Isolate the single movie processing failure for aggregated reporting.
-            process_media_pair(target_mkv, original_mkv)  # Mux the unambiguous target and original movie pair.
+            process_media_pair(target_media, original_media)  # Mux the unambiguous target and original movie pair.
         except Exception as exception:  # Aggregate the movie failure without bypassing the common error summary.
-            errors.append(f"{target_mkv}\n{type(exception).__name__}: {exception}")  # Store the movie path and exception details.
+            errors.append(f"{target_media}\n{type(exception).__name__}: {exception}")  # Store the movie path and exception details.
 
         return True  # Complete direct movie processing after the unique pair is handled.
 
-    for target_mkv in target_movies:  # Process multiple direct target movies deterministically by filename.
+    for target_media in target_movies:  # Process multiple direct target movies deterministically by filename.
         try:  # Isolate filename resolution and movie processing failures.
-            original_mkv = resolve_original_mkv(ORIGINAL_ROOT, target_mkv)  # Resolve a same-named original movie without guessing among multiple files.
+            original_media = resolve_original_media(ORIGINAL_ROOT, target_media)  # Resolve a same-named original movie without guessing among multiple files.
 
-            if original_mkv is None:  # Handle a direct target movie without an unambiguous original filename match.
+            if original_media is None:  # Handle a direct target movie without an unambiguous original filename or stem match.
                 errors.append(  # Add a detailed missing-file report.
                     f"Missing matching original movie file:\n"  # Describe the direct movie matching failure.
-                    f"Target       : {target_mkv}\n"  # Include the target movie path.
-                    f"Original root: {ORIGINAL_ROOT}"  # Include the directory searched for a same-named source movie.
+                    f"Target       : {target_media}\n"  # Include the target movie path.
+                    f"Original root: {ORIGINAL_ROOT}"  # Include the directory searched for a same-named or same-stem source movie.
                 )
 
                 continue  # Continue with the next direct target movie.
 
-            process_media_pair(target_mkv, original_mkv)  # Mux the resolved direct movie pair.
+            process_media_pair(target_media, original_media)  # Mux the resolved direct movie pair.
         except Exception as exception:  # Aggregate one direct movie failure without stopping the remaining files.
-            errors.append(f"{target_mkv}\n{type(exception).__name__}: {exception}")  # Store the movie path and exception details.
+            errors.append(f"{target_media}\n{type(exception).__name__}: {exception}")  # Store the movie path and exception details.
 
     return True  # Report that the direct movie layout was found and processed.
 
@@ -862,7 +899,7 @@ def process_root_movies(errors: list[str]) -> bool:
 
 def process_target_season(target_season: Path, original_season: Path, errors: list[str]) -> None:
     """
-    Process every eligible target MKV in one matched season directory.
+    Process every eligible target media file in one matched season directory.
 
     :param target_season: Target season directory containing higher-resolution episodes.
     :param original_season: Matching original season directory containing source tracks.
@@ -870,28 +907,28 @@ def process_target_season(target_season: Path, original_season: Path, errors: li
     :return: None.
     """
 
-    for target_mkv in iter_mkv_files(target_season):  # Process target MKV files in deterministic order.
+    for target_media in iter_media_files(target_season):  # Process target media files in deterministic order.
         try:  # Isolate filename resolution and episode processing failures.
-            original_mkv = resolve_original_mkv(original_season, target_mkv)  # Resolve the matching original episode path.
+            original_media = resolve_original_media(original_season, target_media)  # Resolve the matching original episode path.
 
-            if original_mkv is None:  # Handle missing original episode files.
+            if original_media is None:  # Handle missing original episode files.
                 errors.append(  # Add a detailed missing-file report.
                     f"Missing matching original file:\n"  # Describe the matching failure.
-                    f"Target  : {target_mkv}\n"  # Include the target episode path.
-                    f"Expected: {original_season / target_mkv.name}"  # Include the expected original path.
+                    f"Target  : {target_media}\n"  # Include the target episode path.
+                    f"Expected: {original_season / target_media.name}"  # Include the expected original filename before cross-extension stem matching.
                 )
 
                 continue  # Continue with the next target episode.
 
-            process_media_pair(target_mkv, original_mkv)  # Mux the resolved episode pair.
+            process_media_pair(target_media, original_media)  # Mux the resolved episode pair.
         except Exception as exception:  # Aggregate one episode failure without stopping the batch.
-            errors.append(f"{target_mkv}\n{type(exception).__name__}: {exception}")  # Store the episode path and exception details.
+            errors.append(f"{target_media}\n{type(exception).__name__}: {exception}")  # Store the episode path and exception details.
 
 
 
 def print_processing_errors(errors: list[str]) -> None:
     """
-    Print aggregated season and episode processing errors.
+    Print aggregated movie, season, and episode processing errors.
 
     :param errors: Processing error descriptions collected during execution.
     :return: None.
@@ -920,7 +957,7 @@ def main() -> None:
         raise FileNotFoundError(f"Target root does not exist: {TARGET_ROOT}")  # Stop before processing an unavailable target root.
 
     errors: list[str] = []  # Initialize aggregated movie, season, and episode processing errors.
-    processed_root_movies = process_root_movies(errors)  # Process MKV files located directly inside the configured movie roots.
+    processed_root_movies = process_root_movies(errors)  # Process supported media files located directly inside the configured movie roots.
     original_seasons = build_original_season_map()  # Build the original season lookup by season number when series folders are present.
     processed_target_seasons = False  # Track whether the target root contains at least one recognized season directory.
 
@@ -947,7 +984,7 @@ def main() -> None:
 
     if not processed_root_movies and not processed_target_seasons:  # Reject roots that contain neither supported movie files nor season directories.
         raise RuntimeError(  # Report the supported directory layouts required for processing.
-            f"No direct movie MKV files or target season folders found in: {TARGET_ROOT}"  # Describe the unavailable target media layout.
+            f"No direct supported movie files or target season folders found in: {TARGET_ROOT}"  # Describe the unavailable target media layout.
         )
 
     if errors:  # Report all collected failures after processing every supported media layout.
