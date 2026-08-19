@@ -162,7 +162,7 @@ def resolve_full_trailing_space_path(filepath: str) -> str:
         if filepath.startswith(os.sep):  # Handle absolute paths
             current_path = os.sep  # Start from root
             parts = parts[1:]  # Remove empty root part
-        else:
+        else:  # Handle the alternative branch
             current_path = parts[0] if parts[0] else os.getcwd()  # Initialize base
             parts = parts[1:] if parts[0] else parts  # Adjust parts
 
@@ -208,8 +208,8 @@ def verify_filepath_exists(filepath):
     """
 
     try:  # Wrap full function logic to ensure production-safe monitoring
-        verbose_output(
-            f"{BackgroundColors.GREEN}Verifying if the file or folder exists at the path: {BackgroundColors.CYAN}{filepath}{Style.RESET_ALL}"
+        verbose_output(  # Output verbose diagnostic information when enabled
+            f"{BackgroundColors.GREEN}Verifying if the file or folder exists at the path: {BackgroundColors.CYAN}{filepath}{Style.RESET_ALL}"  # Continue the formatted output message
         )  # Output the verbose message
         
         if not isinstance(filepath, str) or not filepath.strip():  # Verify for non-string or empty/whitespace-only input   
@@ -221,8 +221,8 @@ def verify_filepath_exists(filepath):
 
         candidate = str(filepath).strip()  # Normalize input to string and strip surrounding whitespace
 
-        if (candidate.startswith("'") and candidate.endswith("'")) or (
-            candidate.startswith('"') and candidate.endswith('"')
+        if (candidate.startswith("'") and candidate.endswith("'")) or (  # Detect paths wrapped in matching quotes
+            candidate.startswith('"') and candidate.endswith('"')  # Execute this step as part of the function flow
         ):  # Handle quoted paths from config files
             candidate = candidate[1:-1].strip()  # Remove wrapping quotes and trim again
 
@@ -241,26 +241,26 @@ def verify_filepath_exists(filepath):
         cwd_candidate = os.path.join(cwd, alt)  # Build cwd-relative candidate
 
         for path_variant in (repo_candidate, cwd_candidate):  # Iterate alternative base paths
-            try:
+            try:  # Attempt the protected operation
                 normalized_variant = os.path.normpath(path_variant)  # Normalize variant
                 if os.path.exists(normalized_variant):  # Verify existence
                     return True  # Return True if found
-            except Exception:
+            except Exception:  # Handle unexpected operation failures
                 continue  # Continue safely on error
 
         try:  # Attempt absolute path resolution as fallback
             abs_candidate = os.path.abspath(candidate)  # Build absolute path
             if os.path.exists(abs_candidate):  # Verify existence
                 return True  # Return True if found
-        except Exception:
+        except Exception:  # Handle unexpected operation failures
             pass  # Ignore resolution errors
 
         for path_variant in (candidate, repo_candidate, cwd_candidate):  # Attempt trailing-space resolution on all variants
             try:  # Attempt to resolve trailing space issues across path components for this variant
                 resolved = resolve_full_trailing_space_path(path_variant)  # Resolve trailing space issues across path components
                 if resolved != path_variant and os.path.exists(resolved):  # Verify resolved path exists
-                    verbose_output(
-                        f"{BackgroundColors.YELLOW}Resolved trailing space mismatch: {BackgroundColors.CYAN}{path_variant}{BackgroundColors.YELLOW} -> {BackgroundColors.CYAN}{resolved}{Style.RESET_ALL}"
+                    verbose_output(  # Output verbose diagnostic information when enabled
+                        f"{BackgroundColors.YELLOW}Resolved trailing space mismatch: {BackgroundColors.CYAN}{path_variant}{BackgroundColors.YELLOW} -> {BackgroundColors.CYAN}{resolved}{Style.RESET_ALL}"  # Continue the formatted output message
                     )  # Log successful resolution
                     return True  # Return True if corrected path exists
             except Exception:  # Catch any exception during trailing space resolution   
@@ -284,14 +284,14 @@ def normalize_movie_name(movie_name: str) -> str:
     """
 
     normalized = unicodedata.normalize("NFKD", movie_name)  # Split accented characters
-    normalized = "".join(
-        character for character in normalized if not unicodedata.combining(character)
+    normalized = "".join(  # Rebuild the title without Unicode combining marks
+        character for character in normalized if not unicodedata.combining(character)  # Keep only base characters while removing accent marks
     )  # Remove accent marks
     normalized = normalized.casefold()  # Normalize casing more thoroughly than lower()
     normalized = re.sub(r"[^\w]+", " ", normalized, flags=re.UNICODE)  # Treat punctuation as separators
     normalized = re.sub(r"_+", " ", normalized)  # Treat underscores as separators too
     normalized = re.sub(r"\s+", " ", normalized).strip()  # Collapse whitespace
-    return normalized
+    return normalized  # Return the normalized movie-title comparison key
 
 
 def parse_movie_directory_name(directory_name: str):
@@ -305,27 +305,27 @@ def parse_movie_directory_name(directory_name: str):
     :return: Parsed metadata dictionary, or None when the directory does not match.
     """
 
-    if not isinstance(directory_name, str):
-        return None
+    if not isinstance(directory_name, str):  # Reject non-string directory names
+        return None  # Return no metadata for an invalid or unmatched directory name
 
-    match = MOVIE_DIRECTORY_PATTERN.fullmatch(directory_name.strip())
-    if match is None:
-        return None
+    match = MOVIE_DIRECTORY_PATTERN.fullmatch(directory_name.strip())  # Match the complete directory name against the movie naming pattern
+    if match is None:  # Reject directory names outside the expected pattern
+        return None  # Return no metadata for an invalid or unmatched directory name
 
-    movie_name = match.group("movie_name").strip()
-    if not movie_name:
-        return None
+    movie_name = match.group("movie_name").strip()  # Extract and trim the movie-title portion
+    if not movie_name:  # Reject matches with an empty movie title
+        return None  # Return no metadata for an invalid or unmatched directory name
 
-    language_lookup = {language.casefold(): language for language in SUPPORTED_LANGUAGES}
-    language = language_lookup[match.group("language").casefold()]
+    language_lookup = {language.casefold(): language for language in SUPPORTED_LANGUAGES}  # Build a case-insensitive lookup for canonical language labels
+    language = language_lookup[match.group("language").casefold()]  # Restore the configured canonical language spelling
 
-    return {
-        "movie_name": movie_name,
-        "normalized_movie_name": normalize_movie_name(movie_name),
-        "year": int(match.group("year")),
-        "resolution": match.group("resolution").lower(),
-        "language": language,
-    }
+    return {  # Execute this step as part of the function flow
+        "movie_name": movie_name,  # Store the original movie title
+        "normalized_movie_name": normalize_movie_name(movie_name),  # Store the normalized comparison title
+        "year": int(match.group("year")),  # Store the parsed release year
+        "resolution": match.group("resolution").lower(),  # Store the parsed video resolution
+        "language": language,  # Store the canonical language label
+    }  # Close the current data structure or call
 
 
 def scan_movie_directories(input_dir: str):
@@ -336,42 +336,42 @@ def scan_movie_directories(input_dir: str):
     :return: Tuple containing parsed movie entries and total directory count.
     """
 
-    movie_entries = []
-    total_directories_scanned = 0
+    movie_entries = []  # Initialize the collection of parsed movie directories
+    total_directories_scanned = 0  # Initialize the recursive directory counter
 
-    def handle_walk_error(error):
-        print(
-            f"{BackgroundColors.YELLOW}Warning: unable to scan "
-            f"{BackgroundColors.CYAN}{getattr(error, 'filename', 'unknown path')}"
-            f"{BackgroundColors.YELLOW}: {error}{Style.RESET_ALL}"
-        )
+    def handle_walk_error(error):  # Define a local handler for os.walk errors
+        print(  # Output status information to the terminal and logger
+            f"{BackgroundColors.YELLOW}Warning: unable to scan "  # Continue the formatted output message
+            f"{BackgroundColors.CYAN}{getattr(error, 'filename', 'unknown path')}"  # Continue the formatted output message
+            f"{BackgroundColors.YELLOW}: {error}{Style.RESET_ALL}"  # Continue the formatted output message
+        )  # Close the current data structure or call
 
-    for current_root, directory_names, _ in os.walk(input_dir, onerror=handle_walk_error):
-        for directory_name in directory_names:
-            total_directories_scanned += 1
-            metadata = parse_movie_directory_name(directory_name)
-            if metadata is None:
-                continue
+    for current_root, directory_names, _ in os.walk(input_dir, onerror=handle_walk_error):  # Recursively walk every directory below the input root
+        for directory_name in directory_names:  # Inspect every immediate child directory discovered by os.walk
+            total_directories_scanned += 1  # Count the current descendant directory
+            metadata = parse_movie_directory_name(directory_name)  # Parse metadata from the current directory name
+            if metadata is None:  # Skip directories that do not match the movie naming format
+                continue  # Continue with the next available item
 
-            full_path = os.path.normpath(os.path.join(current_root, directory_name))
-            relative_path = os.path.relpath(full_path, input_dir)
-            movie_entries.append(
-                {
-                    **metadata,
-                    "directory_name": directory_name,
-                    "relative_path": relative_path,
-                    "path": full_path,
-                }
-            )
+            full_path = os.path.normpath(os.path.join(current_root, directory_name))  # Build the normalized absolute-or-rooted path for the matched directory
+            relative_path = os.path.relpath(full_path, input_dir)  # Build the directory path relative to INPUT_DIR
+            movie_entries.append(  # Begin the multi-line operation
+                {  # Close the current data structure or call
+                    **metadata,  # Include all parsed movie metadata fields
+                    "directory_name": directory_name,  # Store the original matched directory name
+                    "relative_path": relative_path,  # Store the path relative to INPUT_DIR
+                    "path": full_path,  # Store the normalized matched directory path
+                }  # Close the current data structure or call
+            )  # Close the current data structure or call
 
-            verbose_output(
-                true_string=(
-                    f"{BackgroundColors.GREEN}Matched movie directory: "
-                    f"{BackgroundColors.CYAN}{full_path}{Style.RESET_ALL}"
-                )
-            )
+            verbose_output(  # Output verbose diagnostic information when enabled
+                true_string=(  # Build the verbose matched-directory message
+                    f"{BackgroundColors.GREEN}Matched movie directory: "  # Continue the formatted output message
+                    f"{BackgroundColors.CYAN}{full_path}{Style.RESET_ALL}"  # Continue the formatted output message
+                )  # Close the current data structure or call
+            )  # Close the current data structure or call
 
-    return movie_entries, total_directories_scanned
+    return movie_entries, total_directories_scanned  # Return matched movie entries and the scanned-directory count
 
 
 def find_duplicate_movies(movie_entries):
@@ -382,52 +382,52 @@ def find_duplicate_movies(movie_entries):
     :return: Sorted list containing only movie-title groups with 2+ occurrences.
     """
 
-    grouped_entries = {}
-    for entry in movie_entries:
-        key = entry["normalized_movie_name"]
-        grouped_entries.setdefault(key, []).append(entry)
+    grouped_entries = {}  # Initialize movie-title groups keyed by normalized names
+    for entry in movie_entries:  # Group every parsed movie entry by its normalized title
+        key = entry["normalized_movie_name"]  # Read the normalized movie-title grouping key
+        grouped_entries.setdefault(key, []).append(entry)  # Append the movie occurrence to its normalized-title group
 
-    duplicate_groups = []
-    for normalized_name, entries in grouped_entries.items():
-        if len(entries) < 2:
-            continue
+    duplicate_groups = []  # Initialize the final collection of duplicate title groups
+    for normalized_name, entries in grouped_entries.items():  # Inspect each normalized title group for duplicates
+        if len(entries) < 2:  # Ignore movie titles that occur only once
+            continue  # Continue with the next available item
 
-        sorted_entries = sorted(
-            entries,
-            key=lambda entry: (
-                entry["year"],
-                entry["resolution"],
-                entry["language"].casefold(),
-                entry["path"].casefold(),
-            ),
-        )
-        movie_name_variants = sorted(
-            {entry["movie_name"] for entry in sorted_entries},
-            key=str.casefold,
-        )
+        sorted_entries = sorted(  # Sort duplicate occurrences deterministically by metadata and path
+            entries,  # Provide the next value for the current structure or call
+            key=lambda entry: (  # Begin the multi-line operation
+                entry["year"],  # Provide the next value for the current structure or call
+                entry["resolution"],  # Provide the next value for the current structure or call
+                entry["language"].casefold(),  # Provide the next value for the current structure or call
+                entry["path"].casefold(),  # Provide the next value for the current structure or call
+            ),  # Close the current data structure or call
+        )  # Close the current data structure or call
+        movie_name_variants = sorted(  # Collect all original title spellings represented by the group
+            {entry["movie_name"] for entry in sorted_entries},  # Provide the next value for the current structure or call
+            key=str.casefold,  # Provide the next value for the current structure or call
+        )  # Close the current data structure or call
 
-        duplicate_groups.append(
-            {
-                "movie_name": sorted_entries[0]["movie_name"],
-                "normalized_movie_name": normalized_name,
-                "movie_name_variants": movie_name_variants,
-                "occurrences": len(sorted_entries),
-                "entries": [
-                    {
-                        "directory_name": entry["directory_name"],
-                        "year": entry["year"],
-                        "resolution": entry["resolution"],
-                        "language": entry["language"],
-                        "relative_path": entry["relative_path"],
-                        "path": entry["path"],
-                    }
-                    for entry in sorted_entries
-                ],
-            }
-        )
+        duplicate_groups.append(  # Append the completed duplicate group to the report data
+            {  # Close the current data structure or call
+                "movie_name": sorted_entries[0]["movie_name"],  # Store the original movie title
+                "normalized_movie_name": normalized_name,  # Store the normalized comparison title
+                "movie_name_variants": movie_name_variants,  # Store all original title variants found in the group
+                "occurrences": len(sorted_entries),  # Store the number of duplicate occurrences
+                "entries": [  # Execute this step as part of the function flow
+                    {  # Close the current data structure or call
+                        "directory_name": entry["directory_name"],  # Store the original matched directory name
+                        "year": entry["year"],  # Store the parsed release year
+                        "resolution": entry["resolution"],  # Store the parsed video resolution
+                        "language": entry["language"],  # Store the canonical language label
+                        "relative_path": entry["relative_path"],  # Store the path relative to INPUT_DIR
+                        "path": entry["path"],  # Store the normalized matched directory path
+                    }  # Close the current data structure or call
+                    for entry in sorted_entries  # Build one report entry for each duplicate occurrence
+                ],  # Close the current data structure or call
+            }  # Close the current data structure or call
+        )  # Close the current data structure or call
 
-    duplicate_groups.sort(key=lambda group: group["normalized_movie_name"])
-    return duplicate_groups
+    duplicate_groups.sort(key=lambda group: group["normalized_movie_name"])  # Sort duplicate groups alphabetically by normalized movie title
+    return duplicate_groups  # Return the sorted duplicate movie groups
 
 
 def build_report_filename(input_dir: str) -> str:
@@ -443,15 +443,15 @@ def build_report_filename(input_dir: str) -> str:
     :return: Safe JSON report filename.
     """
 
-    prefix = str(input_dir).strip().replace("\\", "-").replace("/", "-")
+    prefix = str(input_dir).strip().replace("\\", "-").replace("/", "-")  # Convert the input path into the requested hyphenated filename prefix
     prefix = prefix.replace(":", "")  # Required for Windows filename compatibility
     prefix = re.sub(r'[<>"|?*]', '-', prefix)  # Sanitize remaining Windows-invalid filename characters
-    prefix = re.sub(r"-+", "-", prefix).strip("- .")
+    prefix = re.sub(r"-+", "-", prefix).strip("- .")  # Normalize the sanitized report filename prefix
 
-    if not prefix:
-        prefix = "movies"
+    if not prefix:  # Provide a fallback prefix when sanitization removes everything
+        prefix = "movies"  # Use a safe fallback report filename prefix
 
-    return f"{prefix}-report.json"
+    return f"{prefix}-report.json"  # Return the final report filename
 
 
 def write_duplicate_report(input_dir: str, movie_entries, total_directories_scanned: int, duplicate_groups):
@@ -465,45 +465,45 @@ def write_duplicate_report(input_dir: str, movie_entries, total_directories_scan
     :return: Path to the written JSON report.
     """
 
-    output_dir = Path(OUTPUT_DIR)
-    output_dir.mkdir(parents=True, exist_ok=True)
-    report_path = output_dir / build_report_filename(input_dir)
+    output_dir = Path(OUTPUT_DIR)  # Resolve the configured output directory as a Path object
+    output_dir.mkdir(parents=True, exist_ok=True)  # Create the output directory tree when it does not already exist
+    report_path = output_dir / build_report_filename(input_dir)  # Build the final JSON report path
 
-    unique_movie_names = {entry["normalized_movie_name"] for entry in movie_entries}
-    duplicate_movie_directories = sum(group["occurrences"] for group in duplicate_groups)
+    unique_movie_names = {entry["normalized_movie_name"] for entry in movie_entries}  # Collect unique normalized movie titles for report statistics
+    duplicate_movie_directories = sum(group["occurrences"] for group in duplicate_groups)  # Count all directories that belong to duplicate groups
 
-    report = {
-        "input_dir": input_dir,
-        "generated_at": datetime.datetime.now().astimezone().isoformat(timespec="seconds"),
-        "expected_directory_format": "<MovieName> <YYYY> <Resolution> <Dual|Legendado|Dublado|Nacional|English>",
-        "comparison": {
-            "based_on": "movie_name_only",
-            "ignores": [
-                "year",
-                "resolution",
-                "language",
-                "letter_casing",
-                "accents",
-                "punctuation",
-                "extra_whitespace",
-            ],
-        },
-        "summary": {
-            "directories_scanned": total_directories_scanned,
-            "matching_movie_directories": len(movie_entries),
-            "non_matching_directories": total_directories_scanned - len(movie_entries),
-            "unique_movie_names": len(unique_movie_names),
-            "duplicate_movie_names": len(duplicate_groups),
-            "directories_in_duplicate_groups": duplicate_movie_directories,
-        },
-        "duplicates": duplicate_groups,
-    }
+    report = {  # Build the complete JSON-serializable report structure
+        "input_dir": input_dir,  # Record the scanned input directory
+        "generated_at": datetime.datetime.now().astimezone().isoformat(timespec="seconds"),  # Record when the report was generated
+        "expected_directory_format": "<MovieName> <YYYY> <Resolution> <Dual|Legendado|Dublado|Nacional|English>",  # Document the directory naming convention used by the scanner
+        "comparison": {  # Describe the duplicate comparison rules
+            "based_on": "movie_name_only",  # Document that comparison uses only the movie title
+            "ignores": [  # List metadata and formatting differences ignored during matching
+                "year",  # Document one ignored comparison attribute
+                "resolution",  # Document one ignored comparison attribute
+                "language",  # Document one ignored comparison attribute
+                "letter_casing",  # Document one ignored comparison attribute
+                "accents",  # Document one ignored comparison attribute
+                "punctuation",  # Document one ignored comparison attribute
+                "extra_whitespace",  # Document one ignored comparison attribute
+            ],  # Close the current data structure or call
+        },  # Close the current data structure or call
+        "summary": {  # Store aggregate scan statistics
+            "directories_scanned": total_directories_scanned,  # Store the number of descendant directories inspected
+            "matching_movie_directories": len(movie_entries),  # Store the number of directories matching the expected pattern
+            "non_matching_directories": total_directories_scanned - len(movie_entries),  # Store the number of inspected directories that did not match
+            "unique_movie_names": len(unique_movie_names),  # Store the number of unique normalized movie titles
+            "duplicate_movie_names": len(duplicate_groups),  # Store the number of repeated movie-title groups
+            "directories_in_duplicate_groups": duplicate_movie_directories,  # Store the total number of directories belonging to duplicate groups
+        },  # Close the current data structure or call
+        "duplicates": duplicate_groups,  # Store every detected duplicate movie group
+    }  # Close the current data structure or call
 
-    with report_path.open("w", encoding="utf-8") as report_file:
-        json.dump(report, report_file, ensure_ascii=False, indent=4)
-        report_file.write("\n")
+    with report_path.open("w", encoding="utf-8") as report_file:  # Open the report destination using UTF-8 encoding
+        json.dump(report, report_file, ensure_ascii=False, indent=4)  # Serialize the report as indented UTF-8 JSON
+        report_file.write("\n")  # Terminate the generated JSON file with a newline
 
-    return report_path
+    return report_path  # Return the generated JSON report path
 
 
 def run_duplicate_movie_scan(input_dir: str = INPUT_DIR):
@@ -514,21 +514,21 @@ def run_duplicate_movie_scan(input_dir: str = INPUT_DIR):
     :return: Tuple containing the report path, all matched entries, and duplicates.
     """
 
-    if not verify_filepath_exists(input_dir):
-        raise FileNotFoundError(f"Input directory not found: {input_dir}")
-    if not os.path.isdir(input_dir):
-        raise NotADirectoryError(f"Input path is not a directory: {input_dir}")
+    if not verify_filepath_exists(input_dir):  # Verify that the configured input path exists
+        raise FileNotFoundError(f"Input directory not found: {input_dir}")  # Raise a descriptive error for a missing input directory
+    if not os.path.isdir(input_dir):  # Verify that the configured input path is a directory
+        raise NotADirectoryError(f"Input path is not a directory: {input_dir}")  # Raise a descriptive error when INPUT_DIR is not a directory
 
-    movie_entries, total_directories_scanned = scan_movie_directories(input_dir)
-    duplicate_groups = find_duplicate_movies(movie_entries)
-    report_path = write_duplicate_report(
-        input_dir,
-        movie_entries,
-        total_directories_scanned,
-        duplicate_groups,
-    )
+    movie_entries, total_directories_scanned = scan_movie_directories(input_dir)  # Recursively collect all movie directories matching the naming pattern
+    duplicate_groups = find_duplicate_movies(movie_entries)  # Detect repeated movie names from the parsed entries
+    report_path = write_duplicate_report(  # Write the duplicate analysis to the JSON report
+        input_dir,  # Provide the next value for the current structure or call
+        movie_entries,  # Provide the next value for the current structure or call
+        total_directories_scanned,  # Provide the next value for the current structure or call
+        duplicate_groups,  # Provide the next value for the current structure or call
+    )  # Close the current data structure or call
 
-    return report_path, movie_entries, duplicate_groups
+    return report_path, movie_entries, duplicate_groups  # Return the generated report path, matches, and duplicate groups
 
 
 def to_seconds(obj):
@@ -546,12 +546,12 @@ def to_seconds(obj):
     if hasattr(obj, "total_seconds"):  # Timedelta-like objects
         try:  # Attempt to call total_seconds()
             return float(obj.total_seconds())  # Use the total_seconds() method
-        except Exception:
+        except Exception:  # Handle unexpected operation failures
             pass  # Fallthrough on error
     if hasattr(obj, "timestamp"):  # Datetime-like objects
         try:  # Attempt to call timestamp()
             return float(obj.timestamp())  # Use timestamp() to get seconds since epoch
-        except Exception:
+        except Exception:  # Handle unexpected operation failures
             pass  # Fallthrough on error
     return None  # Couldn't convert
 
@@ -573,7 +573,7 @@ def calculate_execution_time(start_time, finish_time=None):
         if total_seconds is None:  # Conversion failed
             try:  # Attempt numeric coercion
                 total_seconds = float(start_time)  # Attempt numeric coercion
-            except Exception:
+            except Exception:  # Handle unexpected operation failures
                 total_seconds = 0.0  # Fallback to zero
     else:  # Two-argument mode: Compute difference finish_time - start_time
         st = to_seconds(start_time)  # Convert start to seconds if possible
@@ -625,13 +625,13 @@ def play_sound():
         if current_os in SOUND_COMMANDS:  # If the platform.system() is in the SOUND_COMMANDS dictionary
             os.system(f"{SOUND_COMMANDS[current_os]} {SOUND_FILE}")  # Play the sound
         else:  # If the platform.system() is not in the SOUND_COMMANDS dictionary
-            print(
-                f"{BackgroundColors.RED}The {BackgroundColors.CYAN}{current_os}{BackgroundColors.RED} is not in the {BackgroundColors.CYAN}SOUND_COMMANDS dictionary{BackgroundColors.RED}. Please add it!{Style.RESET_ALL}"
-            )
+            print(  # Output status information to the terminal and logger
+                f"{BackgroundColors.RED}The {BackgroundColors.CYAN}{current_os}{BackgroundColors.RED} is not in the {BackgroundColors.CYAN}SOUND_COMMANDS dictionary{BackgroundColors.RED}. Please add it!{Style.RESET_ALL}"  # Continue the formatted output message
+            )  # Close the current data structure or call
     else:  # If the sound file does not exist
-        print(
-            f"{BackgroundColors.RED}Sound file {BackgroundColors.CYAN}{SOUND_FILE}{BackgroundColors.RED} not found. Make sure the file exists.{Style.RESET_ALL}"
-        )
+        print(  # Output status information to the terminal and logger
+            f"{BackgroundColors.RED}Sound file {BackgroundColors.CYAN}{SOUND_FILE}{BackgroundColors.RED} not found. Make sure the file exists.{Style.RESET_ALL}"  # Continue the formatted output message
+        )  # Close the current data structure or call
 
 
 def main():
@@ -642,57 +642,57 @@ def main():
     :return: None
     """
 
-    print(
-        f"{BackgroundColors.CLEAR_TERMINAL}{BackgroundColors.BOLD}{BackgroundColors.GREEN}Welcome to the {BackgroundColors.CYAN}Find Repeated Movies-Series{BackgroundColors.GREEN} program!{Style.RESET_ALL}",
-        end="\n\n",
-    )
+    print(  # Output status information to the terminal and logger
+        f"{BackgroundColors.CLEAR_TERMINAL}{BackgroundColors.BOLD}{BackgroundColors.GREEN}Welcome to the {BackgroundColors.CYAN}Find Repeated Movies-Series{BackgroundColors.GREEN} program!{Style.RESET_ALL}",  # Continue the formatted output message
+        end="\n\n",  # Add the configured spacing after the welcome message
+    )  # Close the current data structure or call
 
-    start_time = datetime.datetime.now()
+    start_time = datetime.datetime.now()  # Capture the program start time
 
-    try:
-        report_path, movie_entries, duplicate_groups = run_duplicate_movie_scan(INPUT_DIR)
+    try:  # Attempt the protected operation
+        report_path, movie_entries, duplicate_groups = run_duplicate_movie_scan(INPUT_DIR)  # Run the complete recursive duplicate-movie scan
 
-        print(
-            f"{BackgroundColors.GREEN}Matching movie directories: "
-            f"{BackgroundColors.CYAN}{len(movie_entries)}{Style.RESET_ALL}"
-        )
-        print(
-            f"{BackgroundColors.GREEN}Repeated movie names: "
-            f"{BackgroundColors.CYAN}{len(duplicate_groups)}{Style.RESET_ALL}"
-        )
+        print(  # Output status information to the terminal and logger
+            f"{BackgroundColors.GREEN}Matching movie directories: "  # Continue the formatted output message
+            f"{BackgroundColors.CYAN}{len(movie_entries)}{Style.RESET_ALL}"  # Continue the formatted output message
+        )  # Close the current data structure or call
+        print(  # Output status information to the terminal and logger
+            f"{BackgroundColors.GREEN}Repeated movie names: "  # Continue the formatted output message
+            f"{BackgroundColors.CYAN}{len(duplicate_groups)}{Style.RESET_ALL}"  # Continue the formatted output message
+        )  # Close the current data structure or call
 
-        if duplicate_groups:
-            print(f"{BackgroundColors.YELLOW}Repeated movies:{Style.RESET_ALL}")
-            for group in duplicate_groups:
-                print(
-                    f"  {BackgroundColors.CYAN}{group['movie_name']}"
-                    f"{BackgroundColors.GREEN} ({group['occurrences']} occurrences){Style.RESET_ALL}"
-                )
-        else:
-            print(f"{BackgroundColors.GREEN}No repeated movie names found.{Style.RESET_ALL}")
+        if duplicate_groups:  # Display duplicate groups only when duplicates were found
+            print(f"{BackgroundColors.YELLOW}Repeated movies:{Style.RESET_ALL}")  # Output status information to the terminal and logger
+            for group in duplicate_groups:  # Display each repeated movie group
+                print(  # Output status information to the terminal and logger
+                    f"  {BackgroundColors.CYAN}{group['movie_name']}"  # Continue the formatted output message
+                    f"{BackgroundColors.GREEN} ({group['occurrences']} occurrences){Style.RESET_ALL}"  # Continue the formatted output message
+                )  # Close the current data structure or call
+        else:  # Handle the alternative branch
+            print(f"{BackgroundColors.GREEN}No repeated movie names found.{Style.RESET_ALL}")  # Output status information to the terminal and logger
 
-        print(
-            f"{BackgroundColors.GREEN}JSON report written to: "
-            f"{BackgroundColors.CYAN}{report_path}{Style.RESET_ALL}"
-        )
-    except Exception as error:
-        print(
-            f"{BackgroundColors.RED}Failed to scan movie library: "
-            f"{BackgroundColors.CYAN}{error}{Style.RESET_ALL}"
-        )
-        raise
-    finally:
-        finish_time = datetime.datetime.now()
-        print(
-            f"{BackgroundColors.GREEN}Start time: {BackgroundColors.CYAN}{start_time.strftime('%d/%m/%Y - %H:%M:%S')}\n"
-            f"{BackgroundColors.GREEN}Finish time: {BackgroundColors.CYAN}{finish_time.strftime('%d/%m/%Y - %H:%M:%S')}\n"
-            f"{BackgroundColors.GREEN}Execution time: {BackgroundColors.CYAN}{calculate_execution_time(start_time, finish_time)}{Style.RESET_ALL}"
-        )
-        print(
-            f"{BackgroundColors.BOLD}{BackgroundColors.GREEN}Program finished.{Style.RESET_ALL}"
-        )
-        if RUN_FUNCTIONS["Play Sound"]:
-            atexit.register(play_sound)
+        print(  # Output status information to the terminal and logger
+            f"{BackgroundColors.GREEN}JSON report written to: "  # Continue the formatted output message
+            f"{BackgroundColors.CYAN}{report_path}{Style.RESET_ALL}"  # Continue the formatted output message
+        )  # Close the current data structure or call
+    except Exception as error:  # Handle and report unexpected scan failures
+        print(  # Output status information to the terminal and logger
+            f"{BackgroundColors.RED}Failed to scan movie library: "  # Continue the formatted output message
+            f"{BackgroundColors.CYAN}{error}{Style.RESET_ALL}"  # Continue the formatted output message
+        )  # Close the current data structure or call
+        raise  # Re-raise the original exception after logging it
+    finally:  # Always finalize timing and completion output
+        finish_time = datetime.datetime.now()  # Capture the program finish time
+        print(  # Output status information to the terminal and logger
+            f"{BackgroundColors.GREEN}Start time: {BackgroundColors.CYAN}{start_time.strftime('%d/%m/%Y - %H:%M:%S')}\n"  # Continue the formatted output message
+            f"{BackgroundColors.GREEN}Finish time: {BackgroundColors.CYAN}{finish_time.strftime('%d/%m/%Y - %H:%M:%S')}\n"  # Continue the formatted output message
+            f"{BackgroundColors.GREEN}Execution time: {BackgroundColors.CYAN}{calculate_execution_time(start_time, finish_time)}{Style.RESET_ALL}"  # Continue the formatted output message
+        )  # Close the current data structure or call
+        print(  # Output status information to the terminal and logger
+            f"{BackgroundColors.BOLD}{BackgroundColors.GREEN}Program finished.{Style.RESET_ALL}"  # Continue the formatted output message
+        )  # Close the current data structure or call
+        if RUN_FUNCTIONS["Play Sound"]:  # Check whether completion sound is enabled
+            atexit.register(play_sound)  # Register the configured completion sound callback
 
 
 if __name__ == "__main__":
