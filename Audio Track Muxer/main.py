@@ -19,7 +19,7 @@ Description :
         - External target SRT discovery, collision-safe naming, and metadata copying.
         - Dedicated output root to avoid consuming target-drive free space.
         - Optional post-success deletion of processed target and/or original source media files.
-        - Dry-run support, overwrite control, storage preflight, and partial-output cleanup.
+        - Dry-run support, overwrite control, erasure-aware storage preflight, and partial-output cleanup.
 
 Usage:
     1. Configure ORIGINAL_ROOT, TARGET_ROOT, OUTPUT_ROOT, DRY_RUN, OVERWRITE,
@@ -52,13 +52,18 @@ Assumptions & Notes:
       from original-source audio metadata.
     - Generated media always uses MKV so copied video, audio, subtitle, attachment,
       and chapter streams are not constrained by the target input container format.
-    - Generated media is written under OUTPUT_ROOT instead of beside TARGET_ROOT,
-      preventing large outputs from consuming free space on the target drive.
+    - Generated media is written under OUTPUT_ROOT, which may be located on the same
+      filesystem as either source root or on a different filesystem entirely.
     - ERASE_TARGET_FILES and ERASE_ORIGINAL_FILES delete only the matched source media
       files after FFmpeg succeeds, the generated output is validated, and target SRT
       copying completes successfully. Sidecar files and source directories are preserved.
     - Source-file deletion is disabled during DRY_RUN and never occurs when an existing
       output is skipped because OVERWRITE is disabled.
+    - Storage preflight simulates sequential processing and credits ERASE_TARGET_FILES or
+      ERASE_ORIGINAL_FILES only when that source occupies the same filesystem as OUTPUT_ROOT.
+      A source on another drive does not reduce the free-space requirement of the output drive.
+    - Source erasure is credited only after the current output has been fully generated and
+      validated, so the output filesystem must always be able to hold the next complete output.
 """
 
 import json  # Parse FFprobe JSON output.
@@ -76,6 +81,7 @@ LanguageClass = Literal["english", "ptbr"]  # Restrict supported audio language 
 FallbackAudioOrder = tuple[LanguageClass, LanguageClass] | None  # Define the optional source audio order.
 Stream = dict[str, Any]  # Represent one FFprobe stream dictionary.
 MediaInfo = dict[str, Any]  # Represent parsed FFprobe media information.
+MatchedMediaPair = tuple[Path, Path, Path]  # Represent target media, matching original media, and the generated output path.
 
 ORIGINAL_ROOT = Path(r"G:\\Series\\Breaking Bad")  # Preserve the configured lower-quality Dual source root providing PT-BR audio.
 ERASE_ORIGINAL_FILES = False  # Set to True to delete each processed lower-quality original media file only after its new output is safely generated.
@@ -966,6 +972,94 @@ def erase_processed_source_files(target_media: Path, original_media: Path, outpu
         print(f"Erased processed {source_label} media successfully.")  # Confirm successful deletion of the processed source media file.
 
 
+def build_output_media_path(target_media: Path, output_directory: Path | None = None) -> Path:
+    """
+    Build the generated Matroska output path for one target media file.
+
+    :param target_media: Higher-quality target media file whose filename provides the output stem.
+    :param output_directory: Optional destination directory under OUTPUT_ROOT for the generated media file.
+    :return: Generated MKV path.
+    """
+
+    destination_directory = output_directory if output_directory is not None else OUTPUT_ROOT  # Select the dedicated output root or a season-specific subdirectory.
+
+    return destination_directory / f"{target_media.stem}{UPDATED_SUFFIX}.mkv"  # Build a Matroska output path on the configured output drive.
+
+
+def existing_filesystem_path(path: Path) -> Path:
+    """
+    Return the nearest existing path that belongs to the filesystem containing a configured path.
+
+    :param path: File or directory path whose backing filesystem must be identified.
+    :return: Nearest existing path on the same filesystem.
+    """
+
+    storage_probe = path  # Start with the exact configured path so existing outputs and roots resolve directly.
+
+    while not storage_probe.exists() and storage_probe.parent != storage_probe:  # Walk upward until an existing path on the configured filesystem is available.
+        storage_probe = storage_probe.parent  # Move to the nearest existing parent without creating directories or files.
+
+    if not storage_probe.exists():  # Reject a path whose backing filesystem cannot be resolved safely.
+        raise FileNotFoundError(f"Could not resolve filesystem for: {path}")  # Prevent storage calculations against an unknown destination or source filesystem.
+
+    return storage_probe  # Return an existing path whose device identifier and free-space information are reliable.
+
+
+def paths_share_filesystem(first_path: Path, second_path: Path) -> bool:
+    """
+    Determine whether two paths occupy the same backing filesystem.
+
+    :param first_path: First file or directory path to compare.
+    :param second_path: Second file or directory path to compare.
+    :return: True when both paths resolve to the same filesystem device.
+    """
+
+    first_probe = existing_filesystem_path(first_path)  # Resolve an existing path on the first configured filesystem.
+    second_probe = existing_filesystem_path(second_path)  # Resolve an existing path on the second configured filesystem.
+
+    return first_probe.stat().st_dev == second_probe.stat().st_dev  # Compare filesystem device identifiers instead of assuming equal or different drives from path text.
+
+
+def estimated_generated_output_size(target_media: Path) -> int:
+    """
+    Estimate generated output size from the higher-quality target file.
+
+    :param target_media: Higher-quality target media file providing the output video and English audio.
+    :return: Conservative estimated generated MKV size in bytes.
+    """
+
+    return int(target_media.stat().st_size * OUTPUT_SIZE_SAFETY_FACTOR)  # Add the configured safety margin for injected PT-BR audio and Matroska overhead.
+
+
+def validate_media_pair_output_storage(target_media: Path, output_mkv: Path) -> None:
+    """
+    Recheck output-drive capacity immediately before generating one media file.
+
+    :param target_media: Higher-quality target media file used to estimate the next generated output size.
+    :param output_mkv: Generated output path whose filesystem free space must be checked.
+    :return: None.
+    """
+
+    if DRY_RUN:  # Skip runtime capacity enforcement because preview mode does not create any media output.
+        return  # Complete without requiring disk space that DRY_RUN will never consume.
+
+    estimated_output_bytes = estimated_generated_output_size(target_media)  # Estimate the complete temporary space needed before any source can be erased.
+    existing_output_bytes = output_mkv.stat().st_size if output_mkv.is_file() and OVERWRITE else 0  # Credit an existing output only when FFmpeg is configured to replace it.
+    additional_output_bytes = max(0, estimated_output_bytes - existing_output_bytes)  # Estimate new bytes that must be allocated beyond a replaceable existing output.
+    reserve_bytes = MIN_FREE_SPACE_RESERVE_GB * 1024 ** 3  # Convert the configured post-processing free-space reserve from GiB to bytes.
+    storage_probe = existing_filesystem_path(output_mkv)  # Resolve the actual filesystem that will receive the generated output.
+    disk_usage = shutil.disk_usage(storage_probe)  # Read current free space immediately before processing this media pair.
+    required_free_bytes = additional_output_bytes + reserve_bytes  # Require enough temporary space for this output while still preserving the configured reserve.
+
+    if disk_usage.free < required_free_bytes:  # Stop before FFmpeg when actual current capacity cannot safely hold this single generated output.
+        gib = 1024 ** 3  # Define the binary gigabyte divisor used for readable runtime diagnostics.
+        raise RuntimeError(  # Report a pair-specific capacity shortage without relying on earlier deletion assumptions.
+            f"Insufficient current free space for the next generated output under {OUTPUT_ROOT}. "
+            f"Need approximately {required_free_bytes / gib:.2f} GiB including reserve for {output_mkv.name}, "
+            f"but only {disk_usage.free / gib:.2f} GiB is currently free."
+        )
+
+
 def process_media_pair(target_media: Path, original_media: Path, output_directory: Path | None = None) -> None:
     """
     Mux one higher-quality target media file with PT-BR audio from its matching original source and optionally erase processed inputs.
@@ -977,13 +1071,14 @@ def process_media_pair(target_media: Path, original_media: Path, output_director
     """
 
     destination_directory = output_directory if output_directory is not None else OUTPUT_ROOT  # Select the dedicated output root or a season-specific subdirectory.
-    output_mkv = destination_directory / f"{target_media.stem}{UPDATED_SUFFIX}.mkv"  # Build a Matroska output path on the configured output drive.
+    output_mkv = build_output_media_path(target_media, destination_directory)  # Build the generated Matroska path using the shared output-path convention.
 
     if output_mkv.exists() and not OVERWRITE:  # Preserve an existing generated output when overwrite is disabled.
         print(f"\nSkipping existing output: {output_mkv}")  # Report the skipped generated media file.
 
         return  # Stop processing the current media pair.
 
+    validate_media_pair_output_storage(target_media, output_mkv)  # Recheck real free space immediately before this output so prior cleanup failures cannot invalidate the global estimate.
     print("\n" + "=" * 100)  # Separate the current media pair from previous terminal output.
     print(f"Target  : {target_media}")  # Display the higher-quality target media path.
     print(f"Original: {original_media}")  # Display the lower-quality PT-BR source media path.
@@ -1082,30 +1177,36 @@ def process_target_season(target_season: Path, original_season: Path, season_num
             errors.append(f"{target_media}\n{type(exception).__name__}: {exception}")  # Store the episode path and exception details.
 
 
-def matched_target_media_files() -> list[Path]:
+def matched_media_pairs() -> list[MatchedMediaPair]:
     """
-    Return higher-quality target media files that have an unambiguous original counterpart.
+    Return unambiguous target/original media pairs with their generated output paths in processing order.
 
-    :return: Sorted list of target media files expected to generate outputs.
+    :return: Ordered list of target media, matching original media, and generated output path tuples.
     """
 
-    matched_files: list[Path] = []  # Initialize matched target media paths used for storage estimation.
-    target_movies = iter_media_files(TARGET_ROOT)  # Collect direct target movie files when the configured roots use movie layout.
-    original_movies = iter_media_files(ORIGINAL_ROOT)  # Collect direct original movie files when the configured roots use movie layout.
+    matched_pairs: list[MatchedMediaPair] = []  # Initialize matched media pairs used for storage simulation and diagnostics.
+    target_movies = iter_media_files(TARGET_ROOT)  # Collect direct higher-quality target movie files when the configured roots use movie layout.
+    original_movies = iter_media_files(ORIGINAL_ROOT)  # Collect direct lower-quality original movie files when the configured roots use movie layout.
 
     if len(target_movies) == 1 and len(original_movies) == 1:  # Handle the unambiguous direct one-movie layout.
-        matched_files.append(target_movies[0])  # Include the only target movie in the output-size estimate.
+        target_media = target_movies[0]  # Select the only direct higher-quality target movie.
+        original_media = original_movies[0]  # Select the only direct original PT-BR source movie.
+        output_mkv = build_output_media_path(target_media, OUTPUT_ROOT)  # Build the direct movie output path beneath the configured output root.
+        matched_pairs.append((target_media, original_media, output_mkv))  # Retain the complete direct movie pair for ordered storage simulation.
     elif target_movies and original_movies:  # Handle multiple direct movies using only safe filename/stem matches.
-        for target_media in target_movies:  # Inspect each direct target movie candidate.
+        for target_media in target_movies:  # Inspect each direct target movie candidate in the same order used by processing.
             try:  # Ignore ambiguous candidates here because processing will report them with full context.
-                if resolve_original_media(ORIGINAL_ROOT, target_media) is not None:  # Include only direct movies with a safe original counterpart.
-                    matched_files.append(target_media)  # Add the matched direct movie to the output-size estimate.
-            except RuntimeError:  # Defer ambiguous match reporting to the processing phase.
-                continue  # Exclude the unresolved candidate from the storage estimate.
+                original_media = resolve_original_media(ORIGINAL_ROOT, target_media)  # Resolve a safe matching original direct movie.
+
+                if original_media is not None:  # Include only direct movies with an unambiguous original counterpart.
+                    output_mkv = build_output_media_path(target_media, OUTPUT_ROOT)  # Build the direct movie output path beneath the configured output root.
+                    matched_pairs.append((target_media, original_media, output_mkv))  # Add the complete direct movie pair to the ordered storage simulation.
+            except RuntimeError:  # Defer ambiguous direct movie reporting to the processing phase.
+                continue  # Exclude the unresolved candidate from storage simulation.
 
     original_seasons = build_original_season_map()  # Build original season lookup using verbose or compact supported season naming.
 
-    for target_season in sorted(TARGET_ROOT.iterdir(), key=lambda entry: entry.name.casefold()):  # Inspect higher-quality target season directories deterministically.
+    for target_season in sorted(TARGET_ROOT.iterdir(), key=lambda entry: entry.name.casefold()):  # Inspect higher-quality target season directories in the same deterministic order used by processing.
         if not target_season.is_dir():  # Ignore files and other non-directory target-root entries.
             continue  # Continue with the next target-root entry.
 
@@ -1119,54 +1220,120 @@ def matched_target_media_files() -> list[Path]:
         if original_season is None:  # Skip seasons that are not common to both configured roots.
             continue  # Continue with the next target season.
 
-        for target_media in iter_media_files(target_season):  # Inspect target episodes in the common season.
-            try:  # Ignore ambiguous candidates here because processing will report them with full context.
-                if resolve_original_media(original_season, target_media, season_number) is not None:  # Include only episodes with a safe common season/episode source match.
-                    matched_files.append(target_media)  # Add the matched target episode to the output-size estimate.
-            except RuntimeError:  # Defer ambiguous episode reporting to the processing phase.
-                continue  # Exclude the unresolved candidate from the storage estimate.
+        output_season = OUTPUT_ROOT / target_season.name  # Preserve the target season folder name beneath the configured output root.
 
-    return sorted(set(matched_files), key=lambda entry: str(entry).casefold())  # Return deterministic unique target files expected to generate outputs.
+        for target_media in iter_media_files(target_season):  # Inspect target episodes in the same deterministic order used by processing.
+            try:  # Ignore ambiguous candidates here because processing will report them with full context.
+                original_media = resolve_original_media(original_season, target_media, season_number)  # Resolve the matching numeric or descriptive original episode.
+
+                if original_media is not None:  # Include only episodes with a safe common season/episode source match.
+                    output_mkv = build_output_media_path(target_media, output_season)  # Build the generated episode path beneath the matching output season directory.
+                    matched_pairs.append((target_media, original_media, output_mkv))  # Add the complete episode pair to the ordered storage simulation.
+            except RuntimeError:  # Defer ambiguous episode reporting to the processing phase.
+                continue  # Exclude the unresolved candidate from storage simulation.
+
+    return matched_pairs  # Preserve processing order so peak-space simulation matches the real sequential workflow.
+
+
+def matched_target_media_files() -> list[Path]:
+    """
+    Return higher-quality target media files that have an unambiguous original counterpart.
+
+    :return: Ordered list of target media files expected to generate or match outputs.
+    """
+
+    return [target_media for target_media, _, _ in matched_media_pairs()]  # Preserve the compatibility helper while deriving its result from complete matched pairs.
+
 
 
 def validate_output_storage() -> None:
     """
-    Validate that the output drive has enough estimated free space for matched generated media.
+    Validate peak output-drive capacity while accounting for configured sequential source-file erasure.
 
     :return: None.
     """
 
-    matched_files = matched_target_media_files()  # Resolve the higher-quality target files that are expected to produce outputs.
-    target_bytes = sum(media_path.stat().st_size for media_path in matched_files)  # Sum target file sizes as the baseline output-space requirement.
-    estimated_output_bytes = int(target_bytes * OUTPUT_SIZE_SAFETY_FACTOR)  # Add a safety margin for injected PT-BR audio and Matroska overhead.
-    reserve_bytes = MIN_FREE_SPACE_RESERVE_GB * 1024 ** 3  # Convert the configured post-processing free-space reserve from GiB to bytes.
-    storage_probe = OUTPUT_ROOT  # Initialize the path used to query the destination filesystem.
+    matched_pairs = matched_media_pairs()  # Resolve complete target/original/output relationships in the same order used by real processing.
 
-    while not storage_probe.exists() and storage_probe.parent != storage_probe:  # Walk upward until an existing output-drive path is available.
-        storage_probe = storage_probe.parent  # Move to the nearest existing parent directory without creating anything.
-
-    if not storage_probe.exists():  # Reject an output path whose filesystem cannot be resolved safely.
-        raise FileNotFoundError(f"Could not resolve output filesystem for: {OUTPUT_ROOT}")  # Prevent processing without a valid destination drive.
-
-    disk_usage = shutil.disk_usage(storage_probe)  # Read total, used, and free bytes from the output filesystem.
-    required_with_reserve = estimated_output_bytes + reserve_bytes  # Require estimated output capacity while preserving the configured free-space reserve.
-    gib = 1024 ** 3  # Define the binary gigabyte divisor used for readable storage diagnostics.
-
-    print("\nStorage preflight:")  # Announce the destination-drive capacity check.
-    print(f"  Output root             : {OUTPUT_ROOT}")  # Display the dedicated output location.
-    print(f"  Matched target files    : {len(matched_files)}")  # Display how many media files contribute to the estimate.
-    print(f"  Matched target size     : {target_bytes / gib:.2f} GiB")  # Display the exact target-size baseline.
-    print(f"  Estimated output size   : {estimated_output_bytes / gib:.2f} GiB")  # Display the safety-adjusted expected output allocation.
-    print(f"  Current output free     : {disk_usage.free / gib:.2f} GiB")  # Display currently available destination-drive capacity.
-    print(f"  Required free reserve   : {MIN_FREE_SPACE_RESERVE_GB:.2f} GiB")  # Display the free-space reserve preserved after processing.
-
-    if not matched_files:  # Stop when there are no common movie or episode pairs to process.
+    if not matched_pairs:  # Stop when there are no common movie or episode pairs to process.
         raise RuntimeError("No common target/original media pairs were found for the configured roots.")  # Prevent an apparently successful run that produces nothing.
 
-    if disk_usage.free < required_with_reserve:  # Reject processing when the destination could run out of space under the conservative estimate.
-        raise RuntimeError(  # Report the estimated capacity shortfall before FFmpeg creates any large output.
-            f"Insufficient free space under output root {OUTPUT_ROOT}. "
-            f"Need approximately {required_with_reserve / gib:.2f} GiB including reserve, "
+    reserve_bytes = MIN_FREE_SPACE_RESERVE_GB * 1024 ** 3  # Convert the configured post-processing free-space reserve from GiB to bytes.
+    storage_probe = existing_filesystem_path(OUTPUT_ROOT)  # Resolve an existing path on the actual output filesystem without creating anything.
+    disk_usage = shutil.disk_usage(storage_probe)  # Read total, used, and free bytes from the output filesystem before processing starts.
+    running_additional_bytes = 0  # Track net output-filesystem growth relative to the current pre-run filesystem state.
+    peak_additional_bytes = 0  # Track the maximum temporary growth reached before configured source deletion occurs for each pair.
+    target_bytes = 0  # Accumulate target sizes for media pairs that will actually create or overwrite outputs.
+    estimated_output_bytes = 0  # Accumulate conservative generated-output sizes for diagnostic reporting.
+    reclaimable_target_bytes = 0  # Accumulate target bytes that configured deletion will return to the output filesystem.
+    reclaimable_original_bytes = 0  # Accumulate original bytes that configured deletion will return to the output filesystem.
+    replaceable_output_bytes = 0  # Accumulate existing output bytes that OVERWRITE can reclaim before writing replacement contents.
+    pairs_requiring_output = 0  # Count matched pairs that will not be skipped by the existing-output policy.
+
+    for target_media, original_media, output_mkv in matched_pairs:  # Simulate each pair in the same sequential order used by the real mux workflow.
+        if output_mkv.exists() and not OVERWRITE:  # Mirror process_media_pair behavior for existing outputs that are intentionally preserved.
+            continue  # Skipped outputs allocate no new space and never trigger source-file deletion.
+
+        pairs_requiring_output += 1  # Count this pair because FFmpeg is expected to generate or replace its output.
+        current_target_bytes = target_media.stat().st_size  # Read the target size that forms the baseline generated-output estimate.
+        current_estimated_output_bytes = estimated_generated_output_size(target_media)  # Estimate the complete generated output before any post-success deletion.
+        target_bytes += current_target_bytes  # Add this target to the diagnostic baseline total.
+        estimated_output_bytes += current_estimated_output_bytes  # Add this output to the diagnostic conservative total.
+
+        if output_mkv.is_file() and OVERWRITE:  # Account for an existing output that FFmpeg will replace rather than coexist with indefinitely.
+            existing_output_bytes = output_mkv.stat().st_size  # Read currently allocated bytes that can be reclaimed when replacement starts.
+            replaceable_output_bytes += existing_output_bytes  # Track replaceable output capacity for diagnostic reporting.
+            running_additional_bytes -= existing_output_bytes  # Model FFmpeg replacing/truncating the prior output before allocating the new output contents.
+
+        running_additional_bytes += current_estimated_output_bytes  # Model the complete new output existing before either source file is allowed to be erased.
+        peak_additional_bytes = max(peak_additional_bytes, running_additional_bytes)  # Preserve the maximum temporary output-filesystem growth reached so far.
+        reclaimed_source_paths: set[Path] = set()  # Prevent double-crediting when target and original resolve to the same physical source file.
+
+        if ERASE_TARGET_FILES and paths_share_filesystem(target_media, output_mkv):  # Credit target deletion only when it actually frees the filesystem receiving outputs.
+            target_resolved = target_media.resolve()  # Resolve the target source path for duplicate-source accounting.
+
+            if target_resolved != output_mkv.resolve() and target_resolved not in reclaimed_source_paths:  # Exclude unsafe output collisions and duplicate physical source paths.
+                running_additional_bytes -= current_target_bytes  # Model target deletion immediately after this generated output passes validation and subtitle copying.
+                reclaimable_target_bytes += current_target_bytes  # Track target bytes genuinely returned to the output filesystem.
+                reclaimed_source_paths.add(target_resolved)  # Prevent another logical source from crediting the same physical file.
+
+        if ERASE_ORIGINAL_FILES and paths_share_filesystem(original_media, output_mkv):  # Credit original deletion only when it actually frees the filesystem receiving outputs.
+            original_resolved = original_media.resolve()  # Resolve the original source path for duplicate-source accounting.
+
+            if original_resolved != output_mkv.resolve() and original_resolved not in reclaimed_source_paths:  # Exclude unsafe output collisions and duplicate physical source paths.
+                current_original_bytes = original_media.stat().st_size  # Read the lower-quality source size that will be reclaimed after successful processing.
+                running_additional_bytes -= current_original_bytes  # Model original-source deletion after the generated replacement has passed all safety checks.
+                reclaimable_original_bytes += current_original_bytes  # Track original bytes genuinely returned to the output filesystem.
+                reclaimed_source_paths.add(original_resolved)  # Prevent double-crediting the same physical source file.
+
+    required_with_reserve = max(0, peak_additional_bytes) + reserve_bytes  # Require only the simulated peak additional allocation plus the configured free-space reserve.
+    gib = 1024 ** 3  # Define the binary gigabyte divisor used for readable storage diagnostics.
+
+    print("\nStorage preflight:")  # Announce the destination-drive capacity simulation.
+    print(f"  Output root             : {OUTPUT_ROOT}")  # Display the configured generated-output location.
+    print(f"  Matched media pairs     : {len(matched_pairs)}")  # Display all unambiguous common pairs regardless of existing-output skipping.
+    print(f"  Pairs requiring output  : {pairs_requiring_output}")  # Display how many pairs actually require allocation under the overwrite policy.
+    print(f"  Matched target size     : {target_bytes / gib:.2f} GiB")  # Display target sizes for outputs that will actually be generated or replaced.
+    print(f"  Estimated output total  : {estimated_output_bytes / gib:.2f} GiB")  # Display total output bytes without incorrectly requiring all of them as additional free space.
+    print(f"  ERASE_TARGET_FILES      : {ERASE_TARGET_FILES}")  # Display whether successful target files are configured for deletion.
+    print(f"  ERASE_ORIGINAL_FILES    : {ERASE_ORIGINAL_FILES}")  # Display whether successful original files are configured for deletion.
+    print(f"  Target reclaim on output: {reclaimable_target_bytes / gib:.2f} GiB")  # Display target deletion capacity that genuinely helps the output filesystem.
+    print(f"  Original reclaim output : {reclaimable_original_bytes / gib:.2f} GiB")  # Display original deletion capacity that genuinely helps the output filesystem.
+    print(f"  Replaceable outputs     : {replaceable_output_bytes / gib:.2f} GiB")  # Display existing output capacity reusable when OVERWRITE is enabled.
+    print(f"  Peak additional storage : {max(0, peak_additional_bytes) / gib:.2f} GiB")  # Display the maximum simulated extra allocation before per-pair cleanup.
+    print(f"  Current output free     : {disk_usage.free / gib:.2f} GiB")  # Display currently available destination-filesystem capacity.
+    print(f"  Required free reserve   : {MIN_FREE_SPACE_RESERVE_GB:.2f} GiB")  # Display the free-space reserve preserved throughout processing.
+    print(f"  Required peak free      : {required_with_reserve / gib:.2f} GiB")  # Display the actual peak free-space requirement after erasure-aware simulation.
+
+    if DRY_RUN:  # Preview mode creates no outputs and deletes no sources, so capacity must not block command inspection.
+        print("  Storage enforcement     : skipped because DRY_RUN=True")  # Explain why the calculated real-run estimate is informational only.
+
+        return  # Complete preview-mode preflight without rejecting insufficient real-run capacity.
+
+    if disk_usage.free < required_with_reserve:  # Reject processing only when the erasure-aware peak cannot fit while preserving the configured reserve.
+        raise RuntimeError(  # Report the simulated peak capacity shortfall before FFmpeg creates any large output.
+            f"Insufficient peak free space under output root {OUTPUT_ROOT}. "
+            f"Need approximately {required_with_reserve / gib:.2f} GiB including reserve after accounting for configured source erasure, "
             f"but only {disk_usage.free / gib:.2f} GiB is currently free."
         )
 
