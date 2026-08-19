@@ -82,7 +82,7 @@ class BackgroundColors:  # Colors for the terminal
 
 # Execution Constants:
 VERBOSE = False  # Set to True to output verbose messages
-INPUT_DIRS = [f"E:/Movies/", f"F:/Movies/"]  # Root directories recursively scanned for movie directories
+INPUT_DIRS = [f"E:/Movies/", f"F:/Movies/", f"G:/Series/"]  # Root directories recursively scanned for movie directories
 OUTPUT_DIR = Path("./Outputs/")  # Directory receiving one JSON corruption report for each configured input root
 FFMPEG = "ffmpeg"  # FFmpeg executable name or full path used for integrity scans
 MAX_ERROR_LINES_PER_FILE = 500  # Maximum FFmpeg error lines retained per corrupted media file in the JSON report
