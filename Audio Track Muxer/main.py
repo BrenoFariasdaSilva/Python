@@ -5,26 +5,31 @@ Audio Track Muxer
 Author      : Breno Farias da Silva
 Created     : 2026-07-12
 Description :
-    Muxes video and attachments from higher-resolution target media files with
-    English and PT-BR audio plus non-forced subtitles from matching original
-    media files. Matching external SRT files are copied beside each output.
+    Muxes video, English audio, attachments, chapters, and non-forced subtitles
+    from higher-quality target media files with PT-BR audio from matching lower-
+    quality original media files. Matching target external SRT files are copied
+    beside each generated output.
 
     Key features include:
         - Direct movie pairing and season/episode matching across configured roots.
-        - English and PT-BR audio detection with configurable order fallback.
-        - Non-forced internal subtitle preservation with normalized metadata.
-        - External SRT discovery, collision-safe naming, and metadata copying.
-        - Dry-run support, overwrite control, and partial-output cleanup.
+        - Season matching for names such as "Season 02" and "S02".
+        - Episode matching for names such as "01.mp4" and "S02E01 - Title.mkv".
+        - Higher-quality target English audio preservation with PT-BR audio injection.
+        - Non-forced target subtitle preservation with normalized metadata.
+        - External target SRT discovery, collision-safe naming, and metadata copying.
+        - Dedicated output root to avoid consuming target-drive free space.
+        - Dry-run support, overwrite control, storage preflight, and partial-output cleanup.
 
 Usage:
-    1. Configure ORIGINAL_ROOT, TARGET_ROOT, DRY_RUN, OVERWRITE, and the optional
-       FALLBACK_ORIGINAL_AUDIO_ORDER value.
+    1. Configure ORIGINAL_ROOT, TARGET_ROOT, OUTPUT_ROOT, DRY_RUN, OVERWRITE, and
+       the optional FALLBACK_ORIGINAL_AUDIO_ORDER value.
     2. Ensure FFmpeg and FFprobe are available through FFMPEG and FFPROBE.
     3. Execute the script with: python main.py
 
 Outputs:
-    - One <media>-updated.mkv file beside each processed target media file.
-    - Matching external SRT files renamed beside the generated MKV output.
+    - One <media>-updated.mkv file under OUTPUT_ROOT for each matched target media file.
+    - Series outputs preserve the target season directory name under OUTPUT_ROOT.
+    - Matching target external SRT files are copied beside each generated MKV output.
 
 Dependencies:
     - Python >= 3.10.
@@ -34,12 +39,19 @@ Dependencies:
 Assumptions & Notes:
     - Movie roots may contain one supported media file directly in each configured
       root; those files are paired even when their filenames and extensions differ.
-    - Series season directory names contain a value such as "Season 01", and
-      matching original and target episodes use equal filenames, ignoring case.
-    - The original media file contains identifiable English and PT-BR audio tracks or
-      FALLBACK_ORIGINAL_AUDIO_ORDER is configured.
-    - Generated media always uses MKV so copied video, audio, subtitle, attachment, and
-      chapter streams are not constrained by the target input container format.
+    - Series season directory names may use forms such as "Season 02" or "S02".
+    - Series episode filenames may use numeric forms such as "01.mp4" or explicit
+      forms such as "Breaking Bad - S02E01 - Seven Thirty-Seven.mkv".
+    - Only seasons and episodes present in both roots are processed.
+    - The higher-quality target provides video and English audio; the original source
+      provides PT-BR audio. Existing target English audio is never replaced by the
+      lower-quality original English audio.
+    - FALLBACK_ORIGINAL_AUDIO_ORDER is used only when PT-BR cannot be identified
+      from original-source audio metadata.
+    - Generated media always uses MKV so copied video, audio, subtitle, attachment,
+      and chapter streams are not constrained by the target input container format.
+    - Generated media is written under OUTPUT_ROOT instead of beside TARGET_ROOT,
+      preventing large outputs from consuming free space on the target drive.
 """
 
 import json  # Parse FFprobe JSON output.
@@ -58,14 +70,18 @@ FallbackAudioOrder = tuple[LanguageClass, LanguageClass] | None  # Define the op
 Stream = dict[str, Any]  # Represent one FFprobe stream dictionary.
 MediaInfo = dict[str, Any]  # Represent parsed FFprobe media information.
 
-ORIGINAL_ROOT = Path(r"E:/Movies/Dual/Sem Dor Sem Ganho 2013 720p Dual/")  # Preserve the configured original media root.
-TARGET_ROOT = Path(r"F:/Movies/Dublado/Sem Dor, Sem Ganho 2013 1080p Dublado/")  # Preserve the configured target media root.
+ORIGINAL_ROOT = Path(r"G:\\Series\\Breaking Bad")  # Preserve the configured lower-quality Dual source root providing PT-BR audio.
+TARGET_ROOT = Path(r"D:\\Sem Backup\\Download\\Torrent\\Completed\\Breaking Bad 1080p")  # Preserve the configured higher-quality target root providing video and English audio.
+OUTPUT_ROOT = Path(r"G:\\Series\\Breaking Bad 1080p Dual")  # Store generated high-quality Dual outputs on G: instead of consuming limited D: free space.
 FFMPEG = "ffmpeg"  # Select the configured FFmpeg executable.
 FFPROBE = "ffprobe"  # Select the configured FFprobe executable.
 UPDATED_SUFFIX = "-updated"  # Append the configured suffix to generated MKV files.
 DRY_RUN = False  # Execute commands instead of only printing planned operations.
 OVERWRITE = False  # Preserve existing generated outputs when disabled.
-FALLBACK_ORIGINAL_AUDIO_ORDER: FallbackAudioOrder = None  # Preserve automatic audio language detection by default.
+FALLBACK_ORIGINAL_AUDIO_ORDER: FallbackAudioOrder = None  # Preserve automatic PT-BR source-audio detection by default.
+MIN_FREE_SPACE_RESERVE_GB = 10  # Preserve at least this many GiB after the estimated output allocation.
+OUTPUT_SIZE_SAFETY_FACTOR = 1.10  # Reserve ten percent above matched target sizes for the injected PT-BR audio and container overhead.
+
 
 SUPPORTED_MEDIA_EXTENSIONS = frozenset(  # Define input video container extensions accepted for source and target media files.
     {
@@ -106,7 +122,6 @@ def normalize_text(value: str) -> str:
     return normalized_value.lower().strip()  # Return normalized lowercase text.
 
 
-
 def normalized_token_text(value: str) -> str:
     """
     Convert normalized text into a space-delimited token sequence.
@@ -119,7 +134,6 @@ def normalized_token_text(value: str) -> str:
     token_text = re.sub(r"[^a-z0-9]+", " ", normalized_value)  # Replace punctuation and separators with spaces.
 
     return " ".join(token_text.split())  # Collapse repeated whitespace between tokens.
-
 
 
 def contains_token(value: str, token: str) -> bool:
@@ -137,7 +151,6 @@ def contains_token(value: str, token: str) -> bool:
     return normalized_token in normalized_value  # Match only complete tokens or token phrases.
 
 
-
 def stream_tags(stream: Stream) -> Stream:
     """
     Return a stream metadata tag dictionary.
@@ -151,7 +164,6 @@ def stream_tags(stream: Stream) -> Stream:
     return cast(Stream, tags) if isinstance(tags, dict) else {}  # Return only dictionary-shaped tags.
 
 
-
 def stream_disposition(stream: Stream) -> Stream:
     """
     Return a stream disposition dictionary.
@@ -163,7 +175,6 @@ def stream_disposition(stream: Stream) -> Stream:
     disposition = stream.get("disposition")  # Read the raw stream disposition value.
 
     return cast(Stream, disposition) if isinstance(disposition, dict) else {}  # Return only dictionary-shaped dispositions.
-
 
 
 def stream_text(stream: Stream) -> str:
@@ -187,7 +198,6 @@ def stream_text(stream: Stream) -> str:
     return normalize_text(combined_text)  # Return normalized searchable metadata.
 
 
-
 def stream_language(stream: Stream) -> str:
     """
     Return the normalized language tag from a stream.
@@ -200,7 +210,6 @@ def stream_language(stream: Stream) -> str:
     language = tags.get("language") or tags.get("LANGUAGE") or ""  # Select the available language tag variant.
 
     return normalize_text(str(language))  # Return the normalized language value.
-
 
 
 def classify_language(stream_or_text: Stream | str | Path) -> LanguageClass | None:
@@ -236,7 +245,6 @@ def classify_language(stream_or_text: Stream | str | Path) -> LanguageClass | No
     return None  # Report unsupported or absent language metadata.
 
 
-
 def is_forced(stream_or_path: Stream | str | Path) -> bool:
     """
     Determine whether a subtitle stream or external path is marked as forced.
@@ -260,7 +268,6 @@ def is_forced(stream_or_path: Stream | str | Path) -> bool:
     return any(contains_token(text, token) for token in forced_tokens)  # Match complete forced-subtitle markers.
 
 
-
 def is_commentary_audio(stream: Stream) -> bool:
     """
     Determine whether an audio stream contains commentary metadata.
@@ -275,7 +282,6 @@ def is_commentary_audio(stream: Stream) -> bool:
     return any(contains_token(text, token) for token in commentary_tokens)  # Match complete commentary markers.
 
 
-
 def output_language_metadata(language_class: LanguageClass) -> tuple[str, str]:
     """
     Return FFmpeg language metadata for a supported language class.
@@ -288,7 +294,6 @@ def output_language_metadata(language_class: LanguageClass) -> tuple[str, str]:
         return "eng", "English"  # Return normalized English metadata.
 
     return "por", "PT-BR"  # Return normalized Brazilian Portuguese metadata.
-
 
 
 def subtitle_metadata(stream: Stream, fallback_number: int) -> tuple[str, str]:
@@ -326,7 +331,6 @@ def subtitle_metadata(stream: Stream, fallback_number: int) -> tuple[str, str]:
     return "und", f"Subtitle {fallback_number}"  # Return deterministic fallback subtitle metadata.
 
 
-
 def stream_index(stream: Stream, media_path: Path) -> int:
     """
     Return a validated global FFprobe stream index.
@@ -342,7 +346,6 @@ def stream_index(stream: Stream, media_path: Path) -> int:
         raise RuntimeError(f"Invalid stream index in media file: {media_path}")  # Reject unusable FFmpeg stream mappings.
 
     return index  # Return the validated global stream index.
-
 
 
 def probe_media(path: Path) -> MediaInfo:
@@ -378,7 +381,6 @@ def probe_media(path: Path) -> MediaInfo:
     return cast(MediaInfo, parsed_output)  # Return the validated media information dictionary.
 
 
-
 def extract_streams(media_info: MediaInfo, media_path: Path) -> list[Stream]:
     """
     Extract validated stream dictionaries from FFprobe media information.
@@ -401,7 +403,6 @@ def extract_streams(media_info: MediaInfo, media_path: Path) -> list[Stream]:
     return streams  # Return validated FFprobe stream dictionaries.
 
 
-
 def format_command(command: list[str]) -> str:
     """
     Format a subprocess argument list for readable terminal output.
@@ -413,7 +414,6 @@ def format_command(command: list[str]) -> str:
     formatted_parts = [f'"{part}"' if any(character.isspace() for character in part) else part for part in command]  # Quote arguments containing whitespace.
 
     return " ".join(formatted_parts)  # Join command arguments for display.
-
 
 
 def run_command(command: list[str]) -> None:
@@ -435,7 +435,6 @@ def run_command(command: list[str]) -> None:
     subprocess.run(command, check=True)  # Execute the command and propagate unsuccessful exit status.
 
 
-
 def season_key(path: Path) -> int | None:
     """
     Extract a numeric season identifier from a directory name.
@@ -444,13 +443,50 @@ def season_key(path: Path) -> int | None:
     :return: Parsed season number or None when the name has no season identifier.
     """
 
-    match = re.search(r"season\s*0*(\d+)", path.name, re.IGNORECASE)  # Locate a season number in the directory name.
+    season_match = re.search(r"season\s*0*(\d+)", path.name, re.IGNORECASE)  # Locate verbose season names such as "Breaking Bad - Season 02 2009 720p Dual".
 
-    if match is None:  # Handle directories without a recognizable season number.
-        return None  # Report that no season key was found.
+    if season_match is not None:  # Prefer an explicit "Season XX" identifier when available.
+        return int(season_match.group(1))  # Return the parsed verbose season number.
 
-    return int(match.group(1))  # Return the parsed numeric season key.
+    short_match = re.search(r"(?:^|[^a-z0-9])s\s*0*(\d+)(?:[^0-9]|$)", path.name, re.IGNORECASE)  # Locate compact season names such as "S02".
 
+    if short_match is not None:  # Handle target directories using compact season notation.
+        return int(short_match.group(1))  # Return the parsed compact season number.
+
+    return None  # Report that no supported season identifier was found.
+
+
+def episode_key(path: Path, expected_season: int | None = None) -> int | None:
+    """
+    Extract a numeric episode identifier from a media filename.
+
+    :param path: Media file path whose filename identifies an episode.
+    :param expected_season: Optional season number used to reject an SxxExx identifier from another season.
+    :return: Parsed episode number or None when the filename has no supported episode identifier.
+    """
+
+    explicit_match = re.search(r"s\s*0*(\d+)\s*e\s*0*(\d+)", path.stem, re.IGNORECASE)  # Locate explicit identifiers such as "S02E01" inside descriptive target filenames.
+
+    if explicit_match is not None:  # Prefer season-aware episode identifiers when available.
+        detected_season = int(explicit_match.group(1))  # Parse the season number embedded in the media filename.
+        detected_episode = int(explicit_match.group(2))  # Parse the episode number embedded in the media filename.
+
+        if expected_season is not None and detected_season != expected_season:  # Reject a filename whose explicit season conflicts with its containing matched season.
+            return None  # Prevent cross-season episode pairing.
+
+        return detected_episode  # Return the explicit episode number.
+
+    episode_match = re.search(r"(?:^|[^a-z0-9])e\s*0*(\d+)(?:[^0-9]|$)", path.stem, re.IGNORECASE)  # Locate standalone episode identifiers such as "E01".
+
+    if episode_match is not None:  # Handle filenames that identify only the episode number.
+        return int(episode_match.group(1))  # Return the standalone episode number.
+
+    numeric_stem = path.stem.strip()  # Normalize numeric-only source filenames such as "01.mp4".
+
+    if numeric_stem.isdigit():  # Accept source episodes represented only by their sequential number.
+        return int(numeric_stem)  # Return the numeric source episode number.
+
+    return None  # Report that no supported episode identifier was found.
 
 
 def build_original_season_map() -> dict[int, Path]:
@@ -474,7 +510,6 @@ def build_original_season_map() -> dict[int, Path]:
     return seasons  # Return the complete original season mapping.
 
 
-
 def iter_media_files(directory: Path, include_updated: bool = False) -> list[Path]:
     """
     Return sorted supported media files from a directory.
@@ -492,14 +527,14 @@ def iter_media_files(directory: Path, include_updated: bool = False) -> list[Pat
     return sorted(media_files, key=lambda entry: entry.name.casefold())  # Return deterministic case-insensitive filename ordering.
 
 
-
-def resolve_original_media(original_directory: Path, target_media: Path) -> Path | None:
+def resolve_original_media(original_directory: Path, target_media: Path, season_number: int | None = None) -> Path | None:
     """
-    Resolve the original media file matching a target filename or stem inside one directory.
+    Resolve the original media file matching a target filename, stem, or episode number.
 
     :param original_directory: Original media directory containing source media files.
     :param target_media: Target media file whose source counterpart is required.
-    :return: Matching original media path or None when no match exists.
+    :param season_number: Optional matched season number used for episode-number resolution.
+    :return: Matching original media path or None when no unambiguous match exists.
     """
 
     exact_match = original_directory / target_media.name  # Build the original path using the exact target filename and extension.
@@ -523,73 +558,102 @@ def resolve_original_media(original_directory: Path, target_media: Path) -> Path
     if len(matching_stems) > 1:  # Reject ambiguous same-stem files across multiple source container formats.
         raise RuntimeError(f"Multiple original files match target media stem: {target_media}")  # Prevent guessing between duplicate source representations.
 
-    return matching_stems[0] if matching_stems else None  # Return the unique same-stem match when available.
+    if matching_stems:  # Prefer a unique same-stem match before attempting series-specific episode matching.
+        return matching_stems[0]  # Return the unique same-stem source media file.
+
+    target_episode = episode_key(target_media, season_number)  # Extract the target episode number from names such as "Breaking Bad - S02E01 - Title.mkv".
+
+    if target_episode is None:  # Stop when the target filename provides no safe episode identifier.
+        return None  # Report that no supported source match could be resolved.
+
+    matching_episodes = [candidate for candidate in original_files if episode_key(candidate, season_number) == target_episode]  # Match numeric source filenames such as "01.mp4" to descriptive SxxExx target filenames.
+
+    if len(matching_episodes) > 1:  # Reject duplicate source candidates for the same season episode number.
+        raise RuntimeError(f"Multiple original files match target episode S{season_number:02d}E{target_episode:02d}: {target_media}" if season_number is not None else f"Multiple original files match target episode {target_episode}: {target_media}")  # Prevent selecting an arbitrary source episode.
+
+    return matching_episodes[0] if matching_episodes else None  # Return the unique episode-number match when available.
 
 
-
-def select_audio_tracks(original_media: Path, streams: list[Stream]) -> list[Stream]:
+def select_target_english_audio_track(target_media: Path, streams: list[Stream]) -> Stream:
     """
-    Select English and PT-BR non-commentary audio streams in output order.
+    Select the higher-quality English non-commentary audio stream from the target media.
+
+    :param target_media: Higher-quality target media path used in validation errors.
+    :param streams: FFprobe stream dictionaries from the target media file.
+    :return: Selected target English audio stream.
+    """
+
+    audio_streams = [stream for stream in streams if stream.get("codec_type") == "audio" and not is_commentary_audio(stream)]  # Retain non-commentary target audio streams.
+    english_streams = [stream for stream in audio_streams if classify_language(stream) == "english"]  # Collect target audio streams explicitly identified as English.
+
+    if english_streams:  # Prefer the first explicitly identified English target audio stream.
+        return english_streams[0]  # Preserve the highest-priority target English stream in source order.
+
+    if len(audio_streams) == 1:  # Handle common English-only target files whose single audio stream lacks useful language metadata.
+        return audio_streams[0]  # Safely treat the only available target audio stream as the English track.
+
+    debug_lines: list[str] = []  # Initialize diagnostic descriptions for ambiguous target audio layouts.
+
+    for stream in audio_streams:  # Describe every eligible target audio stream for the error report.
+        tags = stream_tags(stream)  # Resolve the stream tag dictionary.
+        debug_lines.append(  # Add one diagnostic line for the current target audio stream.
+            f"index={stream.get('index')} "  # Include the global stream index.
+            f"codec={stream.get('codec_name')} "  # Include the audio codec name.
+            f"language={tags.get('language') or tags.get('LANGUAGE')} "  # Include the available language tag.
+            f"title={tags.get('title') or tags.get('TITLE')}"  # Include the available track title.
+        )
+
+    detected_streams = "\n".join(debug_lines) if debug_lines else "No eligible audio streams were detected."  # Serialize target audio diagnostics.
+    raise RuntimeError(  # Reject targets where preserving the correct high-quality English track would require guessing.
+        f"Could not identify the target English audio track in:\n"  # Describe the target-language detection failure.
+        f"{target_media}\n\n"  # Include the affected higher-quality target path.
+        f"Detected target audio streams:\n{detected_streams}"  # Include stream metadata diagnostics.
+    )
+
+
+def select_original_ptbr_audio_track(original_media: Path, streams: list[Stream]) -> Stream:
+    """
+    Select the PT-BR non-commentary audio stream from the lower-quality original media.
 
     :param original_media: Original media path used in validation errors.
     :param streams: FFprobe stream dictionaries from the original media file.
-    :return: English and PT-BR audio streams in the required output order.
+    :return: Selected original PT-BR audio stream.
     """
 
-    audio_streams = [stream for stream in streams if stream.get("codec_type") == "audio" and not is_commentary_audio(stream)]  # Retain non-commentary audio streams.
-    english_stream: Stream | None = None  # Initialize the detected English audio stream.
-    ptbr_stream: Stream | None = None  # Initialize the detected Brazilian Portuguese audio stream.
+    audio_streams = [stream for stream in streams if stream.get("codec_type") == "audio" and not is_commentary_audio(stream)]  # Retain non-commentary source audio streams.
+    ptbr_streams = [stream for stream in audio_streams if classify_language(stream) == "ptbr"]  # Collect source streams explicitly identified as Brazilian Portuguese.
 
-    for stream in audio_streams:  # Inspect each eligible audio stream in source order.
-        language_class = classify_language(stream)  # Classify the stream language metadata.
+    if ptbr_streams:  # Prefer metadata-based PT-BR detection whenever available.
+        return ptbr_streams[0]  # Return the first detected PT-BR source stream.
 
-        if language_class == "english" and english_stream is None:  # Retain the first detected English stream.
-            english_stream = stream  # Store the English stream selection.
-        elif language_class == "ptbr" and ptbr_stream is None:  # Retain the first detected Brazilian Portuguese stream.
-            ptbr_stream = stream  # Store the Brazilian Portuguese stream selection.
+    if FALLBACK_ORIGINAL_AUDIO_ORDER is not None:  # Apply the configured deterministic source order only when metadata cannot identify PT-BR.
+        if FALLBACK_ORIGINAL_AUDIO_ORDER not in {("english", "ptbr"), ("ptbr", "english")}:  # Validate the supported fallback configurations.
+            raise RuntimeError("Invalid FALLBACK_ORIGINAL_AUDIO_ORDER. Use None, ('english', 'ptbr'), or ('ptbr', 'english').")  # Reject unsupported fallback values.
 
-    if english_stream is None or ptbr_stream is None:  # Handle incomplete automatic language detection.
-        if FALLBACK_ORIGINAL_AUDIO_ORDER is not None:  # Apply the configured deterministic source order.
-            if FALLBACK_ORIGINAL_AUDIO_ORDER not in {("english", "ptbr"), ("ptbr", "english")}:  # Validate the supported fallback configurations.
-                raise RuntimeError("Invalid FALLBACK_ORIGINAL_AUDIO_ORDER. Use None, ('english', 'ptbr'), or ('ptbr', 'english').")  # Reject unsupported fallback values.
+        if len(audio_streams) < 2:  # Require both expected fallback positions before selecting PT-BR by position.
+            raise RuntimeError(f"Not enough audio tracks in original file: {original_media}")  # Reject incomplete source audio layouts.
 
-            if len(audio_streams) < 2:  # Validate that both fallback positions exist.
-                raise RuntimeError(f"Not enough audio tracks in original file: {original_media}")  # Reject incomplete source audio layouts.
+        ptbr_position = FALLBACK_ORIGINAL_AUDIO_ORDER.index("ptbr")  # Resolve whether PT-BR is the first or second eligible source audio track.
 
-            first_stream, second_stream = audio_streams[0], audio_streams[1]  # Select the first two eligible source audio streams.
+        return audio_streams[ptbr_position]  # Return the PT-BR source stream selected from the configured deterministic order.
 
-            if FALLBACK_ORIGINAL_AUDIO_ORDER == ("english", "ptbr"):  # Apply English-first fallback ordering.
-                english_stream, ptbr_stream = first_stream, second_stream  # Assign both streams from the configured order.
-            else:  # Apply Brazilian Portuguese-first fallback ordering.
-                ptbr_stream, english_stream = first_stream, second_stream  # Assign both streams from the configured order.
+    debug_lines: list[str] = []  # Initialize diagnostic descriptions for unresolved source audio layouts.
 
-    if english_stream is None or ptbr_stream is None:  # Handle unresolved required audio languages.
-        debug_lines: list[str] = []  # Initialize diagnostic stream descriptions.
-
-        for stream in audio_streams:  # Describe every eligible audio stream for the error report.
-            tags = stream_tags(stream)  # Resolve the stream tag dictionary.
-            debug_lines.append(  # Add one diagnostic line for the current stream.
-                f"index={stream.get('index')} "  # Include the global stream index.
-                f"codec={stream.get('codec_name')} "  # Include the audio codec name.
-                f"language={tags.get('language') or tags.get('LANGUAGE')} "  # Include the available language tag.
-                f"title={tags.get('title') or tags.get('TITLE')}"  # Include the available track title.
-            )
-
-        detected_streams = "\n".join(debug_lines) if debug_lines else "No eligible audio streams were detected."  # Serialize detected stream diagnostics.
-        raise RuntimeError(  # Report missing required language tracks.
-            f"Could not detect both English and PT-BR audio tracks in:\n"  # Describe the language detection failure.
-            f"{original_media}\n\n"  # Include the affected original media path.
-            f"Detected audio streams:\n{detected_streams}"  # Include stream metadata diagnostics.
+    for stream in audio_streams:  # Describe every eligible source audio stream for the error report.
+        tags = stream_tags(stream)  # Resolve the stream tag dictionary.
+        debug_lines.append(  # Add one diagnostic line for the current source audio stream.
+            f"index={stream.get('index')} "  # Include the global stream index.
+            f"codec={stream.get('codec_name')} "  # Include the audio codec name.
+            f"language={tags.get('language') or tags.get('LANGUAGE')} "  # Include the available language tag.
+            f"title={tags.get('title') or tags.get('TITLE')}"  # Include the available track title.
         )
 
-    english_index = stream_index(english_stream, original_media)  # Validate the selected English global stream index.
-    ptbr_index = stream_index(ptbr_stream, original_media)  # Validate the selected Brazilian Portuguese global stream index.
-
-    if english_index == ptbr_index:  # Prevent duplicate mappings of one source audio stream.
-        raise RuntimeError(f"English and PT-BR resolved to the same stream in: {original_media}")  # Reject an invalid duplicate selection.
-
-    return [english_stream, ptbr_stream]  # Return English first and Brazilian Portuguese second.
-
+    detected_streams = "\n".join(debug_lines) if debug_lines else "No eligible audio streams were detected."  # Serialize source audio diagnostics.
+    raise RuntimeError(  # Reject unresolved PT-BR source layouts rather than copying the wrong language.
+        f"Could not identify the PT-BR audio track in:\n"  # Describe the source-language detection failure.
+        f"{original_media}\n\n"  # Include the affected original source path.
+        f"Detected original audio streams:\n{detected_streams}"  # Include stream metadata diagnostics.
+    )
 
 
 def select_subtitle_tracks(streams: list[Stream]) -> list[Stream]:
@@ -603,7 +667,6 @@ def select_subtitle_tracks(streams: list[Stream]) -> list[Stream]:
     subtitle_streams = [stream for stream in streams if stream.get("codec_type") == "subtitle" and not is_forced(stream)]  # Retain non-forced subtitle streams.
 
     return subtitle_streams  # Return subtitles in their original stream order.
-
 
 
 def matching_external_srts(original_media: Path) -> list[Path]:
@@ -636,55 +699,55 @@ def matching_external_srts(original_media: Path) -> list[Path]:
     return sorted(candidates, key=lambda entry: entry.name.casefold())  # Return deterministic case-insensitive filename ordering.
 
 
-
-def external_subtitle_destination(output_mkv: Path, subtitle_path: Path, subtitle_number: int, subtitle_count: int) -> Path:
+def external_subtitle_destination(media_path: Path, output_mkv: Path, subtitle_path: Path, subtitle_number: int, subtitle_count: int) -> Path:
     """
     Build the preferred destination path for an external subtitle file.
 
+    :param media_path: Target media path whose filename prefix identifies the subtitle suffix.
     :param output_mkv: Generated MKV path that determines the destination stem.
-    :param subtitle_path: Source external subtitle path used for language classification.
+    :param subtitle_path: Source external subtitle path used for destination naming.
     :param subtitle_number: One-based subtitle position used for fallback naming.
     :param subtitle_count: Total number of matching external subtitles.
     :return: Preferred destination SRT path.
     """
 
-    if subtitle_count == 1:  # Preserve the simple output stem for a single external subtitle.
+    media_stem = media_path.stem  # Preserve the target media filename stem used to identify an external subtitle suffix.
+    subtitle_stem = subtitle_path.stem  # Read the external subtitle filename without its .srt extension.
+
+    if subtitle_stem.casefold().startswith(media_stem.casefold()):  # Preserve target subtitle suffixes such as ".pt-BR" when present.
+        source_suffix = subtitle_stem[len(media_stem):]  # Extract the exact suffix following the target media stem.
+    else:  # Handle an unexpected associated subtitle naming shape defensively.
+        source_suffix = ""  # Fall back to deterministic generated naming.
+
+    if source_suffix:  # Preserve meaningful target-language and role suffixes when available.
+        destination_name = f"{output_mkv.stem}{source_suffix}.srt"  # Rebuild the subtitle filename around the generated MKV stem.
+    elif subtitle_count == 1:  # Preserve the simple output stem for a single external subtitle without a source suffix.
         destination_name = f"{output_mkv.stem}.srt"  # Build the single-subtitle destination filename.
-    else:  # Add language or positional metadata when multiple subtitles exist.
-        language_class = classify_language(subtitle_path.name)  # Classify language tokens from the source filename.
-
-        if language_class == "english":  # Handle an English external subtitle filename.
-            clean_name = "English"  # Select the normalized English title.
-        elif language_class == "ptbr":  # Handle a Brazilian Portuguese external subtitle filename.
-            clean_name = "PT-BR"  # Select the normalized Brazilian Portuguese title.
-        else:  # Handle unknown external subtitle languages.
-            clean_name = f"Subtitle-{subtitle_number}"  # Build a deterministic positional title.
-
-        destination_name = f"{output_mkv.stem}.{clean_name}.srt"  # Build the multi-subtitle destination filename.
+    else:  # Add positional metadata when multiple subtitle files provide no reusable suffix.
+        destination_name = f"{output_mkv.stem}.Subtitle-{subtitle_number}.srt"  # Build a deterministic multi-subtitle destination filename.
 
     return output_mkv.parent / destination_name  # Return the preferred destination path.
 
 
-
-def copy_external_srts(original_media: Path, output_mkv: Path) -> None:
+def copy_external_srts(target_media: Path, output_mkv: Path) -> None:
     """
-    Copy matching external SRT files beside a generated MKV output.
+    Copy matching target external SRT files beside a generated MKV output.
 
-    :param original_media: Original media path used to discover source SRT files.
+    :param target_media: Higher-quality target media path used to discover synchronized external SRT files.
     :param output_mkv: Generated MKV path used for destination naming.
     :return: None.
     """
 
-    subtitle_paths = matching_external_srts(original_media)  # Discover associated non-forced external SRT files.
+    subtitle_paths = matching_external_srts(target_media)  # Discover associated non-forced target SRT files already synchronized to the higher-quality release.
 
-    if not subtitle_paths:  # Stop when the media file has no matching external subtitles.
+    if not subtitle_paths:  # Stop when the target media file has no matching external subtitles.
         return  # Complete without creating subtitle files.
 
-    print("\nExternal SRT files to copy:")  # Announce external subtitle copy operations.
+    print("\nExternal target SRT files to copy:")  # Announce external target subtitle copy operations.
     used_destinations: set[Path] = set()  # Track destinations selected during the current media file.
 
-    for subtitle_number, subtitle_path in enumerate(subtitle_paths, start=1):  # Process external subtitles in deterministic order.
-        destination = external_subtitle_destination(output_mkv, subtitle_path, subtitle_number, len(subtitle_paths))  # Build the preferred destination path.
+    for subtitle_number, subtitle_path in enumerate(subtitle_paths, start=1):  # Process external target subtitles in deterministic order.
+        destination = external_subtitle_destination(target_media, output_mkv, subtitle_path, subtitle_number, len(subtitle_paths))  # Build the preferred destination path preserving target subtitle suffixes.
         collision_number = 2  # Initialize the alternate filename counter.
 
         while destination in used_destinations or (destination.exists() and not OVERWRITE):  # Avoid in-memory and filesystem destination collisions.
@@ -695,50 +758,53 @@ def copy_external_srts(original_media: Path, output_mkv: Path) -> None:
         print(f"  {subtitle_path} -> {destination}")  # Display the planned external subtitle copy.
 
         if not DRY_RUN:  # Perform filesystem changes only outside preview mode.
-            shutil.copy2(subtitle_path, destination)  # Copy subtitle contents and filesystem metadata.
-
+            shutil.copy2(subtitle_path, destination)  # Copy target subtitle contents and filesystem metadata.
 
 
 def build_ffmpeg_command(target_media: Path, original_media: Path, output_mkv: Path) -> list[str]:
     """
-    Build the FFmpeg mux command for one target and original media pair.
+    Build the FFmpeg mux command for one higher-quality target and original PT-BR source pair.
 
-    :param target_media: Higher-resolution target media file providing video and attachments.
-    :param original_media: Original media file providing English, PT-BR, and subtitle streams.
+    :param target_media: Higher-quality target media file providing video, English audio, subtitles, attachments, and chapters.
+    :param original_media: Lower-quality original media file providing the PT-BR audio stream.
     :param output_mkv: Destination MKV path.
     :return: Complete FFmpeg command and argument list.
     """
 
-    original_info = probe_media(original_media)  # Read stream metadata from the original media file.
-    streams = extract_streams(original_info, original_media)  # Validate and extract original stream dictionaries.
-    audio_tracks = select_audio_tracks(original_media, streams)  # Select English and Brazilian Portuguese audio streams.
-    subtitle_tracks = select_subtitle_tracks(streams)  # Select every non-forced internal subtitle stream.
+    target_info = probe_media(target_media)  # Read stream metadata from the higher-quality target media file.
+    target_streams = extract_streams(target_info, target_media)  # Validate and extract higher-quality target stream dictionaries.
+    original_info = probe_media(original_media)  # Read stream metadata from the lower-quality original source media file.
+    original_streams = extract_streams(original_info, original_media)  # Validate and extract original source stream dictionaries.
+    english_audio_track = select_target_english_audio_track(target_media, target_streams)  # Preserve the higher-quality target English audio instead of downgrading it from the source.
+    ptbr_audio_track = select_original_ptbr_audio_track(original_media, original_streams)  # Select only the PT-BR audio required from the lower-quality original source.
+    subtitle_tracks = select_subtitle_tracks(target_streams)  # Preserve every non-forced internal subtitle stream from the higher-quality target release.
     command = [  # Initialize the FFmpeg mux command.
         FFMPEG,  # Select the configured FFmpeg executable.
         "-hide_banner",  # Suppress the FFmpeg startup banner.
         "-y" if OVERWRITE else "-n",  # Apply the configured output overwrite policy.
-        "-i",  # Declare the target media input.
+        "-i",  # Declare the higher-quality target media input.
         str(target_media),  # Supply the target media path as input zero.
-        "-i",  # Declare the original media input.
-        str(original_media),  # Supply the original media path as input one.
+        "-i",  # Declare the lower-quality PT-BR source media input.
+        str(original_media),  # Supply the original source media path as input one.
         "-map",  # Add a stream mapping directive.
-        "0:v?",  # Preserve every video stream from the target media file when present.
+        "0:v?",  # Preserve every video stream from the higher-quality target media file when present.
         "-map",  # Add another stream mapping directive.
-        "0:t?",  # Preserve every attachment stream from the target media file when present.
+        "0:t?",  # Preserve every attachment stream from the higher-quality target media file when present.
+        "-map",  # Add the selected higher-quality target English audio stream.
+        f"0:{stream_index(english_audio_track, target_media)}",  # Map the validated English audio stream from input zero.
+        "-map",  # Add the selected original PT-BR audio stream.
+        f"1:{stream_index(ptbr_audio_track, original_media)}",  # Map the validated PT-BR audio stream from input one.
     ]
 
-    for audio_track in audio_tracks:  # Map required original audio streams in output order.
-        command.extend(["-map", f"1:{stream_index(audio_track, original_media)}"])  # Map one validated global audio stream index from input one.
-
-    for subtitle_track in subtitle_tracks:  # Map non-forced original subtitle streams in source order.
-        command.extend(["-map", f"1:{stream_index(subtitle_track, original_media)}"])  # Map one validated global subtitle stream index from input one.
+    for subtitle_track in subtitle_tracks:  # Map non-forced higher-quality target subtitle streams in source order.
+        command.extend(["-map", f"0:{stream_index(subtitle_track, target_media)}"])  # Map one validated global subtitle stream index from input zero.
 
     command.extend(  # Add container-level mapping and codec behavior.
         [  # Define metadata, chapter, and codec arguments.
             "-map_metadata",  # Configure global metadata mapping.
             "-1",  # Remove source global metadata from the output container.
             "-map_chapters",  # Configure chapter mapping.
-            "0",  # Preserve chapters from the target media file.
+            "0",  # Preserve chapters from the higher-quality target media file.
             "-c",  # Configure a codec policy for every mapped stream.
             "copy",  # Copy all mapped streams without re-encoding.
         ]
@@ -746,22 +812,22 @@ def build_ffmpeg_command(target_media: Path, original_media: Path, output_mkv: P
     command.extend(  # Add normalized audio metadata and dispositions.
         [  # Define output audio stream metadata arguments.
             "-metadata:s:a:0",  # Select metadata for the first output audio stream.
-            "language=eng",  # Tag the first output audio stream as English.
+            "language=eng",  # Tag the preserved target audio stream as English.
             "-metadata:s:a:0",  # Select another metadata field for the first output audio stream.
-            "title=English",  # Title the first output audio stream as English.
+            "title=English",  # Title the preserved target audio stream as English.
             "-disposition:a:0",  # Configure the first output audio stream disposition.
-            "default",  # Mark English as the default audio stream.
+            "default",  # Keep higher-quality English as the default audio stream.
             "-metadata:s:a:1",  # Select metadata for the second output audio stream.
-            "language=por",  # Tag the second output audio stream as Portuguese.
+            "language=por",  # Tag the injected source audio stream as Portuguese.
             "-metadata:s:a:1",  # Select another metadata field for the second output audio stream.
-            "title=PT-BR",  # Title the second output audio stream as Brazilian Portuguese.
+            "title=PT-BR",  # Title the injected source audio stream as Brazilian Portuguese.
             "-disposition:a:1",  # Configure the second output audio stream disposition.
-            "0",  # Clear default and special dispositions from the second audio stream.
+            "0",  # Keep PT-BR available without making it the default audio stream.
         ]
     )
 
-    for subtitle_number, subtitle_track in enumerate(subtitle_tracks):  # Configure each output subtitle stream in mapped order.
-        language_code, clean_title = subtitle_metadata(subtitle_track, subtitle_number + 1)  # Resolve normalized subtitle metadata.
+    for subtitle_number, subtitle_track in enumerate(subtitle_tracks):  # Configure each preserved target subtitle stream in mapped order.
+        language_code, clean_title = subtitle_metadata(subtitle_track, subtitle_number + 1)  # Resolve normalized target subtitle metadata.
         command.extend(  # Add metadata and disposition arguments for one subtitle stream.
             [  # Define output subtitle stream metadata arguments.
                 f"-metadata:s:s:{subtitle_number}",  # Select the subtitle language metadata field.
@@ -769,14 +835,13 @@ def build_ffmpeg_command(target_media: Path, original_media: Path, output_mkv: P
                 f"-metadata:s:s:{subtitle_number}",  # Select the subtitle title metadata field.
                 f"title={clean_title}",  # Apply the resolved subtitle title.
                 f"-disposition:s:{subtitle_number}",  # Configure the subtitle stream disposition.
-                "default" if subtitle_number == 0 else "0",  # Mark only the first copied subtitle as default.
+                "default" if subtitle_number == 0 else "0",  # Mark only the first preserved target subtitle as default.
             ]
         )
 
-    command.append(str(output_mkv))  # Append the destination MKV path.
+    command.append(str(output_mkv))  # Append the destination MKV path stored under OUTPUT_ROOT.
 
     return command  # Return the complete FFmpeg mux command.
-
 
 
 def remove_partial_output(output_mkv: Path) -> None:
@@ -789,7 +854,6 @@ def remove_partial_output(output_mkv: Path) -> None:
 
     if output_mkv.is_file():  # Limit cleanup to an existing regular output file.
         output_mkv.unlink()  # Remove the incomplete generated media file.
-
 
 
 def validate_generated_output(output_mkv: Path) -> None:
@@ -807,17 +871,18 @@ def validate_generated_output(output_mkv: Path) -> None:
         raise RuntimeError(f"FFmpeg created an empty output file: {output_mkv}")  # Report unusable zero-byte output.
 
 
-
-def process_media_pair(target_media: Path, original_media: Path) -> None:
+def process_media_pair(target_media: Path, original_media: Path, output_directory: Path | None = None) -> None:
     """
-    Mux one target media file with audio and subtitles from its matching original media file.
+    Mux one higher-quality target media file with PT-BR audio from its matching original source.
 
-    :param target_media: Higher-resolution target media file providing video and attachments.
-    :param original_media: Original media file providing audio and subtitles.
+    :param target_media: Higher-quality target media file providing video, English audio, subtitles, attachments, and chapters.
+    :param original_media: Lower-quality original media file providing PT-BR audio.
+    :param output_directory: Optional destination directory under OUTPUT_ROOT for the generated media file.
     :return: None.
     """
 
-    output_mkv = target_media.with_name(f"{target_media.stem}{UPDATED_SUFFIX}.mkv")  # Build a Matroska output path compatible with copied streams from supported input containers.
+    destination_directory = output_directory if output_directory is not None else OUTPUT_ROOT  # Select the dedicated output root or a season-specific subdirectory.
+    output_mkv = destination_directory / f"{target_media.stem}{UPDATED_SUFFIX}.mkv"  # Build a Matroska output path on the configured output drive.
 
     if output_mkv.exists() and not OVERWRITE:  # Preserve an existing generated output when overwrite is disabled.
         print(f"\nSkipping existing output: {output_mkv}")  # Report the skipped generated media file.
@@ -825,10 +890,13 @@ def process_media_pair(target_media: Path, original_media: Path) -> None:
         return  # Stop processing the current media pair.
 
     print("\n" + "=" * 100)  # Separate the current media pair from previous terminal output.
-    print(f"Target  : {target_media}")  # Display the target media path.
-    print(f"Original: {original_media}")  # Display the original media path.
-    print(f"Output  : {output_mkv}")  # Display the generated media path.
+    print(f"Target  : {target_media}")  # Display the higher-quality target media path.
+    print(f"Original: {original_media}")  # Display the lower-quality PT-BR source media path.
+    print(f"Output  : {output_mkv}")  # Display the generated output path on the configured output drive.
     command = build_ffmpeg_command(target_media, original_media, output_mkv)  # Build the complete FFmpeg mux command.
+
+    if not DRY_RUN:  # Create destination folders only during real execution.
+        destination_directory.mkdir(parents=True, exist_ok=True)  # Ensure the dedicated output directory exists before FFmpeg creates the MKV.
 
     try:  # Isolate FFmpeg execution for partial-output cleanup.
         run_command(command)  # Execute or preview the FFmpeg mux operation.
@@ -841,8 +909,7 @@ def process_media_pair(target_media: Path, original_media: Path) -> None:
 
         raise  # Preserve the original processing failure for aggregation.
 
-    copy_external_srts(original_media, output_mkv)  # Copy associated non-forced external SRT files.
-
+    copy_external_srts(target_media, output_mkv)  # Copy target external SRT files already synchronized to the higher-quality release.
 
 
 def process_root_movies(errors: list[str]) -> bool:
@@ -853,12 +920,12 @@ def process_root_movies(errors: list[str]) -> bool:
     :return: True when at least one direct target media file is available for processing.
     """
 
-    target_movies = iter_media_files(TARGET_ROOT)  # Collect direct target media files while excluding generated outputs.
+    target_movies = iter_media_files(TARGET_ROOT)  # Collect direct higher-quality target media files while excluding generated outputs.
 
     if not target_movies:  # Report that the configured roots do not use the direct movie layout.
         return False  # Allow the caller to continue with season-based series processing.
 
-    original_movies = iter_media_files(ORIGINAL_ROOT)  # Collect direct original media files while excluding generated outputs.
+    original_movies = iter_media_files(ORIGINAL_ROOT)  # Collect direct original PT-BR source media files while excluding generated outputs.
 
     if not original_movies:  # Handle a target movie layout without any direct original media file.
         errors.append(f"No original movie media files found directly in: {ORIGINAL_ROOT}")  # Record the missing source movie files.
@@ -866,11 +933,11 @@ def process_root_movies(errors: list[str]) -> bool:
         return True  # Report that a direct target movie layout was detected even though it could not be processed.
 
     if len(target_movies) == 1 and len(original_movies) == 1:  # Handle the unambiguous one-movie-per-root layout.
-        target_media = target_movies[0]  # Select the only direct target movie file.
-        original_media = original_movies[0]  # Select the only direct original movie file regardless of filename differences.
+        target_media = target_movies[0]  # Select the only direct higher-quality target movie file.
+        original_media = original_movies[0]  # Select the only direct original PT-BR source movie regardless of filename differences.
 
         try:  # Isolate the single movie processing failure for aggregated reporting.
-            process_media_pair(target_media, original_media)  # Mux the unambiguous target and original movie pair.
+            process_media_pair(target_media, original_media, OUTPUT_ROOT)  # Mux the unambiguous movie pair into the dedicated output root.
         except Exception as exception:  # Aggregate the movie failure without bypassing the common error summary.
             errors.append(f"{target_media}\n{type(exception).__name__}: {exception}")  # Store the movie path and exception details.
 
@@ -881,49 +948,131 @@ def process_root_movies(errors: list[str]) -> bool:
             original_media = resolve_original_media(ORIGINAL_ROOT, target_media)  # Resolve a same-named original movie without guessing among multiple files.
 
             if original_media is None:  # Handle a direct target movie without an unambiguous original filename or stem match.
-                errors.append(  # Add a detailed missing-file report.
-                    f"Missing matching original movie file:\n"  # Describe the direct movie matching failure.
-                    f"Target       : {target_media}\n"  # Include the target movie path.
-                    f"Original root: {ORIGINAL_ROOT}"  # Include the directory searched for a same-named or same-stem source movie.
-                )
+                print(f"\nSkipping target movie without a common original counterpart: {target_media}")  # Report the intentionally skipped non-common movie.
 
                 continue  # Continue with the next direct target movie.
 
-            process_media_pair(target_media, original_media)  # Mux the resolved direct movie pair.
+            process_media_pair(target_media, original_media, OUTPUT_ROOT)  # Mux the resolved direct movie pair into the dedicated output root.
         except Exception as exception:  # Aggregate one direct movie failure without stopping the remaining files.
             errors.append(f"{target_media}\n{type(exception).__name__}: {exception}")  # Store the movie path and exception details.
 
     return True  # Report that the direct movie layout was found and processed.
 
 
-
-def process_target_season(target_season: Path, original_season: Path, errors: list[str]) -> None:
+def process_target_season(target_season: Path, original_season: Path, season_number: int, errors: list[str]) -> None:
     """
-    Process every eligible target media file in one matched season directory.
+    Process every common target/source episode in one matched season directory.
 
-    :param target_season: Target season directory containing higher-resolution episodes.
-    :param original_season: Matching original season directory containing source tracks.
+    :param target_season: Higher-quality target season directory containing descriptive episode filenames.
+    :param original_season: Lower-quality original season directory containing PT-BR source episodes.
+    :param season_number: Matched numeric season identifier used for safe episode-number matching.
     :param errors: Shared error list receiving episode processing failures.
     :return: None.
     """
 
+    output_season = OUTPUT_ROOT / target_season.name  # Preserve the target season folder name beneath the dedicated G: output root.
+
     for target_media in iter_media_files(target_season):  # Process target media files in deterministic order.
-        try:  # Isolate filename resolution and episode processing failures.
-            original_media = resolve_original_media(original_season, target_media)  # Resolve the matching original episode path.
+        try:  # Isolate episode resolution and processing failures.
+            original_media = resolve_original_media(original_season, target_media, season_number)  # Match descriptive SxxExx targets to numeric source filenames such as "01.mp4".
 
-            if original_media is None:  # Handle missing original episode files.
-                errors.append(  # Add a detailed missing-file report.
-                    f"Missing matching original file:\n"  # Describe the matching failure.
-                    f"Target  : {target_media}\n"  # Include the target episode path.
-                    f"Expected: {original_season / target_media.name}"  # Include the expected original filename before cross-extension stem matching.
-                )
+            if original_media is None:  # Handle target episodes that do not exist in the matched original season.
+                print(f"\nSkipping target episode without a common original counterpart: {target_media}")  # Report the intentionally skipped non-common episode.
 
-                continue  # Continue with the next target episode.
+                continue  # Continue with the next target episode because only common episodes should be processed.
 
-            process_media_pair(target_media, original_media)  # Mux the resolved episode pair.
-        except Exception as exception:  # Aggregate one episode failure without stopping the batch.
+            process_media_pair(target_media, original_media, output_season)  # Mux the common episode pair into the dedicated season output directory.
+        except Exception as exception:  # Aggregate one episode failure without stopping the remaining season.
             errors.append(f"{target_media}\n{type(exception).__name__}: {exception}")  # Store the episode path and exception details.
 
+
+def matched_target_media_files() -> list[Path]:
+    """
+    Return higher-quality target media files that have an unambiguous original counterpart.
+
+    :return: Sorted list of target media files expected to generate outputs.
+    """
+
+    matched_files: list[Path] = []  # Initialize matched target media paths used for storage estimation.
+    target_movies = iter_media_files(TARGET_ROOT)  # Collect direct target movie files when the configured roots use movie layout.
+    original_movies = iter_media_files(ORIGINAL_ROOT)  # Collect direct original movie files when the configured roots use movie layout.
+
+    if len(target_movies) == 1 and len(original_movies) == 1:  # Handle the unambiguous direct one-movie layout.
+        matched_files.append(target_movies[0])  # Include the only target movie in the output-size estimate.
+    elif target_movies and original_movies:  # Handle multiple direct movies using only safe filename/stem matches.
+        for target_media in target_movies:  # Inspect each direct target movie candidate.
+            try:  # Ignore ambiguous candidates here because processing will report them with full context.
+                if resolve_original_media(ORIGINAL_ROOT, target_media) is not None:  # Include only direct movies with a safe original counterpart.
+                    matched_files.append(target_media)  # Add the matched direct movie to the output-size estimate.
+            except RuntimeError:  # Defer ambiguous match reporting to the processing phase.
+                continue  # Exclude the unresolved candidate from the storage estimate.
+
+    original_seasons = build_original_season_map()  # Build original season lookup using verbose or compact supported season naming.
+
+    for target_season in sorted(TARGET_ROOT.iterdir(), key=lambda entry: entry.name.casefold()):  # Inspect higher-quality target season directories deterministically.
+        if not target_season.is_dir():  # Ignore files and other non-directory target-root entries.
+            continue  # Continue with the next target-root entry.
+
+        season_number = season_key(target_season)  # Resolve a target season identifier such as S02.
+
+        if season_number is None:  # Ignore target folders that are not recognized as seasons.
+            continue  # Continue with the next target folder.
+
+        original_season = original_seasons.get(season_number)  # Resolve the original season folder such as "Breaking Bad - Season 02 ...".
+
+        if original_season is None:  # Skip seasons that are not common to both configured roots.
+            continue  # Continue with the next target season.
+
+        for target_media in iter_media_files(target_season):  # Inspect target episodes in the common season.
+            try:  # Ignore ambiguous candidates here because processing will report them with full context.
+                if resolve_original_media(original_season, target_media, season_number) is not None:  # Include only episodes with a safe common season/episode source match.
+                    matched_files.append(target_media)  # Add the matched target episode to the output-size estimate.
+            except RuntimeError:  # Defer ambiguous episode reporting to the processing phase.
+                continue  # Exclude the unresolved candidate from the storage estimate.
+
+    return sorted(set(matched_files), key=lambda entry: str(entry).casefold())  # Return deterministic unique target files expected to generate outputs.
+
+
+def validate_output_storage() -> None:
+    """
+    Validate that the output drive has enough estimated free space for matched generated media.
+
+    :return: None.
+    """
+
+    matched_files = matched_target_media_files()  # Resolve the higher-quality target files that are expected to produce outputs.
+    target_bytes = sum(media_path.stat().st_size for media_path in matched_files)  # Sum target file sizes as the baseline output-space requirement.
+    estimated_output_bytes = int(target_bytes * OUTPUT_SIZE_SAFETY_FACTOR)  # Add a safety margin for injected PT-BR audio and Matroska overhead.
+    reserve_bytes = MIN_FREE_SPACE_RESERVE_GB * 1024 ** 3  # Convert the configured post-processing free-space reserve from GiB to bytes.
+    storage_probe = OUTPUT_ROOT  # Initialize the path used to query the destination filesystem.
+
+    while not storage_probe.exists() and storage_probe.parent != storage_probe:  # Walk upward until an existing output-drive path is available.
+        storage_probe = storage_probe.parent  # Move to the nearest existing parent directory without creating anything.
+
+    if not storage_probe.exists():  # Reject an output path whose filesystem cannot be resolved safely.
+        raise FileNotFoundError(f"Could not resolve output filesystem for: {OUTPUT_ROOT}")  # Prevent processing without a valid destination drive.
+
+    disk_usage = shutil.disk_usage(storage_probe)  # Read total, used, and free bytes from the output filesystem.
+    required_with_reserve = estimated_output_bytes + reserve_bytes  # Require estimated output capacity while preserving the configured free-space reserve.
+    gib = 1024 ** 3  # Define the binary gigabyte divisor used for readable storage diagnostics.
+
+    print("\nStorage preflight:")  # Announce the destination-drive capacity check.
+    print(f"  Output root             : {OUTPUT_ROOT}")  # Display the dedicated output location.
+    print(f"  Matched target files    : {len(matched_files)}")  # Display how many media files contribute to the estimate.
+    print(f"  Matched target size     : {target_bytes / gib:.2f} GiB")  # Display the exact target-size baseline.
+    print(f"  Estimated output size   : {estimated_output_bytes / gib:.2f} GiB")  # Display the safety-adjusted expected output allocation.
+    print(f"  Current output free     : {disk_usage.free / gib:.2f} GiB")  # Display currently available destination-drive capacity.
+    print(f"  Required free reserve   : {MIN_FREE_SPACE_RESERVE_GB:.2f} GiB")  # Display the free-space reserve preserved after processing.
+
+    if not matched_files:  # Stop when there are no common movie or episode pairs to process.
+        raise RuntimeError("No common target/original media pairs were found for the configured roots.")  # Prevent an apparently successful run that produces nothing.
+
+    if disk_usage.free < required_with_reserve:  # Reject processing when the destination could run out of space under the conservative estimate.
+        raise RuntimeError(  # Report the estimated capacity shortfall before FFmpeg creates any large output.
+            f"Insufficient free space under output root {OUTPUT_ROOT}. "
+            f"Need approximately {required_with_reserve / gib:.2f} GiB including reserve, "
+            f"but only {disk_usage.free / gib:.2f} GiB is currently free."
+        )
 
 
 def print_processing_errors(errors: list[str]) -> None:
@@ -942,52 +1091,54 @@ def print_processing_errors(errors: list[str]) -> None:
         print(error)  # Display the complete error description.
 
 
-
 def main() -> None:
     """
-    Process every configured direct movie pair and season/episode pair.
+    Process every configured common movie pair and common season/episode pair.
 
     :return: None.
     """
 
-    if not ORIGINAL_ROOT.exists():  # Validate the configured original media root.
+    if not ORIGINAL_ROOT.exists():  # Validate the configured lower-quality original PT-BR source root.
         raise FileNotFoundError(f"Original root does not exist: {ORIGINAL_ROOT}")  # Stop before processing an unavailable source root.
 
-    if not TARGET_ROOT.exists():  # Validate the configured target media root.
+    if not TARGET_ROOT.exists():  # Validate the configured higher-quality target root.
         raise FileNotFoundError(f"Target root does not exist: {TARGET_ROOT}")  # Stop before processing an unavailable target root.
 
+    validate_output_storage()  # Verify that the dedicated output drive can hold the expected matched outputs before starting FFmpeg.
     errors: list[str] = []  # Initialize aggregated movie, season, and episode processing errors.
-    processed_root_movies = process_root_movies(errors)  # Process supported media files located directly inside the configured movie roots.
-    original_seasons = build_original_season_map()  # Build the original season lookup by season number when series folders are present.
+    processed_root_movies = process_root_movies(errors)  # Process supported media files located directly inside configured movie roots when present.
+    original_seasons = build_original_season_map()  # Build the original season lookup by season number using supported season naming forms.
     processed_target_seasons = False  # Track whether the target root contains at least one recognized season directory.
 
     for target_season in sorted(TARGET_ROOT.iterdir(), key=lambda entry: entry.name.casefold()):  # Inspect target root entries in deterministic order.
         if not target_season.is_dir():  # Ignore files and other non-directory entries.
             continue  # Continue with the next target root entry.
 
-        key = season_key(target_season)  # Extract the target season number.
+        season_number = season_key(target_season)  # Extract a target season number from forms such as "S02" or "Season 02".
 
-        if key is None:  # Handle directories without recognizable season numbers.
+        if season_number is None:  # Handle directories without a recognizable season number.
             print(f"\nSkipping folder without season number: {target_season}")  # Report the skipped target directory.
 
             continue  # Continue with the next target season directory.
 
-        processed_target_seasons = True  # Record that the configured target root uses the season-based series layout.
-        original_season = original_seasons.get(key)  # Resolve the matching original season directory.
+        original_season = original_seasons.get(season_number)  # Resolve the matching lower-quality original season directory.
 
-        if original_season is None:  # Handle target seasons without a source counterpart.
-            errors.append(f"No matching original season for: {target_season}")  # Add a season-level matching error.
+        if original_season is None:  # Handle target seasons without a common original counterpart.
+            print(f"\nSkipping target season without a common original counterpart: {target_season}")  # Report the intentionally skipped non-common season.
 
             continue  # Continue with the next target season directory.
 
-        process_target_season(target_season, original_season, errors)  # Process every eligible episode in the matched season.
+        processed_target_seasons = True  # Record that at least one common season-based series layout was found.
+        process_target_season(target_season, original_season, season_number, errors)  # Process only common episodes in the matched season.
 
-    if not processed_root_movies and not processed_target_seasons:  # Reject roots that contain neither supported movie files nor season directories.
-        raise RuntimeError(  # Report the supported directory layouts required for processing.
-            f"No direct supported movie files or target season folders found in: {TARGET_ROOT}"  # Describe the unavailable target media layout.
+    if not processed_root_movies and not processed_target_seasons:  # Reject roots that contain neither common direct movies nor common season directories.
+        raise RuntimeError(  # Report the supported common-media layouts required for processing.
+            f"No common direct movie files or matching target/original season folders found between:\n"
+            f"Target  : {TARGET_ROOT}\n"
+            f"Original: {ORIGINAL_ROOT}"
         )
 
-    if errors:  # Report all collected failures after processing every supported media layout.
+    if errors:  # Report all collected failures after processing every common media layout.
         print_processing_errors(errors)  # Print the aggregated error summary.
     else:  # Handle complete batch success.
         print("\nFinished successfully.")  # Report successful completion.
