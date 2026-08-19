@@ -7,8 +7,9 @@ Created     : 2026-08-19
 Description :
     Recursively scans multiple movie-library roots and identifies repeated movie
     titles from directory names that follow the configured movie-directory naming
-    pattern. Duplicate detection is based only on the movie title, ignoring release
-    year, resolution, language, letter casing, accents, punctuation, and spacing.
+    pattern. Duplicate detection is based on the normalized movie title together with
+    the release year, while ignoring resolution, language, casing, accents, punctuation,
+    spacing, and an optional trailing numeric index immediately before the year.
 
     Key features include:
         - INPUT_DIRS list support for scanning two or more independent libraries.
@@ -17,7 +18,8 @@ Description :
         - Separate internal duplicate report for every configured input directory.
         - Separate cross-input reports grouped by the exact input-directory set in
           which each repeated movie title occurs.
-        - Accent/case/punctuation-insensitive movie-title comparison.
+        - Title-and-year duplicate identity with accent/case/punctuation normalization.
+        - Optional trailing numeric title index handling before the release year.
         - Exact byte and GB size reporting for every duplicate movie occurrence.
         - UTF-8 JSON report generation under ./Outputs/.
 
@@ -41,10 +43,13 @@ Assumptions & Notes:
     - Movie directories must end with: <MovieName> <YYYY> <Resolution> <Language>.
     - Supported languages are Dual, Legendado, Dublado, Nacional, and English.
     - Typical resolutions such as 720p, 1080p, 2160p, and 4320p are supported.
-    - Internal reports contain duplicates occurring two or more times inside one
-      configured input directory.
-    - Cross reports contain titles present in two or more distinct input directories
-      and are separated by the exact combination of input directories involved.
+    - Internal reports contain matching title-and-year identities occurring two or
+      more times inside one configured input directory.
+    - Cross reports contain matching title-and-year identities present in two or more
+      distinct input directories and are separated by the exact input-dir combination.
+    - A trailing 1-3 digit token immediately before the year is treated as an optional
+      index when the preceding title contains letters; e.g. "Movie 1 2011" matches
+      "Movie 2011", but "Movie 2011" never matches "Movie 2017".
     - Reported sizes sum all regular files recursively inside each matched movie
       directory, avoiding assumptions about video-file extensions or filenames.
     - size_bytes is exact; size_gb uses 1,000,000,000 bytes per decimal GB and is rounded to 9 decimals.
@@ -304,12 +309,56 @@ def normalize_movie_name(movie_name: str) -> str:
     return normalized  # Return the normalized movie-title comparison key
 
 
+def remove_optional_trailing_movie_index(movie_name: str) -> str:
+    """
+    Remove an optional short numeric index placed immediately before the release year.
+
+    Because parsing already removes the final YYYY/resolution/language suffix, this
+    function inspects only the extracted movie-title portion. A trailing 1-3 digit
+    token is treated as a removable index only when the preceding title contains at
+    least one alphabetic character. This keeps standalone/numeric titles safer while
+    allowing forms such as "Planeta dos Macacos 1 2011 ..." to match the same movie
+    stored as "Planeta dos Macacos 2011 ...".
+
+    :param movie_name: Parsed movie title before year/resolution/language metadata.
+    :return: Movie title with the optional trailing numeric index removed when present.
+    """
+
+    title_parts = movie_name.rsplit(maxsplit=1)  # Split only the final whitespace-delimited token from the parsed movie title
+    if len(title_parts) != 2:  # Keep single-token titles unchanged because they do not contain a separate trailing index token
+        return movie_name  # Return the original title when no separate final token exists
+
+    base_title, trailing_token = title_parts  # Separate the possible base title from the possible numeric index token
+    is_short_numeric_index = trailing_token.isdigit() and 1 <= len(trailing_token) <= 3  # Restrict optional indexes to short integer tokens instead of four-digit year-like values
+    base_contains_letters = any(character.isalpha() for character in base_title)  # Require alphabetic title content before treating the final number as an optional index
+    if is_short_numeric_index and base_contains_letters:  # Ignore the trailing token only when it satisfies the guarded optional-index rules
+        return base_title.rstrip()  # Return the title without the optional trailing numeric index
+
+    return movie_name  # Preserve the complete parsed title when the final token is meaningful or ambiguous
+
+
+def build_movie_identity_key(movie_name: str, year: int):
+    """
+    Build the duplicate-comparison identity from normalized title and release year.
+
+    :param movie_name: Original parsed movie title.
+    :param year: Parsed four-digit release year.
+    :return: Tuple containing normalized comparison title and release year.
+    """
+
+    comparison_movie_name = remove_optional_trailing_movie_index(movie_name)  # Remove only the guarded optional trailing numeric index before normalization
+    normalized_comparison_name = normalize_movie_name(comparison_movie_name)  # Normalize the comparison title for case/accent/punctuation-insensitive matching
+    return normalized_comparison_name, int(year)  # Return the title-and-year identity required for duplicate matching
+
+
 def parse_movie_directory_name(directory_name: str):
     """
     Parse a movie directory name that follows the expected naming convention.
 
-    Parsing is anchored at the end of the directory name so numbers inside movie
-    titles, such as "Toy Story 1" or "Resident Evil 3", remain part of the title.
+    Parsing is anchored at the end of the directory name so numbers inside movie titles
+    remain available for title normalization. Duplicate identity later combines the
+    normalized title with the parsed release year and may ignore one optional trailing
+    short numeric index immediately before that year.
 
     :param directory_name: Directory basename to parse.
     :return: Parsed metadata dictionary, or None when the directory does not match.
@@ -326,13 +375,19 @@ def parse_movie_directory_name(directory_name: str):
     if not movie_name:  # Reject matches whose movie-title portion is empty
         return None  # Return no metadata for an empty movie title
 
+    year = int(match.group("year"))  # Parse the four-digit release year once for metadata storage and identity construction
+    normalized_movie_name = normalize_movie_name(movie_name)  # Preserve the normalized original parsed title for transparent report metadata
+    comparison_movie_name = remove_optional_trailing_movie_index(movie_name)  # Build the display/comparison title after guarded optional-index removal
+    normalized_comparison_movie_name, comparison_year = build_movie_identity_key(movie_name, year)  # Build the exact normalized title-and-year duplicate identity
     language_lookup = {language.casefold(): language for language in SUPPORTED_LANGUAGES}  # Build a case-insensitive lookup for canonical language labels
     language = language_lookup[match.group("language").casefold()]  # Restore the configured canonical language spelling
 
     return {  # Build the parsed movie metadata record
-        "movie_name": movie_name,  # Store the original movie title
-        "normalized_movie_name": normalize_movie_name(movie_name),  # Store the normalized comparison title
-        "year": int(match.group("year")),  # Store the parsed release year as an integer
+        "movie_name": movie_name,  # Store the original movie title exactly as parsed before year/resolution/language
+        "normalized_movie_name": normalized_movie_name,  # Store the normalized original title without discarding a possible trailing numeric token
+        "comparison_movie_name": comparison_movie_name,  # Store the title form used for identity matching after optional-index handling
+        "normalized_comparison_movie_name": normalized_comparison_movie_name,  # Store the normalized title component used by the duplicate identity
+        "year": comparison_year,  # Store the parsed release year that is required to match for duplicate detection
         "resolution": match.group("resolution").lower(),  # Store the parsed video resolution using a normalized suffix
         "language": language,  # Store the canonical language label
     }  # Return-compatible metadata dictionary
@@ -480,15 +535,16 @@ def scan_movie_directories(input_dir: str):
     return movie_entries, total_directories_scanned  # Return this input directory's movie entries and scanned-directory count
 
 
-def build_duplicate_group(normalized_name: str, entries):
+def build_duplicate_group(identity_key, entries):
     """
-    Build one deterministic duplicate-group structure from movie occurrences.
+    Build one deterministic duplicate-group structure from matching movie occurrences.
 
-    :param normalized_name: Normalized movie-title grouping key.
-    :param entries: Movie occurrences belonging to the normalized title.
+    :param identity_key: Tuple containing normalized comparison title and release year.
+    :param entries: Movie occurrences belonging to the same title-and-year identity.
     :return: JSON-serializable duplicate-group dictionary.
     """
 
+    normalized_comparison_name, duplicate_year = identity_key  # Unpack the normalized title and required release year from the duplicate identity
     sorted_entries = sorted(  # Sort movie occurrences deterministically across input directories and metadata
         entries,  # Provide the movie occurrences that belong to the duplicate group
         key=lambda entry: (  # Define the deterministic occurrence ordering key
@@ -499,27 +555,39 @@ def build_duplicate_group(normalized_name: str, entries):
             entry["path"].casefold(),  # Sort finally by full movie-directory path
         ),  # Finish the occurrence ordering tuple
     )  # Finish sorting the duplicate occurrences
-    movie_name_variants = sorted(  # Collect every original title spelling represented by this normalized group
-        {entry["movie_name"] for entry in sorted_entries},  # Build the unique set of original movie-title variants
+    movie_name_variants = sorted(  # Collect every original title spelling/index variant represented by this duplicate identity
+        {entry["movie_name"] for entry in sorted_entries},  # Build the unique set of original parsed movie-title variants
         key=str.casefold,  # Sort title variants case-insensitively for deterministic report output
     )  # Finish sorting the original title variants
+    comparison_movie_name_variants = sorted(  # Collect every comparison-title spelling represented after optional-index handling
+        {entry["comparison_movie_name"] for entry in sorted_entries},  # Build the distinct optional-index-normalized display-title variants
+        key=str.casefold,  # Sort comparison-title variants case-insensitively for deterministic report output
+    )  # Finish sorting the comparison-title variants
     input_dirs = sorted(  # Collect every distinct configured input directory represented in this duplicate group
-        {entry["input_dir"] for entry in sorted_entries},  # Build the distinct input-directory set for this title
+        {entry["input_dir"] for entry in sorted_entries},  # Build the distinct input-directory set for this title-and-year identity
         key=str.casefold,  # Sort input-directory labels deterministically
     )  # Finish sorting the represented input directories
+    representative_movie_name = min(  # Prefer the shortest comparison title so an unnecessary trailing index is not used as the group display name
+        comparison_movie_name_variants,  # Compare the available optional-index-normalized display-title variants
+        key=lambda movie_name: (len(movie_name), movie_name.casefold()),  # Prefer the shortest variant and use casefolded text as a deterministic tie breaker
+    )  # Finish selecting the representative display movie title
 
     return {  # Build the complete duplicate group shared by internal and cross-input reports
-        "movie_name": sorted_entries[0]["movie_name"],  # Use the first deterministic occurrence as the display movie title
-        "normalized_movie_name": normalized_name,  # Store the normalized comparison title
-        "movie_name_variants": movie_name_variants,  # Store all original title variants found in the group
+        "movie_name": representative_movie_name,  # Store the representative title after guarded optional-index removal
+        "normalized_movie_name": normalized_comparison_name,  # Store the normalized comparison title used as part of the duplicate identity
+        "year": duplicate_year,  # Store the release year that every occurrence in this duplicate group must share
+        "movie_name_variants": movie_name_variants,  # Store all original title/index variants found in the group
+        "comparison_movie_name_variants": comparison_movie_name_variants,  # Store all title variants after optional trailing-index removal
         "occurrences": len(sorted_entries),  # Store the total number of matching movie-directory occurrences
         "input_dir_count": len(input_dirs),  # Store the number of distinct configured input directories represented
-        "input_dirs": input_dirs,  # Store the distinct configured input directories represented by the title
+        "input_dirs": input_dirs,  # Store the distinct configured input directories represented by the title-and-year identity
         "entries": [  # Build the serialized occurrence list for the duplicate group
             {  # Build one serialized movie occurrence
                 "input_dir": entry["input_dir"],  # Record the configured input directory containing this occurrence
                 "directory_name": entry["directory_name"],  # Store the original matched directory basename
-                "year": entry["year"],  # Store the parsed release year
+                "movie_name": entry["movie_name"],  # Store the exact parsed movie title for this specific occurrence
+                "comparison_movie_name": entry["comparison_movie_name"],  # Store the title used for matching after optional-index handling
+                "year": entry["year"],  # Store the parsed release year required by the duplicate identity
                 "resolution": entry["resolution"],  # Store the parsed video resolution
                 "language": entry["language"],  # Store the canonical language label
                 "relative_path": entry["relative_path"],  # Store the path relative to the owning input directory
@@ -534,55 +602,59 @@ def build_duplicate_group(normalized_name: str, entries):
 
 def find_duplicate_movies(movie_entries):
     """
-    Group movie entries whose normalized titles repeat within the supplied entries.
+    Group entries that share the same normalized movie title and release year.
+
+    One optional trailing 1-3 digit title index is ignored before title normalization,
+    but the parsed four-digit release year must always be identical.
 
     :param movie_entries: Parsed movie directory entries from one input directory.
-    :return: Sorted list containing only movie-title groups with 2+ occurrences.
+    :return: Sorted list containing only title-and-year groups with 2+ occurrences.
     """
 
-    grouped_entries = {}  # Initialize movie-title groups keyed by normalized names
-    for entry in movie_entries:  # Group every parsed movie occurrence by its normalized title
-        normalized_name = entry["normalized_movie_name"]  # Read the normalized movie-title grouping key
-        grouped_entries.setdefault(normalized_name, []).append(entry)  # Append the current occurrence to its normalized-title group
+    grouped_entries = {}  # Initialize movie identity groups keyed by normalized comparison title and release year
+    for entry in movie_entries:  # Group every parsed movie occurrence by its complete title-and-year identity
+        identity_key = (entry["normalized_comparison_movie_name"], entry["year"])  # Build the exact grouping key from normalized comparison title and required release year
+        grouped_entries.setdefault(identity_key, []).append(entry)  # Append the current occurrence to its title-and-year identity group
 
-    duplicate_groups = []  # Initialize the collection of movie titles repeated within the supplied entries
-    for normalized_name, entries in grouped_entries.items():  # Inspect every normalized title group for multiple occurrences
-        if len(entries) < 2:  # Ignore titles that occur only once in this input directory
-            continue  # Continue with the next normalized movie title
-        duplicate_groups.append(build_duplicate_group(normalized_name, entries))  # Build and append the complete internal duplicate group
+    duplicate_groups = []  # Initialize the collection of movie identities repeated within the supplied entries
+    for identity_key, entries in grouped_entries.items():  # Inspect every normalized title-and-year group for multiple occurrences
+        if len(entries) < 2:  # Ignore movie identities that occur only once in this input directory
+            continue  # Continue with the next normalized movie identity
+        duplicate_groups.append(build_duplicate_group(identity_key, entries))  # Build and append the complete internal duplicate group
 
-    duplicate_groups.sort(key=lambda group: group["normalized_movie_name"])  # Sort duplicate groups alphabetically by normalized movie title
+    duplicate_groups.sort(key=lambda group: (group["normalized_movie_name"], group["year"]))  # Sort duplicate groups deterministically by normalized comparison title and release year
     return duplicate_groups  # Return the deterministic internal duplicate-group collection
 
 
 def find_cross_input_duplicate_groups(movie_entries, input_dirs):
     """
-    Find duplicate titles present in two or more distinct configured input dirs.
+    Find matching title-and-year identities present in two or more distinct input dirs.
 
-    Cross duplicates are separated by the exact set of input directories in which
-    each title occurs, producing one report scope per distinct input-dir combination.
+    Cross duplicates are separated by the exact set of input directories in which each
+    title-and-year identity occurs. An optional trailing short numeric title index is
+    ignored, while the release year remains mandatory for every match.
 
     :param movie_entries: Combined movie entries from every configured input directory.
     :param input_dirs: Validated configured input directories in original order.
     :return: Dictionary mapping input-dir scope tuples to duplicate-group lists.
     """
 
-    grouped_entries = {}  # Initialize combined normalized-title groups across all configured input directories
-    for entry in movie_entries:  # Group every combined movie occurrence by its normalized title
-        normalized_name = entry["normalized_movie_name"]  # Read the normalized movie-title grouping key
-        grouped_entries.setdefault(normalized_name, []).append(entry)  # Append the occurrence to its combined normalized-title group
+    grouped_entries = {}  # Initialize combined movie identity groups across all configured input directories
+    for entry in movie_entries:  # Group every combined movie occurrence by normalized comparison title and release year
+        identity_key = (entry["normalized_comparison_movie_name"], entry["year"])  # Build the exact cross-input identity key including the required release year
+        grouped_entries.setdefault(identity_key, []).append(entry)  # Append the occurrence to its combined title-and-year identity group
 
     cross_groups_by_scope = {}  # Initialize cross-input duplicate groups keyed by their exact configured input-directory scope
-    for normalized_name, entries in grouped_entries.items():  # Inspect every combined normalized title for cross-input presence
-        present_input_dirs = {entry["input_dir"] for entry in entries}  # Collect the distinct configured input directories containing this title
-        if len(present_input_dirs) < 2:  # Ignore titles that occur in only one configured input directory
-            continue  # Continue with the next combined normalized title
+    for identity_key, entries in grouped_entries.items():  # Inspect every combined title-and-year identity for cross-input presence
+        present_input_dirs = {entry["input_dir"] for entry in entries}  # Collect the distinct configured input directories containing this exact movie identity
+        if len(present_input_dirs) < 2:  # Ignore movie identities that occur in only one configured input directory
+            continue  # Continue with the next combined movie identity
 
         scope = tuple(input_dir for input_dir in input_dirs if input_dir in present_input_dirs)  # Preserve INPUT_DIRS ordering while building the exact cross-report scope
-        cross_groups_by_scope.setdefault(scope, []).append(build_duplicate_group(normalized_name, entries))  # Append the title to the report matching its exact input-directory combination
+        cross_groups_by_scope.setdefault(scope, []).append(build_duplicate_group(identity_key, entries))  # Append the identity to the report matching its exact input-directory combination
 
     for duplicate_groups in cross_groups_by_scope.values():  # Normalize ordering inside every generated cross-input report scope
-        duplicate_groups.sort(key=lambda group: group["normalized_movie_name"])  # Sort cross duplicate groups alphabetically by normalized movie title
+        duplicate_groups.sort(key=lambda group: (group["normalized_movie_name"], group["year"]))  # Sort cross duplicate groups by normalized comparison title and release year
 
     cross_groups_by_scope = dict(sorted(cross_groups_by_scope.items(), key=lambda item: tuple(input_dir.casefold() for input_dir in item[0])))  # Sort exact cross-report scopes deterministically by configured input-directory paths
     return cross_groups_by_scope  # Return all cross-input report scopes and their duplicate groups
@@ -638,23 +710,25 @@ def build_comparison_metadata():
     """
 
     return {  # Build the shared duplicate-comparison rule description
-        "based_on": "movie_name_only",  # Document that duplicate comparison uses only the movie title
+        "based_on": "normalized_movie_name_and_year",  # Document that both normalized title and release year are required for duplicate identity
+        "requires_same_year": True,  # Explicitly document that equal titles from different release years are never duplicates
+        "optional_trailing_numeric_index_before_year_ignored": True,  # Document the guarded optional 1-3 digit index normalization immediately before the year
         "ignores": [  # List metadata and formatting differences ignored during matching
-            "year",  # Document that release-year differences do not affect title matching
-            "resolution",  # Document that resolution differences do not affect title matching
-            "language",  # Document that language-label differences do not affect title matching
-            "file_size",  # Document that duplicate titles remain matches even when their measured stored sizes differ
+            "resolution",  # Document that resolution differences do not affect title-and-year matching
+            "language",  # Document that language-label differences do not affect title-and-year matching
+            "file_size",  # Document that duplicate identities remain matches even when their measured stored sizes differ
             "letter_casing",  # Document that uppercase and lowercase differences do not affect title matching
             "accents",  # Document that accented and unaccented character variants are treated equally
             "punctuation",  # Document that punctuation differences do not affect title matching
             "extra_whitespace",  # Document that repeated or surrounding whitespace does not affect title matching
+            "optional_trailing_1_to_3_digit_title_index",  # Document the guarded numeric index ignored immediately before the parsed release year
         ],  # Finish the ignored-comparison attribute list
     }  # Return the common comparison metadata dictionary
 
 
 def write_internal_duplicate_report(input_dir: str, movie_entries, total_directories_scanned: int, duplicate_groups):
     """
-    Write one duplicate report containing repeats inside a single input directory.
+    Write one duplicate report containing title-and-year repeats inside one input directory.
 
     :param input_dir: Root directory represented by the internal report.
     :param movie_entries: All matching movie directory entries from this input dir.
@@ -666,7 +740,7 @@ def write_internal_duplicate_report(input_dir: str, movie_entries, total_directo
     output_dir = Path(OUTPUT_DIR)  # Resolve the configured output directory as a Path object
     output_dir.mkdir(parents=True, exist_ok=True)  # Create the output directory tree when it does not already exist
     report_path = output_dir / build_internal_report_filename(input_dir)  # Build the final per-input internal report path
-    unique_movie_names = {entry["normalized_movie_name"] for entry in movie_entries}  # Collect unique normalized titles for this input directory's statistics
+    unique_movie_identities = {(entry["normalized_comparison_movie_name"], entry["year"]) for entry in movie_entries}  # Collect unique normalized title-and-year identities for this input directory's statistics
     duplicate_movie_directories = sum(group["occurrences"] for group in duplicate_groups)  # Count every directory belonging to an internal duplicate group
 
     report = {  # Build the complete internal-report JSON structure
@@ -679,8 +753,8 @@ def write_internal_duplicate_report(input_dir: str, movie_entries, total_directo
             "directories_scanned": total_directories_scanned,  # Store the total descendant-directory count inspected under this input root
             "matching_movie_directories": len(movie_entries),  # Store the count of directories matching the movie naming convention
             "non_matching_directories": total_directories_scanned - len(movie_entries),  # Store the count of inspected directories that did not match the movie pattern
-            "unique_movie_names": len(unique_movie_names),  # Store the number of unique normalized movie titles found in this input directory
-            "duplicate_movie_names": len(duplicate_groups),  # Store the number of movie titles repeated inside this input directory
+            "unique_movie_identities": len(unique_movie_identities),  # Store the number of unique normalized title-and-year movie identities found in this input directory
+            "duplicate_movie_identities": len(duplicate_groups),  # Store the number of title-and-year movie identities repeated inside this input directory
             "directories_in_duplicate_groups": duplicate_movie_directories,  # Store the number of movie directories belonging to internal duplicate groups
         },  # Finish the internal-report summary section
         "duplicates": duplicate_groups,  # Store every movie title duplicated inside this configured input directory
@@ -716,7 +790,7 @@ def write_cross_duplicate_reports(cross_groups_by_scope):
             "comparison": build_comparison_metadata(),  # Store the shared movie-title duplicate-comparison rules
             "summary": {  # Store aggregate statistics for this exact cross-input report scope
                 "input_dir_count": len(input_dir_scope),  # Store how many configured input directories participate in this cross report
-                "duplicate_movie_names": len(duplicate_groups),  # Store the number of movie titles present across this exact input-directory combination
+                "duplicate_movie_identities": len(duplicate_groups),  # Store the number of title-and-year movie identities present across this exact input-directory combination
                 "directories_in_duplicate_groups": duplicate_movie_directories,  # Store the number of movie-directory occurrences represented by the cross duplicates
             },  # Finish the cross-input report summary section
             "duplicates": duplicate_groups,  # Store every title repeated across this exact configured input-directory combination
@@ -897,17 +971,17 @@ def main():
                 f"{BackgroundColors.GREEN}Matching movie directories in {BackgroundColors.CYAN}{input_dir}{BackgroundColors.GREEN}: {BackgroundColors.CYAN}{len(scan_result['movie_entries'])}{Style.RESET_ALL}"  # Include both the owning input directory and matching movie-directory count
             )  # Finish appending the matching movie-directory count
             output_lines.append(  # Append the internal repeated-title count for the current input root
-                f"{BackgroundColors.GREEN}Internal repeated movie names in {BackgroundColors.CYAN}{input_dir}{BackgroundColors.GREEN}: {BackgroundColors.CYAN}{len(scan_result['duplicate_groups'])}{Style.RESET_ALL}"  # Include both the owning input directory and internal duplicate-title count
+                f"{BackgroundColors.GREEN}Internal repeated movies in {BackgroundColors.CYAN}{input_dir}{BackgroundColors.GREEN}: {BackgroundColors.CYAN}{len(scan_result['duplicate_groups'])}{Style.RESET_ALL}"  # Include both the owning input directory and internal duplicate-identity count
             )  # Finish appending the internal repeated-title count
 
             if scan_result["duplicate_groups"]:  # List internal duplicate titles only when the current input directory contains repeats
                 for duplicate_index, group in enumerate(scan_result["duplicate_groups"], start=1):  # Number every internal duplicate group starting from one
                     output_lines.append(  # Append one numbered internal duplicate movie summary line
-                        f"  {duplicate_index}. {BackgroundColors.CYAN}{group['movie_name']}{BackgroundColors.GREEN} ({group['occurrences']} occurrences){Style.RESET_ALL}"  # Include list number, representative title, and occurrence count
+                        f"  {duplicate_index}. {BackgroundColors.CYAN}{group['movie_name']} ({group['year']}){BackgroundColors.GREEN} ({group['occurrences']} occurrences){Style.RESET_ALL}"  # Include list number, representative title, required release year, and occurrence count
                     )  # Finish appending the numbered internal duplicate line
-            else:  # Handle an input directory with no internal duplicate movie titles
+            else:  # Handle an input directory with no internal duplicate movie identities
                 output_lines.append(  # Append an explicit no-duplicates message for the current input directory
-                    f"{BackgroundColors.GREEN}No internal repeated movie names found in {BackgroundColors.CYAN}{input_dir}{BackgroundColors.GREEN}.{Style.RESET_ALL}"  # Identify the input directory that contains no internal repeats
+                    f"{BackgroundColors.GREEN}No internal repeated movies found in {BackgroundColors.CYAN}{input_dir}{BackgroundColors.GREEN}.{Style.RESET_ALL}"  # Identify the input directory that contains no internal repeats
                 )  # Finish appending the no-internal-duplicates message
 
             output_lines.append(  # Append the generated internal JSON report path
@@ -915,9 +989,9 @@ def main():
             )  # Finish appending the internal report-path line
             output_lines.append("")  # Add exactly one blank line after the current input-directory section
 
-        total_cross_duplicate_groups = sum(len(groups) for groups in cross_groups_by_scope.values())  # Count all cross-input duplicate titles across exact report scopes
+        total_cross_duplicate_groups = sum(len(groups) for groups in cross_groups_by_scope.values())  # Count all cross-input duplicate movie identities across exact report scopes
         output_lines.append(  # Append the total number of cross-input repeated movie titles
-            f"{BackgroundColors.GREEN}Cross-input repeated movie names: {BackgroundColors.CYAN}{total_cross_duplicate_groups}{Style.RESET_ALL}"  # Include the total cross-input duplicate-title count
+            f"{BackgroundColors.GREEN}Cross-input repeated movies: {BackgroundColors.CYAN}{total_cross_duplicate_groups}{Style.RESET_ALL}"  # Include the total cross-input duplicate-identity count
         )  # Finish appending the cross-input duplicate count
 
         if cross_groups_by_scope:  # List cross-input duplicate scopes when titles span distinct configured input directories
@@ -927,7 +1001,7 @@ def main():
                 )  # Finish appending the cross-input scope heading
                 for duplicate_index, group in enumerate(duplicate_groups, start=1):  # Number every duplicate title inside the current cross-input scope
                     output_lines.append(  # Append one numbered cross-input duplicate group summary line
-                        f"  {duplicate_index}. {BackgroundColors.CYAN}{group['movie_name']}{BackgroundColors.GREEN} ({group['occurrences']} occurrences across {group['input_dir_count']} input dirs){Style.RESET_ALL}"  # Include list number, title, occurrence count, and distinct input-directory count
+                        f"  {BackgroundColors.GREEN}{duplicate_index}. {BackgroundColors.CYAN}{group['movie_name']} ({group['year']}){BackgroundColors.GREEN} ({group['occurrences']} occurrences across {group['input_dir_count']} input dirs){Style.RESET_ALL}"  # Include list number, title, required release year, occurrence count, and distinct input-directory count
                     )  # Finish appending the numbered cross-input duplicate line
 
             for report_path in cross_report_paths:  # Append every cross-input JSON report generated by the scan
@@ -935,7 +1009,7 @@ def main():
                     f"{BackgroundColors.GREEN}Cross JSON report written to: {BackgroundColors.CYAN}{report_path}{Style.RESET_ALL}"  # Include the generated cross-input report path
                 )  # Finish appending the cross-input report-path line
         else:  # Handle the case where no movie title appears in two or more configured input directories
-            output_lines.append(f"{BackgroundColors.GREEN}No cross-input repeated movie names found.{Style.RESET_ALL}")  # Append the explicit no-cross-input-duplicates message
+            output_lines.append(f"{BackgroundColors.GREEN}No cross-input repeated movies found.{Style.RESET_ALL}")  # Append the explicit no-cross-input-duplicates message
     except Exception as error:  # Handle and report unexpected multi-input scan failures while preserving the original exception
         output_lines.append(  # Append the scan failure message before the timing footer is generated
             f"{BackgroundColors.RED}Failed to scan movie libraries: {BackgroundColors.CYAN}{error}{Style.RESET_ALL}"  # Include the original exception description
