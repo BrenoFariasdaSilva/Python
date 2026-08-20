@@ -15,6 +15,7 @@ Description :
 
     Key features include:
         - Uses a dedicated persistent Playwright browser profile that preserves login.
+        - Tracks Facebook page replacements/new tabs across CAPTCHA, 2FA, and checkpoints.
         - Scrolls the Facebook profile until no additional posts are discovered.
         - Extracts post text, title, date, permalink, identifier, images, and videos.
         - Streams media using authentication copied in memory from the browser context.
@@ -67,9 +68,11 @@ Assumptions & Notes:
       selectors therefore use several fallbacks and may require future maintenance.
     - The script uses its own persistent .browser_profile/ directory for Playwright automation.
     - Authentication is considered complete only after Facebook session cookies are present,
-      no login/challenge UI is detected, and that state remains stable for several seconds.
+      normal authenticated Facebook UI is rendered, no login/challenge route is active, and
+      that state remains stable for several seconds on the same current browser page.
     - CAPTCHA, 2FA, recovery, checkpoint, and other interactive authentication steps are
       never bypassed; the browser remains open so the user can finish them manually.
+    - Authentication query parameters are removed from logs so verification context is not exposed.
     - The automation profile never writes Facebook cookies to JSON or logs.
     - Facebook posts do not have a dedicated "title" field. The title used for the output
       directory is derived from the first meaningful line of the post text.
@@ -143,6 +146,7 @@ PAGE_LOAD_TIMEOUT_MS = 60_000  # Maximum time allowed for normal page navigation
 LOGIN_WAIT_SECONDS = 0  # Maximum authentication wait in seconds; 0 waits indefinitely until the user finishes every login step
 AUTHENTICATION_POLL_SECONDS = 1.0  # Delay between authentication-state checks
 AUTHENTICATION_STABLE_SECONDS = 8.0  # Continuous authenticated time required before accepting login as complete
+AUTHENTICATION_STATUS_LOG_INTERVAL_SECONDS = 15.0  # Minimum delay between repeated authentication waiting messages
 PROFILE_READY_TIMEOUT_SECONDS = 60  # Maximum time to wait for the authenticated profile page to render usable content
 SCROLL_PAUSE_SECONDS = 2.0  # Delay after each profile scroll to allow lazy-loaded posts to appear
 NO_NEW_POST_SCROLL_LIMIT = 12  # Consecutive scrolls without new posts before the scraper stops
@@ -237,15 +241,16 @@ SEE_MORE_TEXTS = (
     "Ver mais",
 )  # Localized text labels used to expand truncated Facebook post bodies
 
-LOGIN_URL_HINTS = (
+AUTHENTICATION_PATH_PREFIXES = (
     "/login",
     "/checkpoint",
     "/recover",
     "/two_factor",
+    "/two_step_verification",
     "/auth_platform",
     "/device-based",
     "/confirmemail",
-)  # URL fragments indicating that Facebook authentication or account verification is still in progress
+)  # Facebook URL path prefixes that indicate authentication or account verification is still in progress
 
 AUTHENTICATION_CHALLENGE_SELECTORS = (
     'input[name="email"]',
@@ -1015,24 +1020,126 @@ def get_article_locator(page: Page):
     return page.locator(ARTICLE_SELECTORS[0])  # Return the primary selector so later loops can retry naturally
 
 
+def get_live_page_url(page: Page) -> str:
+    """
+    Read the current top-level URL directly from the browser page.
+
+    Reading window.location.href first avoids relying only on a cached Page.url value while
+    Facebook replaces pages or performs client-side authentication transitions.
+
+    :param page: Playwright page whose current URL should be resolved.
+    :return: Current page URL, or an empty string when the page cannot be inspected.
+    """
+
+    if page.is_closed():  # A closed page has no usable live URL
+        return ""  # Return an empty URL for closed pages
+
+    try:  # Prefer the browser's own live location value
+        live_url = page.evaluate("window.location.href")  # Read the current top-level browser URL
+        if isinstance(live_url, str) and live_url.strip():  # Verify a usable URL was returned
+            return live_url.strip()  # Return the browser-reported URL
+    except Exception:  # Fall back to Playwright's Page.url property during transient navigations
+        pass  # Continue to the fallback
+
+    try:  # Read Playwright's last known URL as a fallback
+        return str(page.url or "").strip()  # Return the normalized fallback URL
+    except Exception:  # Treat inaccessible pages as having no current URL
+        return ""  # Return an empty URL
+
+
+def format_url_for_log(url: str) -> str:
+    """
+    Format a URL for logs without exposing authentication query parameters or fragments.
+
+    Facebook authentication URLs can contain long encrypted_context values and other
+    verification state in the query string. Logs therefore retain only scheme, host, and path.
+
+    :param url: Raw browser URL.
+    :return: Safe URL containing no query string or fragment.
+    """
+
+    try:  # Parse the URL using the standard URL parser
+        parsed = urlparse(str(url or ""))  # Split the URL into structured components
+
+        if not parsed.scheme or not parsed.netloc:  # Preserve simple fallback strings such as <unknown>
+            return str(url or "<unknown>")  # Return the original non-URL value
+
+        return urlunparse(
+            (parsed.scheme, parsed.netloc, parsed.path or "/", "", "", "")
+        )  # Rebuild the URL without query parameters or fragments
+    except Exception:  # Logging must never fail because of a malformed URL
+        return "<unknown>"  # Return a safe fallback
+
+
+def is_facebook_url(url: str) -> bool:
+    """
+    Determine whether a URL belongs to Facebook.
+
+    :param url: URL to inspect.
+    :return: True when the hostname is facebook.com or one of its subdomains.
+    """
+
+    try:  # Parse the URL hostname safely
+        hostname = (urlparse(str(url or "")).hostname or "").casefold()  # Normalize hostname
+    except Exception:  # Invalid URLs are not Facebook pages
+        return False  # Reject malformed URLs
+
+    return hostname == "facebook.com" or hostname.endswith(".facebook.com")  # Match Facebook hostnames only
+
+
+def is_facebook_authentication_path(url: str) -> bool:
+    """
+    Determine whether a Facebook URL path represents an authentication or verification flow.
+
+    Query parameters are deliberately ignored. For example, the authenticated Facebook home
+    URL "/?checkpoint_src=any" has path "/" and must not be mistaken for "/checkpoint".
+
+    :param url: Facebook URL to inspect.
+    :return: True when the URL path is a known authentication/verification route.
+    """
+
+    if not is_facebook_url(url):  # Authentication-path checks only apply to Facebook pages
+        return False  # Reject non-Facebook URLs
+
+    try:  # Parse only the path component so query-string names cannot cause false positives
+        path = (urlparse(url).path or "/").casefold().rstrip("/") or "/"  # Normalize path
+    except Exception:  # Treat malformed Facebook URLs conservatively
+        return True  # Do not accept authentication based on an unparseable URL
+
+    for prefix in AUTHENTICATION_PATH_PREFIXES:  # Compare against known authentication route prefixes
+        normalized_prefix = prefix.casefold().rstrip("/") or "/"  # Normalize configured prefix
+        if path == normalized_prefix or path.startswith(f"{normalized_prefix}/"):  # Match route and descendants
+            return True  # Authentication or verification is still in progress
+
+    return False  # The current Facebook path is not an authentication route
+
+
 def has_facebook_session_cookie(context: BrowserContext) -> bool:
     """
     Determine whether the browser context contains Facebook's authenticated user cookie.
 
     :param context: Persistent browser context containing Facebook session state.
-    :return: True when a non-empty c_user cookie is available for Facebook.
+    :return: True when a non-empty c_user cookie is available for a Facebook domain.
     """
 
-    try:  # Read only cookies applicable to Facebook without writing or logging their values
-        cookies = context.cookies([FACEBOOK_BASE_URL])  # Retrieve Facebook cookies from the persistent context
+    try:  # Read context cookies without logging any cookie value
+        cookies = context.cookies()  # Retrieve every cookie from the persistent context
     except Exception:  # Treat cookie-read failures as unauthenticated instead of guessing
         return False  # Authentication cannot be positively confirmed
 
-    for cookie in cookies:  # Inspect Facebook cookie metadata
-        if cookie.get("name") == "c_user" and str(cookie.get("value") or "").strip():  # Verify the authenticated user cookie exists
+    for cookie in cookies:  # Inspect cookie metadata only
+        cookie_name = str(cookie.get("name") or "")  # Normalize cookie name
+        cookie_value = str(cookie.get("value") or "").strip()  # Read value only for non-empty validation
+        cookie_domain = str(cookie.get("domain") or "").lstrip(".").casefold()  # Normalize cookie domain
+
+        if (
+            cookie_name == "c_user"
+            and cookie_value
+            and (cookie_domain == "facebook.com" or cookie_domain.endswith(".facebook.com"))
+        ):  # Verify Facebook's authenticated-user cookie exists
             return True  # A Facebook user session is present
 
-    return False  # No authenticated user cookie was found
+    return False  # No authenticated Facebook user cookie was found
 
 
 def has_visible_authentication_challenge(page: Page) -> bool:
@@ -1042,6 +1149,9 @@ def has_visible_authentication_challenge(page: Page) -> bool:
     :param page: Browser page currently involved in Facebook authentication.
     :return: True when an interactive authentication challenge is still visible.
     """
+
+    if page.is_closed():  # Closed pages cannot be considered challenge-free
+        return True  # Treat the page as unusable
 
     for selector in AUTHENTICATION_CHALLENGE_SELECTORS:  # Inspect known authentication/challenge controls
         try:  # Isolate DOM changes and transient navigation states
@@ -1060,6 +1170,41 @@ def has_visible_authentication_challenge(page: Page) -> bool:
     return False  # No visible authentication challenge control was found
 
 
+def has_authenticated_facebook_ui(page: Page) -> bool:
+    """
+    Detect UI that is expected only after a Facebook user session has reached the normal site.
+
+    The function intentionally combines multiple structural signals instead of depending on
+    language-specific text such as "Home", "Página inicial", or profile-menu labels.
+
+    :param page: Facebook page to inspect.
+    :return: True when normal authenticated Facebook navigation/main content is rendered.
+    """
+
+    if page.is_closed():  # A closed page has no usable authenticated UI
+        return False  # Reject the page
+
+    try:  # Require Facebook's normal main content region
+        has_main = page.locator('div[role="main"]').count() > 0  # Detect central Facebook content
+    except Exception:  # Transient DOM failures mean the UI is not yet stable
+        has_main = False  # Keep waiting
+
+    try:  # Look for the normal logged-in navigation region
+        has_navigation = page.locator('[role="navigation"]').count() > 0  # Detect navigation controls
+    except Exception:  # Ignore transient navigation-region failures
+        has_navigation = False  # Keep waiting
+
+    try:  # Detect a link to the configured user's own profile as an additional positive signal
+        profile_path = urlparse(PROFILE_URL).path.rstrip("/")  # Resolve configured profile slug/path
+        has_profile_link = bool(profile_path) and page.locator(
+            f'a[href*="{profile_path}"]'
+        ).count() > 0  # Detect the user's profile link in the authenticated shell
+    except Exception:  # Ignore transient profile-link detection failures
+        has_profile_link = False  # Keep waiting
+
+    return has_main and (has_navigation or has_profile_link)  # Require normal main UI plus one authenticated-shell signal
+
+
 def is_facebook_authentication_in_progress(page: Page) -> bool:
     """
     Determine whether Facebook is still showing an authentication or verification flow.
@@ -1068,15 +1213,15 @@ def is_facebook_authentication_in_progress(page: Page) -> bool:
     :return: True when login, CAPTCHA, 2FA, recovery, or checkpoint work is still pending.
     """
 
-    if page.is_closed():  # Verify the user has not closed the automation page
+    if page.is_closed():  # Verify the user has not closed this page
         return True  # A closed page cannot be considered authenticated
 
-    current_url = (page.url or "").lower()  # Normalize the current URL
+    current_url = get_live_page_url(page)  # Read the browser's current live URL
 
-    if "facebook.com" not in current_url:  # Authentication is not complete while Facebook redirects elsewhere
+    if not is_facebook_url(current_url):  # Authentication is incomplete while Facebook redirects elsewhere
         return True  # Wait for the flow to return to Facebook
 
-    if any(hint in current_url for hint in LOGIN_URL_HINTS):  # Detect known login/challenge routes
+    if is_facebook_authentication_path(current_url):  # Detect known authentication/challenge routes by URL path only
         return True  # Authentication or verification is still in progress
 
     if has_visible_authentication_challenge(page):  # Detect interactive login/2FA/CAPTCHA controls
@@ -1087,33 +1232,86 @@ def is_facebook_authentication_in_progress(page: Page) -> bool:
 
 def is_facebook_authenticated(page: Page, context: BrowserContext) -> bool:
     """
-    Positively verify that the current browser session is authenticated to Facebook.
+    Positively verify that a specific browser page represents a completed Facebook session.
 
     :param page: Browser page to inspect.
     :param context: Persistent browser context containing Facebook session state.
-    :return: True only when a session cookie exists and no authentication flow is active.
+    :return: True only when session, URL, challenge, and authenticated UI checks all succeed.
     """
 
-    if is_facebook_authentication_in_progress(page):  # Reject login/checkpoint/transient states first
-        return False  # Authentication is not complete
+    if not has_facebook_session_cookie(context):  # Require Facebook's authenticated-user session cookie first
+        return False  # Do not infer authentication from page appearance alone
 
-    if not has_facebook_session_cookie(context):  # Require Facebook's authenticated-user session cookie
-        return False  # Do not infer authentication merely because the login form disappeared
+    if is_facebook_authentication_in_progress(page):  # Reject login/checkpoint/transient states
+        return False  # Authentication is not complete on this page
 
-    return True  # Positive session evidence exists and no challenge is visible
+    if not has_authenticated_facebook_ui(page):  # Require normal logged-in Facebook structure
+        return False  # Avoid accepting a blank/intermediate redirect after the cookie appears
+
+    return True  # Positive session evidence and authenticated UI are both present
 
 
-def wait_for_facebook_login(page: Page, context: BrowserContext) -> None:
+def select_current_facebook_page(context: BrowserContext, preferred_page: Page | None = None) -> Page:
+    """
+    Resolve the Facebook page that currently represents the user's active authentication state.
+
+    Facebook authentication can replace or open pages during CAPTCHA, 2FA, and checkpoint
+    flows. The downloader therefore re-evaluates every page in the persistent context instead
+    of permanently trusting the Page object captured when Chrome first launched.
+
+    :param context: Persistent browser context containing all browser pages.
+    :param preferred_page: Previously selected page, when still available.
+    :return: Best current Facebook page.
+    """
+
+    pages = [page for page in context.pages if not page.is_closed()]  # Snapshot all currently usable pages
+
+    if not pages:  # The browser context should always contain at least one page
+        raise RuntimeError("The Facebook automation browser has no open pages.")  # Stop with a precise error
+
+    facebook_pages = [page for page in pages if is_facebook_url(get_live_page_url(page))]  # Keep Facebook pages only
+
+    if has_facebook_session_cookie(context):  # Once a session exists, prefer a page that has reached normal Facebook UI
+        authenticated_pages = [
+            page for page in facebook_pages if is_facebook_authenticated(page, context)
+        ]  # Find every positively authenticated Facebook page
+
+        if authenticated_pages:  # Prefer the configured profile when it is already open
+            target_prefix = PROFILE_URL.casefold().rstrip("/")  # Normalize configured profile URL
+            for candidate in reversed(authenticated_pages):  # Prefer newer pages when multiple pages match
+                if get_live_page_url(candidate).casefold().rstrip("/").startswith(target_prefix):
+                    return candidate  # Reuse the actual configured profile page
+
+            return authenticated_pages[-1]  # Otherwise use the newest authenticated Facebook page
+
+    challenge_pages = [
+        page for page in facebook_pages if is_facebook_authentication_in_progress(page)
+    ]  # Find current login/2FA/checkpoint pages
+
+    if challenge_pages:  # Prefer the newest challenge page because Facebook may replace the original tab/page
+        return challenge_pages[-1]  # Return the most recently created challenge page
+
+    if preferred_page is not None and not preferred_page.is_closed():  # Reuse the prior page when it remains usable
+        return preferred_page  # Preserve continuity during ordinary client-side navigation
+
+    if facebook_pages:  # Fall back to the newest Facebook page
+        return facebook_pages[-1]  # Return the newest Facebook page
+
+    return pages[-1]  # Fall back to the newest browser page before initial Facebook navigation
+
+
+def wait_for_facebook_login(page: Page, context: BrowserContext) -> Page:
     """
     Wait until the complete Facebook authentication flow is finished and stable.
 
     The function intentionally waits through password entry, CAPTCHA, 2FA, recovery,
-    checkpoints, approval prompts, and intermediate redirects. Authentication is accepted
-    only after the session remains positively authenticated for AUTHENTICATION_STABLE_SECONDS.
+    checkpoints, approval prompts, page replacement, and intermediate redirects.
+    Authentication is accepted only after the same positively authenticated page remains
+    valid for AUTHENTICATION_STABLE_SECONDS.
 
-    :param page: Playwright page displaying the Facebook authentication flow.
+    :param page: Initial Playwright page displaying the Facebook authentication flow.
     :param context: Persistent browser context containing Facebook session state.
-    :return: None
+    :return: Current authenticated Facebook page that should be used after login.
     """
 
     print(
@@ -1130,39 +1328,42 @@ def wait_for_facebook_login(page: Page, context: BrowserContext) -> None:
     )  # Allow indefinite waiting by default while retaining an optional configurable timeout
 
     authenticated_since = None  # Track when a continuously valid authenticated state began
+    authenticated_page = None  # Track the page that owns the current stability window
     last_status_output = 0.0  # Limit repeated waiting messages
 
     while deadline is None or time.monotonic() < deadline:  # Wait until authentication is stable or configured timeout expires
-        if page.is_closed():  # Detect the user manually closing the controlled page
-            raise RuntimeError("The Facebook authentication browser page was closed before authentication completed.")  # Stop with a precise error
-
+        page = select_current_facebook_page(context, page)  # Follow page replacements/new tabs created by Facebook authentication
         now = time.monotonic()  # Capture one monotonic timestamp for this iteration
 
         try:  # Authentication state can change repeatedly during CAPTCHA/2FA redirects
-            authenticated = is_facebook_authenticated(page, context)  # Positively verify the current state
+            authenticated = is_facebook_authenticated(page, context)  # Positively verify the selected current page
         except Exception:  # Treat transient browser/DOM errors as an unstable authentication state
             authenticated = False  # Continue waiting instead of advancing early
 
         if authenticated:  # A candidate authenticated state is currently present
-            if authenticated_since is None:  # Start the stability window on the first positive observation
+            if authenticated_since is None or authenticated_page is not page:  # Start/restart stability for the selected page
                 authenticated_since = now  # Record the beginning of continuous authentication
+                authenticated_page = page  # Bind the stability window to this concrete Page object
 
             stable_for = now - authenticated_since  # Calculate continuous authenticated duration
 
-            if stable_for >= AUTHENTICATION_STABLE_SECONDS:  # Require the state to remain valid across redirects/prompts
+            if stable_for >= AUTHENTICATION_STABLE_SECONDS:  # Require the page to remain valid across redirects/prompts
                 print(
                     f"{BackgroundColors.GREEN}Facebook authentication confirmed and stable for "
-                    f"{BackgroundColors.CYAN}{AUTHENTICATION_STABLE_SECONDS:.0f}s{BackgroundColors.GREEN}.{Style.RESET_ALL}"
-                )  # Log only after positive stable confirmation
-                return  # Continue to the profile only after the full login flow has settled
-        else:  # Any challenge, missing cookie, redirect, or transient state invalidates the candidate
+                    f"{BackgroundColors.CYAN}{AUTHENTICATION_STABLE_SECONDS:.0f}s{BackgroundColors.GREEN}. "
+                    f"{BackgroundColors.GREEN}Current page: "
+                    f"{BackgroundColors.CYAN}{format_url_for_log(get_live_page_url(page))}{Style.RESET_ALL}"
+                )  # Log only after positive stable confirmation without exposing authentication query data
+                return page  # Return the actual authenticated page currently shown by Facebook
+        else:  # Any challenge, missing cookie, redirect, page replacement, or transient state invalidates the candidate
             authenticated_since = None  # Restart the stability window after the user finishes the remaining step
+            authenticated_page = None  # Clear the previously authenticated Page candidate
 
-        if now - last_status_output >= 15.0:  # Provide occasional progress without flooding the terminal
-            current_url = page.url or "<unknown>"  # Read the current browser location without exposing credentials
+        if now - last_status_output >= AUTHENTICATION_STATUS_LOG_INTERVAL_SECONDS:  # Provide occasional progress without flooding the terminal
+            safe_url = format_url_for_log(get_live_page_url(page))  # Strip authentication query data from logs
             print(
                 f"{BackgroundColors.YELLOW}Authentication still in progress; waiting for completion. "
-                f"{BackgroundColors.GREEN}Current page: {BackgroundColors.CYAN}{current_url}{Style.RESET_ALL}"
+                f"{BackgroundColors.GREEN}Current page: {BackgroundColors.CYAN}{safe_url}{Style.RESET_ALL}"
             )  # Make it clear the program has intentionally not advanced
             last_status_output = now  # Record the status-output time
 
@@ -1173,41 +1374,43 @@ def wait_for_facebook_login(page: Page, context: BrowserContext) -> None:
     )  # Fail only when the user explicitly configures a finite timeout
 
 
-def wait_for_profile_ready(page: Page, context: BrowserContext) -> None:
+def wait_for_profile_ready(page: Page, context: BrowserContext) -> Page:
     """
     Wait until the authenticated Facebook profile page has rendered usable main/timeline content.
 
     :param page: Browser page opened at PROFILE_URL.
     :param context: Persistent authenticated browser context.
-    :return: None
+    :return: Current authenticated profile page that is ready for scraping.
     """
 
     deadline = time.monotonic() + PROFILE_READY_TIMEOUT_SECONDS  # Bound post-authentication profile rendering
-    target_prefix = PROFILE_URL.lower().rstrip("/")  # Normalize the configured profile URL
+    target_prefix = PROFILE_URL.casefold().rstrip("/")  # Normalize the configured profile URL
 
     while time.monotonic() < deadline:  # Wait for Facebook's client-rendered profile to become usable
-        if page.is_closed():  # Detect manual closure
-            raise RuntimeError("The Facebook browser page was closed while waiting for the profile to load.")  # Stop clearly
+        page = select_current_facebook_page(context, page)  # Follow any page replacement after profile navigation
 
         if not is_facebook_authenticated(page, context):  # Authentication may be challenged again after navigating to the profile
             print(
                 f"{BackgroundColors.YELLOW}Facebook requested additional authentication after profile navigation; "
                 f"waiting for completion.{Style.RESET_ALL}"
             )  # Explain why scraping has not started
-            wait_for_facebook_login(page, context)  # Wait through the new challenge before continuing
+            page = wait_for_facebook_login(page, context)  # Wait through the new challenge and recover the current page
             continue  # Re-evaluate profile readiness afterward
 
-        current_url = (page.url or "").lower().rstrip("/")  # Normalize the current location
-        if not current_url.startswith(target_prefix):  # Wait until the configured profile navigation has settled
-            time.sleep(AUTHENTICATION_POLL_SECONDS)  # Allow client-side redirects to finish
-            continue  # Re-check the URL
+        current_url = get_live_page_url(page).casefold().rstrip("/")  # Read the current live page location
+        if not current_url.startswith(target_prefix):  # Ensure the configured profile is the page being inspected
+            try:  # Navigate the currently authenticated page to the requested profile
+                page.goto(PROFILE_URL, wait_until="domcontentloaded", timeout=PAGE_LOAD_TIMEOUT_MS)  # Open configured profile
+            except Exception:  # Allow transient client-side navigation failures to retry until the deadline
+                time.sleep(AUTHENTICATION_POLL_SECONDS)  # Wait briefly before retrying
+            continue  # Re-select and validate the profile page
 
         try:  # Verify that Facebook rendered the authenticated profile's main content
             has_main_content = page.locator('div[role="main"]').count() > 0  # Detect the main profile region
             has_timeline_articles = any(page.locator(selector).count() > 0 for selector in ARTICLE_SELECTORS)  # Detect loaded posts
 
             if has_main_content or has_timeline_articles:  # Either signal proves that the authenticated profile UI rendered
-                return  # The page is safe to hand to the scraper
+                return page  # Return the concrete profile page to the scraper
         except Exception:  # Ignore transient client-side rerenders
             pass  # Continue polling until the page stabilizes
 
@@ -1215,40 +1418,44 @@ def wait_for_profile_ready(page: Page, context: BrowserContext) -> None:
 
     raise TimeoutError(
         f"Facebook authentication is valid, but the profile did not render usable content within "
-        f"{PROFILE_READY_TIMEOUT_SECONDS} seconds. Current URL: {page.url}"
+        f"{PROFILE_READY_TIMEOUT_SECONDS} seconds. Current URL: {format_url_for_log(get_live_page_url(page))}"
     )  # Do not silently run an empty scraper against an unusable page
 
 
 def find_existing_facebook_page(context: BrowserContext) -> Page | None:
     """
-    Find an existing Facebook page inside a connected browser context.
+    Find the best existing Facebook page inside the persistent browser context.
 
     :param context: Persistent browser context used by the downloader.
     :return: Existing Facebook page or None.
     """
 
-    profile_prefix = PROFILE_URL.lower().rstrip("/")  # Normalize the configured profile URL
+    pages = [page for page in context.pages if not page.is_closed()]  # Snapshot usable pages
+    facebook_pages = [page for page in pages if is_facebook_url(get_live_page_url(page))]  # Keep Facebook pages only
 
-    for page in context.pages:  # Prefer the exact configured profile tab
-        try:  # Protect against pages closing during enumeration
-            if (page.url or "").lower().rstrip("/").startswith(profile_prefix):  # Match the configured profile
-                return page  # Return the already-open profile tab
-        except Exception:  # Ignore closed pages
-            continue  # Continue scanning
+    if not facebook_pages:  # Verify a reusable Facebook page exists
+        return None  # No Facebook page is currently open
 
-    for page in context.pages:  # Otherwise reuse any authenticated Facebook tab
-        try:  # Protect against pages closing during enumeration
-            if "facebook.com" in (page.url or "").lower():  # Match a Facebook page
-                return page  # Return the existing Facebook tab
-        except Exception:  # Ignore closed pages
-            continue  # Continue scanning
+    target_prefix = PROFILE_URL.casefold().rstrip("/")  # Normalize configured profile URL
 
-    return None  # No reusable Facebook page was found
+    for page in reversed(facebook_pages):  # Prefer the newest exact configured profile page
+        if get_live_page_url(page).casefold().rstrip("/").startswith(target_prefix):
+            return page  # Return the configured profile page
+
+    if has_facebook_session_cookie(context):  # Prefer a positively authenticated page when login is already persisted
+        for page in reversed(facebook_pages):  # Prefer the newest authenticated Facebook page
+            if is_facebook_authenticated(page, context):
+                return page  # Return the current authenticated page
+
+    return facebook_pages[-1]  # Otherwise return the newest Facebook page for authentication
 
 
 def launch_browser_session(playwright: Playwright) -> BrowserSession:
     """
     Launch the dedicated persistent browser profile used for Facebook automation.
+
+    Chromium sandboxing is explicitly enabled so Chrome is not launched with Playwright's
+    default --no-sandbox configuration.
 
     :param playwright: Active Playwright instance.
     :return: BrowserSession containing the page and context used by the downloader.
@@ -1267,8 +1474,9 @@ def launch_browser_session(playwright: Playwright) -> BrowserSession:
             channel=BROWSER_CHANNEL,
             headless=False,
             no_viewport=True,
+            chromium_sandbox=True,
             args=["--start-maximized"],
-        )  # Launch Chrome with the project's dedicated persistent profile
+        )  # Launch Chrome with the project's persistent profile and Chromium sandbox enabled
     except Exception as chrome_error:  # Fall back to Playwright Chromium when stable Chrome cannot be launched
         verbose_output(
             true_string=f"{BackgroundColors.YELLOW}Stable Chrome launch failed: {BackgroundColors.CYAN}{chrome_error}{Style.RESET_ALL}"
@@ -1278,47 +1486,55 @@ def launch_browser_session(playwright: Playwright) -> BrowserSession:
             user_data_dir=str(AUTOMATION_PROFILE_DIR),
             headless=False,
             no_viewport=True,
+            chromium_sandbox=True,
             args=["--start-maximized"],
-        )  # Launch bundled Chromium using the same persistent profile
+        )  # Launch bundled Chromium using the same persistent profile and sandbox
 
-    page = find_existing_facebook_page(context) or (context.pages[0] if context.pages else context.new_page())  # Resolve the page to control
+    page = find_existing_facebook_page(context) or (context.pages[-1] if context.pages else context.new_page())  # Resolve the page to control
     return BrowserSession(context=context, page=page)  # Return the locally managed browser session
 
 
-def navigate_to_profile(page: Page, context: BrowserContext) -> None:
+def navigate_to_profile(page: Page, context: BrowserContext) -> Page:
     """
     Authenticate completely, navigate to the configured Facebook profile, and wait until it is usable.
 
-    :param page: Browser page used by the downloader.
+    :param page: Initial browser page used by the downloader.
     :param context: Persistent browser context containing Facebook authentication state.
-    :return: None
+    :return: Current authenticated profile page that should be used by the scraper.
     """
 
     page.set_default_timeout(10_000)  # Configure a conservative default action timeout
     page.set_default_navigation_timeout(PAGE_LOAD_TIMEOUT_MS)  # Configure page navigation timeout
 
-    target_prefix = PROFILE_URL.lower().rstrip("/")  # Normalize configured profile URL
-    current_url = (page.url or "").lower().rstrip("/")  # Normalize current page URL
+    current_url = get_live_page_url(page)  # Resolve current live browser location
 
-    if "facebook.com" not in current_url:  # Open Facebook first when the persistent browser starts on a blank/non-Facebook page
+    if not is_facebook_url(current_url):  # Open Facebook first when the persistent browser starts on a blank/non-Facebook page
         page.goto(FACEBOOK_BASE_URL, wait_until="domcontentloaded", timeout=PAGE_LOAD_TIMEOUT_MS)  # Enter Facebook without interrupting a later login flow
 
-    wait_for_facebook_login(page, context)  # Wait through the entire password/CAPTCHA/2FA/checkpoint flow
+    page = wait_for_facebook_login(page, context)  # Follow the actual page through the complete authentication flow
+    page.set_default_timeout(10_000)  # Reapply action timeout in case Facebook created/replaced the page
+    page.set_default_navigation_timeout(PAGE_LOAD_TIMEOUT_MS)  # Reapply navigation timeout to the selected page
 
-    current_url = (page.url or "").lower().rstrip("/")  # Re-read the location after authentication finishes
+    target_prefix = PROFILE_URL.casefold().rstrip("/")  # Normalize configured profile URL
+    current_url = get_live_page_url(page).casefold().rstrip("/")  # Re-read the current live location after authentication
+
     if not current_url.startswith(target_prefix):  # Navigate to the requested profile only after authentication is stable
         page.goto(PROFILE_URL, wait_until="domcontentloaded", timeout=PAGE_LOAD_TIMEOUT_MS)  # Open the configured profile
 
-    if not is_facebook_authenticated(page, context):  # Facebook can request another challenge when the profile is opened
-        wait_for_facebook_login(page, context)  # Wait through any additional account verification
-        if not (page.url or "").lower().rstrip("/").startswith(target_prefix):  # Return to the profile after the challenge completes
-            page.goto(PROFILE_URL, wait_until="domcontentloaded", timeout=PAGE_LOAD_TIMEOUT_MS)  # Re-open the configured profile
+    page = select_current_facebook_page(context, page)  # Recover the current page if Facebook replaced it during navigation
 
-    wait_for_profile_ready(page, context)  # Require authenticated main/timeline content before scraping begins
+    if not is_facebook_authenticated(page, context):  # Facebook can request another challenge when the profile is opened
+        page = wait_for_facebook_login(page, context)  # Wait through any additional account verification
+        if not get_live_page_url(page).casefold().rstrip("/").startswith(target_prefix):  # Return to profile after challenge
+            page.goto(PROFILE_URL, wait_until="domcontentloaded", timeout=PAGE_LOAD_TIMEOUT_MS)  # Re-open configured profile
+
+    page = wait_for_profile_ready(page, context)  # Require authenticated main/timeline content before scraping begins
 
     print(
         f"{BackgroundColors.GREEN}Profile loaded and authenticated: {BackgroundColors.CYAN}{PROFILE_URL}{Style.RESET_ALL}"
     )  # Log successful authentication and profile readiness
+
+    return page  # Return the exact Page object that is ready for timeline scraping
 
 
 def load_existing_post_keys() -> set[str]:
@@ -2103,7 +2319,7 @@ def main():
     try:  # Execute the complete Facebook export workflow
         with sync_playwright() as playwright:  # Start Playwright runtime
             session = launch_browser_session(playwright)  # Launch the persistent automation browser
-            navigate_to_profile(session.page, session.context)  # Complete authentication and open the configured Facebook profile
+            session.page = navigate_to_profile(session.page, session.context)  # Complete authentication and retain the current Facebook page
             statistics = scroll_profile_and_download(session.page, session.context)  # Download discovered posts
 
             print(
