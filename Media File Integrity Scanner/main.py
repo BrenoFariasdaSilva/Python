@@ -17,7 +17,8 @@ Description :
         - Full-file FFmpeg packet-read validation without creating or modifying media.
         - Detection of recoverable FFmpeg errors even when the process exit code is 0.
         - One incrementally updated JSON corruption report per configured input root.
-        - Collision-safe Windows-compatible report names derived from each input path.
+        - Collision-safe report names derived from each input path.
+        - Unix-style forward-slash path serialization in reports and terminal output.
         - Bounded error storage to prevent heavily corrupted files from bloating reports.
 
 Usage:
@@ -54,6 +55,8 @@ Assumptions & Notes:
       future optional full-decode mode and is outside the default packet-read scan.
     - Reports are rewritten atomically after each scanned file so completed results
       remain available if the program is interrupted later in the library.
+    - Paths written to reports or terminal output always use forward slashes, while
+      native Path objects remain unchanged for actual filesystem operations.
 """
 
 import atexit  # For playing a sound when the program finishes
@@ -130,6 +133,17 @@ RUN_FUNCTIONS = {
 # Functions Definitions:
 
 
+def unix_path(path_value: str | Path) -> str:
+    """
+    Convert a path-like value to a platform-independent forward-slash representation.
+
+    :param path_value: Path or path string being serialized or displayed.
+    :return: Path text using forward slashes regardless of the current operating system.
+    """
+
+    return str(path_value).replace("\\", "/")  # Normalize Windows path separators only for reports, logs, and other user-visible text
+
+
 def verbose_output(true_string="", false_string=""):
     """
     Outputs a message if the VERBOSE constant is set to True.
@@ -162,10 +176,10 @@ def resolve_entry_with_trailing_space(current_path: str, entry: str, stripped_pa
             corrected = os.path.join(current_path, stripped_part)  # Build corrected path
             try:  # Attempt to rename entry
                 os.rename(resolved, corrected)  # Rename entry to stripped version
-                verbose_output(true_string=f"{BackgroundColors.GREEN}Renamed: {BackgroundColors.CYAN}{resolved}{BackgroundColors.GREEN} -> {BackgroundColors.CYAN}{corrected}{Style.RESET_ALL}")  # Log rename
+                verbose_output(true_string=f"{BackgroundColors.GREEN}Renamed: {BackgroundColors.CYAN}{unix_path(resolved)}{BackgroundColors.GREEN} -> {BackgroundColors.CYAN}{unix_path(corrected)}{Style.RESET_ALL}")  # Log rename
                 resolved = corrected  # Update resolved path after rename
             except Exception:  # Handle rename failure
-                verbose_output(true_string=f"{BackgroundColors.RED}Failed to rename: {BackgroundColors.CYAN}{resolved}{Style.RESET_ALL}")  # Log failure
+                verbose_output(true_string=f"{BackgroundColors.RED}Failed to rename: {BackgroundColors.CYAN}{unix_path(resolved)}{Style.RESET_ALL}")  # Log failure
 
         return resolved  # Return resolved path
     except Exception:  # Catch unexpected errors
@@ -181,7 +195,7 @@ def resolve_full_trailing_space_path(filepath: str) -> str:
     """
 
     try:  # Wrap full function logic to ensure safe execution
-        verbose_output(true_string=f"{BackgroundColors.GREEN}Resolving full trailing space path for: {BackgroundColors.CYAN}{filepath}{Style.RESET_ALL}")  # Log start
+        verbose_output(true_string=f"{BackgroundColors.GREEN}Resolving full trailing space path for: {BackgroundColors.CYAN}{unix_path(filepath)}{Style.RESET_ALL}")  # Log start
 
         if not isinstance(filepath, str) or not filepath:  # Verify filepath validity
             verbose_output(true_string=f"{BackgroundColors.YELLOW}Invalid filepath provided, skipping resolution.{Style.RESET_ALL}")  # Log invalid input
@@ -207,7 +221,7 @@ def resolve_full_trailing_space_path(filepath: str) -> str:
             try:  # Attempt to list current directory
                 entries = os.listdir(current_path) if os.path.isdir(current_path) else []  # List current directory entries
             except Exception:  # Handle failure to list directory contents
-                verbose_output(true_string=f"{BackgroundColors.RED}Failed to list directory: {BackgroundColors.CYAN}{current_path}{Style.RESET_ALL}")  # Log failure
+                verbose_output(true_string=f"{BackgroundColors.RED}Failed to list directory: {BackgroundColors.CYAN}{unix_path(current_path)}{Style.RESET_ALL}")  # Log failure
                 return filepath  # Return original
 
             stripped_part = part.strip()  # Normalize current part
@@ -229,7 +243,7 @@ def resolve_full_trailing_space_path(filepath: str) -> str:
         return current_path  # Return fully resolved path
 
     except Exception:  # Catch unexpected errors to maintain stability
-        verbose_output(true_string=f"{BackgroundColors.RED}Error resolving full path: {BackgroundColors.CYAN}{filepath}{Style.RESET_ALL}")  # Log error
+        verbose_output(true_string=f"{BackgroundColors.RED}Error resolving full path: {BackgroundColors.CYAN}{unix_path(filepath)}{Style.RESET_ALL}")  # Log error
         return filepath  # Return original
 
 
@@ -243,7 +257,7 @@ def verify_filepath_exists(filepath):
 
     try:  # Wrap full function logic to ensure production-safe monitoring
         verbose_output(
-            f"{BackgroundColors.GREEN}Verifying if the file or folder exists at the path: {BackgroundColors.CYAN}{filepath}{Style.RESET_ALL}"
+            f"{BackgroundColors.GREEN}Verifying if the file or folder exists at the path: {BackgroundColors.CYAN}{unix_path(filepath)}{Style.RESET_ALL}"
         )  # Output the verbose message
         
         if not isinstance(filepath, str) or not filepath.strip():  # Verify for non-string or empty/whitespace-only input   
@@ -294,7 +308,7 @@ def verify_filepath_exists(filepath):
                 resolved = resolve_full_trailing_space_path(path_variant)  # Resolve trailing space issues across path components
                 if resolved != path_variant and os.path.exists(resolved):  # Verify resolved path exists
                     verbose_output(
-                        f"{BackgroundColors.YELLOW}Resolved trailing space mismatch: {BackgroundColors.CYAN}{path_variant}{BackgroundColors.YELLOW} -> {BackgroundColors.CYAN}{resolved}{Style.RESET_ALL}"
+                        f"{BackgroundColors.YELLOW}Resolved trailing space mismatch: {BackgroundColors.CYAN}{unix_path(path_variant)}{BackgroundColors.YELLOW} -> {BackgroundColors.CYAN}{unix_path(resolved)}{Style.RESET_ALL}"
                     )  # Log successful resolution
                     return True  # Return True if corrected path exists
             except Exception:  # Catch any exception during trailing space resolution   
@@ -322,14 +336,14 @@ def resolve_ffmpeg_executable() -> str:
     resolved_path = shutil.which(FFMPEG)  # Search the operating system PATH for the configured FFmpeg command
 
     if resolved_path is None:  # Reject execution when FFmpeg cannot be located
-        raise FileNotFoundError(f"FFmpeg executable not found: {FFMPEG}")  # Report the missing external dependency
+        raise FileNotFoundError(f"FFmpeg executable not found: {unix_path(FFMPEG)}")  # Report the missing external dependency
 
     return resolved_path  # Return the executable path discovered through the system PATH
 
 
 def build_report_filepath(input_dir: str) -> Path:
     """
-    Build a Windows-compatible JSON report path derived from an input directory.
+    Build a filesystem-compatible JSON report path derived from an input directory.
 
     :param input_dir: Configured input root used as the report filename source.
     :return: Report path inside OUTPUT_DIR.
@@ -355,9 +369,9 @@ def discovery_error_record(error: OSError) -> dict:
     """
 
     return {  # Build the directory discovery error record
-        "path": str(getattr(error, "filename", "") or ""),  # Preserve the affected filesystem path when available
+        "path": unix_path(getattr(error, "filename", "") or ""),  # Preserve the affected filesystem path using the required Unix-style separators
         "error_type": type(error).__name__,  # Record the concrete operating system exception type
-        "message": str(error),  # Preserve the original traversal failure message
+        "message": unix_path(str(error)),  # Preserve the traversal failure message while normalizing any embedded Windows path separators
     }
 
 
@@ -381,7 +395,7 @@ def discover_media_files(input_dir: Path) -> tuple[list[Path], list[dict]]:
         """
 
         discovery_errors.append(discovery_error_record(error))  # Preserve the traversal problem in the generated JSON report
-        logger.write(f"{BackgroundColors.YELLOW}Directory discovery error: {BackgroundColors.CYAN}{error}{Style.RESET_ALL}")  # Report the inaccessible directory in the terminal log
+        logger.write(f"{BackgroundColors.YELLOW}Directory discovery error: {BackgroundColors.CYAN}{unix_path(str(error))}{Style.RESET_ALL}")  # Report the inaccessible directory in the terminal log
 
     for current_path, _, filenames in os.walk(input_dir, onerror=handle_walk_error):  # Traverse every accessible subdirectory without following directory symlinks
         for filename in filenames:  # Inspect every file discovered in the current directory
@@ -405,9 +419,9 @@ def relative_media_path(media_path: Path, input_dir: Path) -> str:
     """
 
     try:  # Attempt normal relative path resolution for files found below the configured root
-        return str(media_path.relative_to(input_dir))  # Return the concise root-relative media path
+        return unix_path(media_path.relative_to(input_dir))  # Return the concise root-relative media path using Unix-style separators
     except ValueError:  # Handle unusual path normalization differences that prevent relative resolution
-        return str(media_path)  # Fall back to the complete media path
+        return unix_path(media_path)  # Fall back to the complete media path using Unix-style separators
 
 
 def build_integrity_scan_command(ffmpeg_executable: str, media_path: Path) -> list[str]:
@@ -463,10 +477,10 @@ def scan_media_file(ffmpeg_executable: str, media_path: Path, input_dir: Path) -
 
     if process.stderr is None:  # Guard against an unexpected subprocess configuration without a stderr pipe
         process.kill()  # Stop the unusable FFmpeg process before reporting the internal scan failure
-        raise RuntimeError(f"Could not capture FFmpeg stderr for: {media_path}")  # Reject a scan that cannot observe integrity errors
+        raise RuntimeError(f"Could not capture FFmpeg stderr for: {unix_path(media_path)}")  # Reject a scan that cannot observe integrity errors
 
     for stderr_line in process.stderr:  # Read FFmpeg error output continuously until the complete media file has been consumed
-        clean_line = stderr_line.rstrip("\r\n")  # Remove terminal line endings while preserving the original FFmpeg message contents
+        clean_line = unix_path(stderr_line.rstrip("\r\n"))  # Remove terminal line endings and normalize any FFmpeg-reported Windows paths to Unix-style separators
 
         if not clean_line.strip():  # Ignore empty FFmpeg output lines that do not describe an integrity problem
             continue  # Continue waiting for the next emitted error line
@@ -486,7 +500,7 @@ def scan_media_file(ffmpeg_executable: str, media_path: Path, input_dir: Path) -
         file_size_bytes = None  # Preserve the unavailable file size explicitly in the JSON report
 
     return {  # Build the complete per-file integrity scan result
-        "file_path": str(media_path),  # Store the complete source media path
+        "file_path": unix_path(media_path),  # Store the complete source media path using Unix-style separators
         "relative_path": relative_media_path(media_path, input_dir),  # Store a concise path relative to the configured input root
         "extension": media_path.suffix.lower(),  # Record the normalized media container extension
         "file_size_bytes": file_size_bytes,  # Record the media file size when available
@@ -535,9 +549,9 @@ def build_initial_report(input_dir_string: str, input_dir: Path, report_path: Pa
     current_time = datetime.datetime.now()  # Capture the report initialization time
 
     return {  # Build the complete initial report document
-        "input_dir": input_dir_string,  # Preserve the configured input directory exactly as supplied
-        "resolved_input_dir": str(input_dir),  # Record the normalized filesystem root used by the scanner
-        "report_file": str(report_path),  # Record the generated JSON report path
+        "input_dir": unix_path(input_dir_string),  # Store the configured input directory using Unix-style separators
+        "resolved_input_dir": unix_path(input_dir),  # Record the normalized filesystem root using Unix-style separators
+        "report_file": unix_path(report_path),  # Record the generated JSON report path using Unix-style separators
         "scan_method": "FFmpeg full-file packet-read scan using -v error -map 0 -c copy -f null -",  # Document the non-destructive validation strategy
         "supported_extensions": sorted(MEDIA_EXTENSIONS),  # Record every configured media extension considered during recursive discovery
         "status": "in_progress",  # Mark the report as incomplete while media files are still being processed
@@ -566,10 +580,10 @@ def failed_scan_record(media_path: Path, input_dir: Path, exception: Exception) 
     """
 
     return {  # Build the scan failure record
-        "file_path": str(media_path),  # Store the complete affected media path
+        "file_path": unix_path(media_path),  # Store the complete affected media path using Unix-style separators
         "relative_path": relative_media_path(media_path, input_dir),  # Store the path relative to the configured input root when possible
         "error_type": type(exception).__name__,  # Record the concrete Python/subprocess exception type
-        "message": str(exception),  # Preserve the original scan failure description
+        "message": unix_path(str(exception)),  # Preserve the scan failure description while normalizing any embedded Windows path separators
     }
 
 
@@ -602,16 +616,16 @@ def scan_input_directory(ffmpeg_executable: str, input_dir_string: str) -> Path:
     report_path = build_report_filepath(input_dir_string)  # Build the requested path-derived JSON report filename
 
     if not input_dir.is_dir():  # Reject missing paths and non-directory input roots before recursive discovery
-        raise NotADirectoryError(f"Input directory does not exist or is not a directory: {input_dir}")  # Report the invalid configured input root
+        raise NotADirectoryError(f"Input directory does not exist or is not a directory: {unix_path(input_dir)}")  # Report the invalid configured input root
 
-    logger.write(f"{BackgroundColors.BOLD}{BackgroundColors.GREEN}Discovering media files in: {BackgroundColors.CYAN}{input_dir}{Style.RESET_ALL}")  # Announce recursive discovery for the current input root
+    logger.write(f"{BackgroundColors.BOLD}{BackgroundColors.GREEN}Discovering media files in: {BackgroundColors.CYAN}{unix_path(input_dir)}{Style.RESET_ALL}")  # Announce recursive discovery for the current input root
     logger.write("")  # Keep one blank line before the discovery result
     media_files, discovery_errors = discover_media_files(input_dir)  # Discover every supported media file and preserve traversal failures
     report_data = build_initial_report(input_dir_string, input_dir, report_path, discovery_errors, len(media_files))  # Initialize the root-specific JSON report
     write_json_report(report_path, report_data)  # Persist the initial report before the potentially long media scan begins
 
     logger.write(f"{BackgroundColors.GREEN}Found {BackgroundColors.CYAN}{len(media_files)}{BackgroundColors.GREEN} supported media files.{Style.RESET_ALL}")  # Report the number of files queued for integrity scanning
-    logger.write(f"{BackgroundColors.GREEN}Report: {BackgroundColors.CYAN}{report_path}{Style.RESET_ALL}")  # Display the JSON report destination
+    logger.write(f"{BackgroundColors.GREEN}Report: {BackgroundColors.CYAN}{unix_path(report_path)}{Style.RESET_ALL}")  # Display the JSON report destination
     logger.write("")  # Keep one blank line before the progress bar
 
     progress_bar = tqdm(media_files, total=len(media_files), unit="file", dynamic_ncols=True, file=sys.__stdout__, colour="green")  # Render one green inline-updated progress bar for this input directory
@@ -627,19 +641,19 @@ def scan_input_directory(ffmpeg_executable: str, input_dir_string: str) -> Path:
                 report_data["corrupted_files"] += 1  # Increment the corrupted/suspicious media count
                 report_data["corruptions"].append(scan_result)  # Preserve full diagnostics for the affected media file
                 progress_bar.clear()  # Clear the inline bar before permanent error messages
-                logger.write(f"{BackgroundColors.RED}Corruption/error detected: {BackgroundColors.CYAN}{media_path}{Style.RESET_ALL}")  # Highlight the detected integrity issue in the terminal log
+                logger.write(f"{BackgroundColors.RED}Corruption/error detected: {BackgroundColors.CYAN}{unix_path(media_path)}{Style.RESET_ALL}")  # Highlight the detected integrity issue in the terminal log
                 logger.write(f"{BackgroundColors.RED}FFmpeg exit code: {BackgroundColors.CYAN}{scan_result['ffmpeg_exit_code']}{BackgroundColors.RED} | Error lines: {BackgroundColors.CYAN}{scan_result['error_line_count']}{Style.RESET_ALL}")  # Summarize FFmpeg's result without assuming non-zero exit is required for corruption
                 progress_bar.refresh()  # Restore the inline bar after the permanent messages
             else:  # Handle media files that complete without FFmpeg error-level output
                 report_data["clean_files"] += 1  # Increment the clean media count
-                verbose_output(true_string=f"{BackgroundColors.GREEN}No FFmpeg integrity errors detected: {BackgroundColors.CYAN}{media_path}{Style.RESET_ALL}")  # Log clean results only in verbose mode
+                verbose_output(true_string=f"{BackgroundColors.GREEN}No FFmpeg integrity errors detected: {BackgroundColors.CYAN}{unix_path(media_path)}{Style.RESET_ALL}")  # Log clean results only in verbose mode
 
         except Exception as exception:  # Capture Python or subprocess failures that prevent a reliable FFmpeg integrity result
             report_data["scan_failures"] += 1  # Increment the failed scan count separately from confirmed corruption results
             report_data["failed_scans"].append(failed_scan_record(media_path, input_dir, exception))  # Preserve failure details in the JSON report
             progress_bar.clear()  # Clear the inline bar before permanent failure messages
-            logger.write(f"{BackgroundColors.RED}Failed to scan: {BackgroundColors.CYAN}{media_path}{Style.RESET_ALL}")  # Report the affected media path
-            logger.write(f"{BackgroundColors.RED}{type(exception).__name__}: {BackgroundColors.CYAN}{exception}{Style.RESET_ALL}")  # Report the concrete failure reason
+            logger.write(f"{BackgroundColors.RED}Failed to scan: {BackgroundColors.CYAN}{unix_path(media_path)}{Style.RESET_ALL}")  # Report the affected media path
+            logger.write(f"{BackgroundColors.RED}{type(exception).__name__}: {BackgroundColors.CYAN}{unix_path(str(exception))}{Style.RESET_ALL}")  # Report the concrete failure reason
             progress_bar.refresh()  # Restore the inline bar after the permanent messages
 
         write_json_report(report_path, report_data)  # Atomically checkpoint the report after every media file for interruption resilience
@@ -650,7 +664,7 @@ def scan_input_directory(ffmpeg_executable: str, input_dir_string: str) -> Path:
     write_json_report(report_path, report_data)  # Persist the completed report state after every queued media file has been handled
 
     logger.write(  # Output the final input-root scan summary
-        f"{BackgroundColors.GREEN}Finished input directory: {BackgroundColors.CYAN}{input_dir}\n"
+        f"{BackgroundColors.GREEN}Finished input directory: {BackgroundColors.CYAN}{unix_path(input_dir)}\n"
         f"{BackgroundColors.GREEN}Scanned: {BackgroundColors.CYAN}{report_data['files_scanned']}{BackgroundColors.GREEN} | "
         f"Clean: {BackgroundColors.CYAN}{report_data['clean_files']}{BackgroundColors.GREEN} | "
         f"Corrupted: {BackgroundColors.CYAN}{report_data['corrupted_files']}{BackgroundColors.GREEN} | "
@@ -782,7 +796,7 @@ def main():
     generated_reports: list[Path] = []  # Store report paths generated successfully during the current program execution
     input_failures: list[tuple[str, Exception]] = []  # Store configured input roots that could not be processed
 
-    logger.write(f"{BackgroundColors.GREEN}FFmpeg: {BackgroundColors.CYAN}{ffmpeg_executable}{Style.RESET_ALL}")  # Display the resolved FFmpeg executable used for every integrity scan
+    logger.write(f"{BackgroundColors.GREEN}FFmpeg: {BackgroundColors.CYAN}{unix_path(ffmpeg_executable)}{Style.RESET_ALL}")  # Display the resolved FFmpeg executable used for every integrity scan
     logger.write("")  # Keep one blank line before the first input directory
 
     for input_dir in INPUT_DIRS:  # Process each configured movie root independently
@@ -790,8 +804,8 @@ def main():
             generated_reports.append(scan_input_directory(ffmpeg_executable, input_dir))  # Scan the complete input root and preserve its generated report path
         except Exception as exception:  # Capture input-root configuration or discovery failures
             input_failures.append((input_dir, exception))  # Preserve the failed root and exception for the final program summary
-            logger.write(f"{BackgroundColors.RED}Failed input directory: {BackgroundColors.CYAN}{input_dir}{Style.RESET_ALL}")  # Report the input root that could not be processed
-            logger.write(f"{BackgroundColors.RED}{type(exception).__name__}: {BackgroundColors.CYAN}{exception}{Style.RESET_ALL}")  # Report the concrete input-root failure reason
+            logger.write(f"{BackgroundColors.RED}Failed input directory: {BackgroundColors.CYAN}{unix_path(input_dir)}{Style.RESET_ALL}")  # Report the input root that could not be processed
+            logger.write(f"{BackgroundColors.RED}{type(exception).__name__}: {BackgroundColors.CYAN}{unix_path(str(exception))}{Style.RESET_ALL}")  # Report the concrete input-root failure reason
             logger.write("")  # Keep one blank line after the failed input directory
 
     finish_time = datetime.datetime.now()  # Get the finish time of the program
@@ -801,7 +815,7 @@ def main():
     )  # Output the final report generation totals
 
     for report_path in generated_reports:  # Display every JSON report successfully produced during the current run
-        print(f"{BackgroundColors.GREEN}Report: {BackgroundColors.CYAN}{report_path}{Style.RESET_ALL}")  # Output one generated report path
+        print(f"{BackgroundColors.GREEN}Report: {BackgroundColors.CYAN}{unix_path(report_path)}{Style.RESET_ALL}")  # Output one generated report path
 
     print(
         f"{BackgroundColors.GREEN}Start time: {BackgroundColors.CYAN}{start_time.strftime('%d/%m/%Y - %H:%M:%S')}\n{BackgroundColors.GREEN}Finish time: {BackgroundColors.CYAN}{finish_time.strftime('%d/%m/%Y - %H:%M:%S')}\n{BackgroundColors.GREEN}Execution time: {BackgroundColors.CYAN}{calculate_execution_time(start_time, finish_time)}{Style.RESET_ALL}"
