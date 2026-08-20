@@ -1331,20 +1331,21 @@ def render_translation_progress(progress_state: Dict[str, Any] | None, force: bo
     overall_percent = (overall_done / overall_total * 100) if overall_total else 0.0  # Overall percent
     file_eta = format_eta(file_done, file_total, progress_state["file_start_time"])  # Current file ETA
     overall_eta = format_eta(overall_done, overall_total, progress_state["overall_start_time"])  # Overall ETA
-    file_line = f"File    [{build_progress_bar(file_done, file_total)}] {file_percent:5.1f}% | {file_done:,}/{file_total:,} chars | ETA {file_eta}"  # Build file progress line
-    overall_line = f"Overall [{build_progress_bar(overall_done, overall_total)}] {overall_percent:5.1f}% | {overall_done:,}/{overall_total:,} chars | Files {progress_state['completed_files']}/{progress_state['total_files']} | ETA {overall_eta}"  # Build overall progress line
+    api_key_name = str(progress_state.get("active_api_key_name", "N/A"))  # Read the currently selected DeepL account name without exposing its API key.
+    file_line = f"{BackgroundColors.GREEN}File - API Key: {BackgroundColors.CYAN}{api_key_name}{BackgroundColors.GREEN} [{build_progress_bar(file_done, file_total)}] {file_percent:5.1f}% | {file_done:,}/{file_total:,} chars | ETA {file_eta}{Style.RESET_ALL}"  # Build the green file progress line with only the active API key name in cyan.
+    overall_line = f"{BackgroundColors.GREEN}Overall - API Key: {BackgroundColors.CYAN}{api_key_name}{BackgroundColors.GREEN} [{build_progress_bar(overall_done, overall_total)}] {overall_percent:5.1f}% | {overall_done:,}/{overall_total:,} chars | Files {progress_state['completed_files']}/{progress_state['total_files']} | ETA {overall_eta}{Style.RESET_ALL}"  # Build the green overall progress line with only the active API key name in cyan.
 
     stream = sys.__stdout__  # Read the original terminal stream once so Pylance can narrow the optional type safely
 
     if interactive and stream is not None:
         if progress_state.get("progress_visible"):
             stream.write("\033[F\033[K\033[F\033[K")  # Clear previous two progress lines
-        stream.write(f"{BackgroundColors.GREEN}{file_line}{Style.RESET_ALL}\n{BackgroundColors.CYAN}{overall_line}{Style.RESET_ALL}\n")  # Draw current progress lines
+        stream.write(f"{file_line}\n{overall_line}\n")  # Draw both fully colored progress lines.
         stream.flush()  # Flush terminal output
         progress_state["progress_visible"] = True  # Mark progress as visible
     else:
-        print(file_line)  # Plain snapshot for redirected output or environments without an original stdout stream
-        print(overall_line)  # Plain snapshot for redirected output or environments without an original stdout stream
+        print(file_line)  # Print the colored file progress snapshot in redirected output.
+        print(overall_line)  # Print the colored overall progress snapshot in redirected output.
 
     progress_state["last_snapshot_time"] = now  # Store snapshot time
 
@@ -1798,6 +1799,19 @@ def create_deepl_client(account_name: str, api_key: str) -> deepl.DeepLClient:
     return deepl.DeepLClient(auth_key=api_key)  # Create the client while retaining the SDK's built-in transient retry behavior.
 
 
+def set_progress_api_key_name(progress_state: Dict[str, Any] | None, account_name: str) -> None:
+    """
+    Stores the currently selected DeepL account name for progress rendering.
+
+    :param progress_state: Optional shared progress state.
+    :param account_name: DeepL account name currently selected for API operations.
+    :return: None.
+    """
+
+    if progress_state is not None:  # Update progress state only when progress rendering is enabled.
+        progress_state["active_api_key_name"] = account_name  # Store only the configured account name and never the secret API key.
+
+
 def select_next_unused_deepl_account(account_items: List[Tuple[str, str]], active_account_index: int, api_state: Dict[str, Any], progress_state: Dict[str, Any] | None = None) -> int:
     """
     Selects the next DeepL account that has not been used during this execution.
@@ -1818,6 +1832,7 @@ def select_next_unused_deepl_account(account_items: List[Tuple[str, str]], activ
         if candidate_account_name in used_accounts:  # Reject every account already touched during this execution.
             continue  # Continue until a genuinely unused key is found.
 
+        set_progress_api_key_name(progress_state, candidate_account_name)  # Update both progress bars before logging and redrawing the quota-driven account switch.
         print_progress_event(progress_state, f"{BackgroundColors.YELLOW}Switching DeepL account from {BackgroundColors.CYAN}{current_account_name}{BackgroundColors.YELLOW} to unused account {BackgroundColors.CYAN}{candidate_account_name}{BackgroundColors.YELLOW} after quota exhaustion.{Style.RESET_ALL}")  # Log quota-driven account rotation.
         return candidate_index  # Return the next unused account without issuing an API request yet.
 
@@ -1844,7 +1859,8 @@ def translate_text_block(text_block: str, account_items: List[Tuple[str, str]], 
         raise RuntimeError("No DeepL API accounts are available for pending translation work.")  # Reject impossible runtime state before indexing the account list.
 
     while True:  # Keep the same pending block until it translates or no eligible account remains.
-        account_name, api_key = account_items[active_account_index]  # Select the current process-wide active account.
+        account_name, api_key = account_items[active_account_index]  # Select the current process-wide active account in configured insertion order.
+        set_progress_api_key_name(progress_state, account_name)  # Keep both progress bars synchronized with the account used by the next DeepL operation.
         api_state["used_accounts"].add(account_name)  # Mark this key as used before its first API operation in this execution.
 
         if account_name not in translators:  # Reuse one client per account across files and retries.
@@ -2101,10 +2117,11 @@ def prepare_translation_runtime(translation_plan: List[Dict[str, Any]], total_pl
         if not get_api_keys():  # Preserve existing API-key validation before new translation requests.
             print(f"{BackgroundColors.RED}DEEPL_API_KEYS not found or invalid in .env file. Please set it before running the program.{Style.RESET_ALL}")  # Output configuration error.
             return None  # Leave persisted partial outputs untouched for the next run.
-        account_items = list(DEEPL_API_KEYS.items())  # Preserve configured account order across files.
+        account_items = list(DEEPL_API_KEYS.items())  # Preserve the exact JSON insertion order from DEEPL_API_KEYS for account priority across files.
 
     api_state = {"used_accounts": set(), "quota_exhausted_accounts": set()}  # Track account usage and quota retirement across the entire execution.
-    progress_state = {"interactive": is_interactive_output(), "overall_total_characters": total_planned_characters, "overall_translated_characters": 0, "overall_start_time": time.monotonic(), "total_files": len(translation_plan), "completed_files": 0, "progress_visible": False, "last_snapshot_time": 0.0}  # Track only current-execution character progress while retaining planned file completion.
+    initial_api_key_name = account_items[0][0] if account_items else "N/A"  # Select the first configured account name for initial progress display without exposing its API key.
+    progress_state = {"interactive": is_interactive_output(), "overall_total_characters": total_planned_characters, "overall_translated_characters": 0, "overall_start_time": time.monotonic(), "total_files": len(translation_plan), "completed_files": 0, "progress_visible": False, "last_snapshot_time": 0.0, "active_api_key_name": initial_api_key_name}  # Track current-execution progress and the active configured DeepL account name.
     return account_items, translators, api_state, progress_state  # Return initialized API, account, and progress state for deterministic plan execution.
 
 
