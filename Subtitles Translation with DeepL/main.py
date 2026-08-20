@@ -56,6 +56,7 @@ Assumptions & Notes:
 import atexit  # For playing a sound when the program finishes
 import datetime  # For getting the current date and time
 import deepl  # For DeepL API
+import hashlib  # For fingerprinting resumable translation state
 import json  # For parsing DeepL API accounts from environment variables
 import os  # For running a command in the terminal
 import platform  # For getting the operating system name
@@ -99,6 +100,7 @@ TARGET_LANGUAGE_MIN_MARGIN = 0.20  # Require target language to clearly beat the
 TARGET_LANGUAGE_MIN_SHARE = 0.80  # Require target language to dominate mixed-language content
 SUBTITLE_FORMATTING_TAG_PATTERN = re.compile(r"</?(?:i|b|u|font)(?:\s+[^<>]*)?>", re.IGNORECASE)  # Recognized SRT formatting tags
 LANGUAGE_DETECTOR = None  # Lazily initialized offline language detector
+TRANSLATION_RESUME_STATE_VERSION = 1  # Version for persistent resumable translation metadata
 
 # Logger Setup:
 logger = Logger(str(SCRIPT_DIR / "Logs" / f"{Path(__file__).stem}.log"), clean=True)  # Create a Logger instance
@@ -841,6 +843,400 @@ def write_srt_lines_atomic(file_path: Path, lines: List[str]) -> None:
     os.replace(temp_file, file_path)  # Replace destination after successful write
 
 
+def serialize_srt_blocks_preserving_indices(blocks: List[Tuple[str, str, List[str]]]) -> List[str]:
+    """
+    Serializes SRT blocks while preserving their existing indices and timings.
+
+    :param blocks: Parsed subtitle blocks.
+    :return: Serialized SRT lines with original indices and timings.
+    """
+
+    lines = []  # Store serialized subtitle lines.
+
+    for index, timing, text_lines in blocks:  # Serialize every complete subtitle block.
+        lines.extend([index, timing])  # Preserve the source index and timing lines.
+        lines.extend(text_lines)  # Append translated or structural subtitle text lines.
+        lines.append("")  # Terminate the subtitle block at a safe SRT boundary.
+
+    return lines  # Return structurally complete serialized subtitle blocks.
+
+
+def build_srt_blocks_fingerprint(blocks: List[Tuple[str, str, List[str]]]) -> str:
+    """
+    Builds a deterministic fingerprint for ordered SRT block structure and text.
+
+    :param blocks: Parsed subtitle blocks.
+    :return: SHA-256 fingerprint for the ordered subtitle blocks.
+    """
+
+    payload = json.dumps([[index, timing, text_lines] for index, timing, text_lines in blocks], ensure_ascii=False, separators=(",", ":"))  # Serialize ordered block data deterministically.
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()  # Return the deterministic subtitle fingerprint.
+
+
+def get_translation_resume_state_file(output_file: Path) -> Path:
+    """
+    Resolves the persistent resume metadata file for a translated output.
+
+    :param output_file: Translated output SRT path.
+    :return: Resume metadata file path.
+    """
+
+    return output_file.with_suffix(output_file.suffix + ".resume.json")  # Keep resume metadata beside the translated output.
+
+
+def get_in_place_resume_backup_file(output_file: Path) -> Path:
+    """
+    Resolves the protected source backup used for resumable in-place translation.
+
+    :param output_file: In-place translated output SRT path.
+    :return: Protected source backup SRT path.
+    """
+
+    return output_file.with_name(f"{output_file.stem}.resume.backup.srt")  # Use an internal backup filename excluded from source discovery.
+
+
+def write_translation_resume_state_atomic(state_file: Path, state: Dict[str, Any]) -> None:
+    """
+    Writes translation resume metadata through a same-folder atomic replacement.
+
+    :param state_file: Resume metadata file path.
+    :param state: Resume metadata payload.
+    :return: None.
+    """
+
+    temp_file = state_file.with_suffix(state_file.suffix + ".tmp")  # Build a same-folder temporary metadata path.
+    temp_file.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")  # Persist complete resume metadata before replacement.
+    os.replace(temp_file, state_file)  # Atomically replace the previous resume metadata.
+
+
+def read_translation_resume_state(state_file: Path) -> Dict[str, Any] | None:
+    """
+    Reads persistent translation resume metadata when it is valid JSON data.
+
+    :param state_file: Resume metadata file path.
+    :return: Resume metadata mapping, or None when unavailable or malformed.
+    """
+
+    if not state_file.exists():  # Return no state when the metadata file is absent.
+        return None  # Signal that no persistent resume metadata exists.
+
+    try:  # Read and parse persistent resume metadata safely.
+        state = json.loads(state_file.read_text(encoding="utf-8"))  # Parse the atomic JSON resume metadata.
+    except Exception:  # Treat unreadable or malformed metadata as unusable.
+        return None  # Preserve source and output data when resume metadata cannot be trusted.
+
+    return state if isinstance(state, dict) else None  # Accept only mapping-shaped resume metadata.
+
+
+def create_translation_resume_state(source_lines: List[str], output_file: Path, in_place_output: bool) -> Dict[str, Any]:
+    """
+    Creates persistent resume metadata for the exact preprocessed source representation.
+
+    :param source_lines: Exact preprocessed source SRT lines used for translation.
+    :param output_file: Translated output SRT path.
+    :param in_place_output: Whether source and translated output share the same path.
+    :return: Newly persisted resume metadata mapping.
+    """
+
+    source_blocks = parse_srt_blocks(source_lines)  # Parse the exact source representation used for DeepL requests.
+    state_file = get_translation_resume_state_file(output_file)  # Resolve persistent resume metadata beside the output.
+    state = {"version": TRANSLATION_RESUME_STATE_VERSION, "target_lang": TARGET_LANG.upper(), "source_fingerprint": build_srt_blocks_fingerprint(source_blocks), "source_block_count": len(source_blocks), "completed_blocks": 0, "completed_characters": 0, "completed_output_fingerprint": build_srt_blocks_fingerprint([]), "pending_block": None, "final_output_fingerprint": "", "in_place_output": in_place_output}  # Store source identity and crash-journal state without duplicating completed subtitle content.
+    write_translation_resume_state_atomic(state_file, state)  # Persist source identity before the first DeepL request.
+    return state  # Return the persisted resume metadata for the active translation session.
+
+
+def build_translation_resume_info(source_lines: List[str], output_file: Path) -> Dict[str, Any]:
+    """
+    Validates persistent resume metadata and translated output against the current source.
+
+    :param source_lines: Exact preprocessed source SRT lines used for translation.
+    :param output_file: Translated output SRT path.
+    :return: Resume validation data describing safely reusable translated progress.
+    """
+
+    source_blocks = parse_srt_blocks(source_lines)  # Parse the current exact translation source representation.
+    state_file = get_translation_resume_state_file(output_file)  # Resolve persistent resume metadata for this output.
+    result = {"valid": False, "reason": "No resume metadata exists.", "state_file": state_file, "state": None, "output_blocks": [], "completed_blocks": 0, "completed_characters": 0, "effective_blocks": 0, "effective_characters": 0, "pending_block": None, "pending_persisted": False, "final_output_ready": False}  # Initialize conservative resume validation data.
+
+    if not state_file.exists():  # Stop when no persistent resume session exists.
+        return result  # Return the conservative no-resume result.
+
+    state = read_translation_resume_state(state_file)  # Read persistent source identity and progress journal.
+    if state is None:  # Reject malformed or unreadable resume metadata.
+        result["reason"] = "Resume metadata is unreadable or malformed."  # Record the conservative rejection reason.
+        return result  # Avoid trusting any partial output without valid metadata.
+
+    result["state"] = state  # Preserve validated JSON data for later session preparation.
+
+    if state.get("version") != TRANSLATION_RESUME_STATE_VERSION:  # Require the exact supported state format.
+        result["reason"] = "Resume metadata version is unsupported."  # Record version incompatibility.
+        return result  # Avoid interpreting unknown persistent state.
+    if state.get("target_lang") != TARGET_LANG.upper():  # Require the same configured DeepL target language.
+        result["reason"] = "Resume metadata target language differs from the current configuration."  # Record target-language incompatibility.
+        return result  # Prevent reusing translation progress for another target language.
+    if not source_blocks or state.get("source_block_count") != len(source_blocks):  # Require identical source block cardinality.
+        result["reason"] = "Current source block structure differs from the resumable source."  # Record source structure incompatibility.
+        return result  # Avoid skipping content after structural source changes.
+
+    source_fingerprint = build_srt_blocks_fingerprint(source_blocks)  # Fingerprint the exact current preprocessed source.
+    if state.get("source_fingerprint") != source_fingerprint:  # Require source text, indices, timings, and order to remain unchanged.
+        result["reason"] = "Current source content differs from the resumable source."  # Record exact source identity mismatch.
+        return result  # Prevent stale translated content from being reused for changed source text.
+
+    output_lines = []  # Default to no persisted translated SRT blocks.
+    if output_file.exists() and output_file.stat().st_size > 0:  # Read an existing non-empty translated output when present.
+        try:  # Read the current translated output safely.
+            output_lines = output_file.read_text(encoding="utf-8").splitlines()  # Load persisted output lines for structural validation.
+        except Exception:  # Reject unreadable output while preserving all files.
+            result["reason"] = "Translated output is unreadable."  # Record output read failure.
+            return result  # Avoid skipping any source content from unreadable output.
+
+    output_blocks = parse_srt_blocks(output_lines) if output_lines else []  # Parse only complete structurally valid output blocks.
+    if output_lines and not output_blocks:  # Reject malformed non-empty translated output.
+        result["reason"] = "Translated output is malformed."  # Record malformed partial output.
+        return result  # Avoid trusting an ambiguous SRT boundary.
+
+    final_output_fingerprint = state.get("final_output_fingerprint", "")  # Read a journaled finalized-output fingerprint when available.
+    if final_output_fingerprint and output_blocks and build_srt_blocks_fingerprint(output_blocks) == final_output_fingerprint:  # Recognize cleanup already persisted before metadata removal.
+        total_characters = sum(len("\n".join(text_lines)) for _, _, text_lines in source_blocks)  # Count all previously translated source characters.
+        result.update({"valid": True, "reason": "Final translated output is already persisted.", "output_blocks": output_blocks, "completed_blocks": len(source_blocks), "completed_characters": total_characters, "effective_blocks": len(source_blocks), "effective_characters": total_characters, "final_output_ready": True})  # Mark final output as complete without another DeepL request.
+        return result  # Return finalized crash-recovery state.
+
+    completed_blocks = state.get("completed_blocks")  # Read committed safely persisted block count.
+    completed_characters = state.get("completed_characters")  # Read committed source character count.
+    if not isinstance(completed_blocks, int) or completed_blocks < 0 or completed_blocks > len(source_blocks):  # Require a possible committed prefix length.
+        result["reason"] = "Resume metadata contains an impossible completed block count."  # Record impossible progression.
+        return result  # Avoid skipping any source content from inconsistent metadata.
+    if not isinstance(completed_characters, int) or completed_characters < 0:  # Require a valid committed character total.
+        result["reason"] = "Resume metadata contains an invalid completed character count."  # Record invalid character progression.
+        return result  # Avoid trusting inconsistent progress totals.
+
+    expected_completed_characters = sum(len("\n".join(text_lines)) for _, _, text_lines in source_blocks[:completed_blocks])  # Recalculate committed characters from the current source prefix.
+    if completed_characters != expected_completed_characters:  # Require mathematically exact committed character totals.
+        result["reason"] = "Resume metadata character totals do not match the current source prefix."  # Record arithmetic inconsistency.
+        return result  # Prevent incorrect progress or quota planning.
+
+    in_place_output = bool(state.get("in_place_output"))  # Read whether this session replaces a misleading generated filename in place.
+    pending_block = state.get("pending_block")  # Read a translated block journaled before SRT persistence.
+    if in_place_output and completed_blocks == 0 and pending_block is None and output_blocks and build_srt_blocks_fingerprint(output_blocks) == source_fingerprint:  # Recognize an in-place session that crashed before its first translated block.
+        output_blocks = []  # Treat the still-intact source path as zero translated output progress.
+
+    if len(output_blocks) < completed_blocks:  # Require every committed block to remain present in the output.
+        result["reason"] = "Translated output is shorter than the committed resume progression."  # Record missing persisted translation data.
+        return result  # Avoid reconstructing completed translations that are no longer available.
+
+    for position in range(completed_blocks):  # Validate structural correspondence for every committed output block.
+        source_block = source_blocks[position]  # Read the matching current source block.
+        output_block = output_blocks[position]  # Read the persisted translated block.
+        if source_block[0] != output_block[0] or source_block[1] != output_block[1]:  # Require exact index and timing correspondence.
+            result["reason"] = "Translated output index or timing differs from the current source prefix."  # Record structural incompatibility.
+            return result  # Prevent unsafe skipping when ordering or timing changed.
+
+    completed_output_fingerprint = state.get("completed_output_fingerprint")  # Read the committed translated prefix fingerprint.
+    if not isinstance(completed_output_fingerprint, str) or build_srt_blocks_fingerprint(output_blocks[:completed_blocks]) != completed_output_fingerprint:  # Require persisted translated prefix content to remain unchanged.
+        result["reason"] = "Translated output content differs from the committed resume prefix."  # Record translated-prefix mutation.
+        return result  # Avoid trusting altered or unrelated generated content.
+
+    effective_blocks = completed_blocks  # Start reusable progress at the committed SRT prefix.
+    effective_characters = completed_characters  # Start reusable character progress at the committed prefix total.
+    pending_persisted = False  # Default to no journaled block already present in the output.
+
+    if pending_block is not None:  # Validate a DeepL result journaled before or during output persistence.
+        if not isinstance(pending_block, dict):  # Require mapping-shaped pending journal data.
+            result["reason"] = "Pending resume metadata is malformed."  # Record malformed pending journal data.
+            return result  # Avoid interpreting ambiguous pending progress.
+
+        position = pending_block.get("position")  # Read the pending source block position.
+        translated_lines = pending_block.get("translated_lines")  # Read the journaled DeepL translation lines.
+        if not isinstance(position, int) or position != completed_blocks or position >= len(source_blocks):  # Require the exact next source block.
+            result["reason"] = "Pending resume metadata has impossible ordering."  # Record impossible pending progression.
+            return result  # Prevent skipping non-prefix source content.
+        if not isinstance(translated_lines, list) or any(not isinstance(line, str) for line in translated_lines):  # Require complete translated text lines.
+            result["reason"] = "Pending resume metadata contains invalid translated text."  # Record invalid journaled translation payload.
+            return result  # Avoid persisting malformed translated content.
+
+        source_block = source_blocks[position]  # Read the exact source block represented by the pending translation.
+        source_block_fingerprint = build_srt_blocks_fingerprint([source_block])  # Fingerprint the current pending source block.
+        if pending_block.get("source_fingerprint") != source_block_fingerprint:  # Require pending translation to belong to the unchanged source block.
+            result["reason"] = "Pending resume metadata belongs to different source content."  # Record pending source mismatch.
+            return result  # Prevent stale pending translation from being reused.
+
+        pending_characters = len("\n".join(source_block[2]))  # Recalculate source characters represented by the pending DeepL result.
+        if pending_block.get("characters") != pending_characters:  # Require exact pending character accounting.
+            result["reason"] = "Pending resume character totals are inconsistent."  # Record pending arithmetic mismatch.
+            return result  # Prevent incorrect remaining-character planning.
+
+        pending_output_block = (source_block[0], source_block[1], translated_lines)  # Reconstruct the complete SRT block from journaled DeepL output.
+        pending_output_fingerprint = build_srt_blocks_fingerprint([pending_output_block])  # Fingerprint the journaled translated block.
+        if pending_block.get("output_fingerprint") != pending_output_fingerprint:  # Require pending translated content to remain intact.
+            result["reason"] = "Pending translated content differs from its persisted fingerprint."  # Record pending output mutation.
+            return result  # Avoid persisting altered journal content.
+
+        if len(output_blocks) == completed_blocks:  # Pending block was journaled but not yet atomically written to the SRT.
+            pending_persisted = False  # Mark that restart must persist the journaled block before another DeepL request.
+        elif len(output_blocks) == completed_blocks + 1:  # Pending block may already be present after a crash before metadata commit.
+            output_pending_block = output_blocks[position]  # Read the possible already-persisted pending output block.
+            if source_block[0] != output_pending_block[0] or source_block[1] != output_pending_block[1] or build_srt_blocks_fingerprint([output_pending_block]) != pending_output_fingerprint:  # Require exact structural and translated-content equality.
+                result["reason"] = "Pending translated block does not match the persisted SRT progression."  # Record pending persistence mismatch.
+                return result  # Avoid advancing beyond an ambiguous output boundary.
+            pending_persisted = True  # Mark that only metadata commit remains for this translated block.
+        else:  # Reject extra output beyond the single crash-journaled block.
+            result["reason"] = "Translated output extends beyond the safely journaled progression."  # Record impossible output progression.
+            return result  # Avoid trusting unproven translated content.
+
+        effective_blocks += 1  # Count the journaled DeepL result as reusable translated work.
+        effective_characters += pending_characters  # Exclude journaled characters from future DeepL quota planning.
+    elif len(output_blocks) != completed_blocks:  # Require exact output length when no pending translation journal exists.
+        result["reason"] = "Translated output contains uncommitted blocks without a pending journal."  # Record unproven translated progression.
+        return result  # Avoid skipping any unjournaled output content.
+
+    result.update({"valid": True, "reason": "Resume metadata and translated prefix are valid.", "output_blocks": output_blocks, "completed_blocks": completed_blocks, "completed_characters": completed_characters, "effective_blocks": effective_blocks, "effective_characters": effective_characters, "pending_block": pending_block, "pending_persisted": pending_persisted})  # Return safely reusable prefix and journaled progress.
+    return result  # Return validated resumable translation state.
+
+
+def reconcile_translation_resume_state(source_lines: List[str], output_file: Path, resume_info: Dict[str, Any]) -> Tuple[Dict[str, Any], List[Tuple[str, str, List[str]]]]:
+    """
+    Reconciles a valid pending translation journal with the persistent output SRT.
+
+    :param source_lines: Exact preprocessed source SRT lines used for translation.
+    :param output_file: Translated output SRT path.
+    :param resume_info: Validated resume information for this source and output.
+    :return: Updated resume metadata and safely persisted translated output blocks.
+    """
+
+    if not resume_info.get("valid") or not isinstance(resume_info.get("state"), dict):  # Require previously validated resume data.
+        raise RuntimeError("Resume state cannot be reconciled because validation did not succeed.")  # Reject unsafe resume preparation.
+
+    state = dict(resume_info["state"])  # Copy validated persistent state for deterministic updates.
+    output_blocks = list(resume_info.get("output_blocks", []))  # Start from the structurally validated persisted prefix.
+    pending_block = resume_info.get("pending_block")  # Read a DeepL result journaled across the previous interruption.
+    state_file = get_translation_resume_state_file(output_file)  # Resolve persistent metadata path once.
+
+    if pending_block is None:  # Return immediately when no journaled result needs reconciliation.
+        return state, output_blocks  # Preserve the already committed translated prefix.
+
+    source_blocks = parse_srt_blocks(source_lines)  # Parse exact source blocks for pending reconstruction.
+    position = pending_block["position"]  # Read validated pending block position.
+    source_block = source_blocks[position]  # Read the validated matching source block.
+    pending_output_block = (source_block[0], source_block[1], list(pending_block["translated_lines"]))  # Reconstruct the complete journaled translated block.
+
+    if not resume_info.get("pending_persisted"):  # Persist the journaled DeepL result when the prior run stopped before output replacement.
+        candidate_blocks = output_blocks + [pending_output_block]  # Build the next structurally complete translated prefix.
+        candidate_lines = serialize_srt_blocks_preserving_indices(candidate_blocks)  # Serialize only complete SRT blocks.
+        if len(parse_srt_blocks(candidate_lines)) != len(candidate_blocks):  # Require the journaled translation to serialize as complete SRT structure.
+            raise RuntimeError("Journaled translated block cannot be persisted as a structurally complete SRT prefix.")  # Preserve the journal instead of consuming more quota.
+        write_srt_lines_atomic(output_file, candidate_lines)  # Atomically persist the previously returned DeepL translation.
+        output_blocks = candidate_blocks  # Advance in-memory output only after atomic SRT persistence.
+
+    state["completed_blocks"] = position + 1  # Commit the journaled block after output persistence is confirmed.
+    state["completed_characters"] = sum(len("\n".join(text_lines)) for _, _, text_lines in source_blocks[: position + 1])  # Recalculate exact committed source characters.
+    state["completed_output_fingerprint"] = build_srt_blocks_fingerprint(output_blocks[: position + 1])  # Fingerprint the committed translated prefix.
+    state["pending_block"] = None  # Clear the crash journal only after its translated block is safely persisted.
+    write_translation_resume_state_atomic(state_file, state)  # Atomically commit reconciled resume progress.
+    return state, output_blocks  # Return committed state and translated output prefix.
+
+
+def persist_translated_srt_block(source_blocks: List[Tuple[str, str, List[str]]], output_blocks: List[Tuple[str, str, List[str]]], block_position: int, translated_lines: List[str], output_file: Path, resume_state: Dict[str, Any]) -> Tuple[List[Tuple[str, str, List[str]]], Dict[str, Any]]:
+    """
+    Journals and atomically persists one successfully translated complete SRT block.
+
+    :param source_blocks: Exact parsed source SRT blocks.
+    :param output_blocks: Safely persisted translated output prefix.
+    :param block_position: Zero-based source block position being persisted.
+    :param translated_lines: DeepL-returned translated text lines for this block.
+    :param output_file: Translated output SRT path.
+    :param resume_state: Active persistent resume metadata.
+    :return: Updated translated output blocks and resume metadata.
+    """
+
+    if block_position != len(output_blocks):  # Require strict prefix progression without gaps or reordering.
+        raise RuntimeError("Translated block persistence attempted an invalid SRT progression.")  # Reject ambiguous output ordering.
+
+    source_block = source_blocks[block_position]  # Read the exact source block represented by this DeepL result.
+    source_characters = len("\n".join(source_block[2]))  # Count exact source characters billed for the translation unit.
+    output_block = (source_block[0], source_block[1], translated_lines)  # Preserve source index and timing around translated text.
+    pending_block = {"position": block_position, "source_fingerprint": build_srt_blocks_fingerprint([source_block]), "characters": source_characters, "translated_lines": translated_lines, "output_fingerprint": build_srt_blocks_fingerprint([output_block])}  # Journal returned translation content before SRT persistence.
+    state_file = get_translation_resume_state_file(output_file)  # Resolve persistent metadata path for this output.
+    resume_state["pending_block"] = pending_block  # Record the returned DeepL block before touching the output SRT.
+    write_translation_resume_state_atomic(state_file, resume_state)  # Atomically persist the returned translation crash journal.
+
+    candidate_blocks = output_blocks + [output_block]  # Build the next complete translated SRT prefix.
+    candidate_lines = serialize_srt_blocks_preserving_indices(candidate_blocks)  # Serialize only complete SRT blocks at a safe boundary.
+    parsed_candidate_blocks = parse_srt_blocks(candidate_lines)  # Parse the candidate prefix before persistent replacement.
+    if len(parsed_candidate_blocks) != len(candidate_blocks):  # Require the translated block to remain structurally unambiguous.
+        raise RuntimeError("DeepL returned text that cannot be persisted as a structurally complete SRT block.")  # Preserve the pending journal without falsely advancing progress.
+    for source_candidate, output_candidate in zip(source_blocks[: len(parsed_candidate_blocks)], parsed_candidate_blocks):  # Verify every persisted block remains aligned with the source progression.
+        if source_candidate[0] != output_candidate[0] or source_candidate[1] != output_candidate[1]:  # Require source index and timing correspondence after serialization.
+            raise RuntimeError("Translated SRT prefix lost source index or timing correspondence during persistence.")  # Preserve the pending journal instead of writing ambiguous progress.
+
+    write_srt_lines_atomic(output_file, candidate_lines)  # Atomically persist the complete translated prefix including the new successful block.
+    output_blocks = candidate_blocks  # Advance in-memory translated output only after atomic persistence succeeds.
+    resume_state["completed_blocks"] = block_position + 1  # Commit the newly persisted translated block count.
+    resume_state["completed_characters"] = sum(len("\n".join(text_lines)) for _, _, text_lines in source_blocks[: block_position + 1])  # Recalculate exact committed source characters.
+    resume_state["completed_output_fingerprint"] = build_srt_blocks_fingerprint(output_blocks)  # Fingerprint the complete committed translated prefix.
+    resume_state["pending_block"] = None  # Clear the journal only after successful output persistence.
+    write_translation_resume_state_atomic(state_file, resume_state)  # Atomically commit the translated progression metadata.
+    return output_blocks, resume_state  # Return safely persisted output and committed resume metadata.
+
+
+def prepare_translation_resume_session(source_lines: List[str], source_path: Path, source_storage_path: Path, output_file: Path, resume_info: Dict[str, Any]) -> Tuple[Dict[str, Any], List[Tuple[str, str, List[str]]]]:
+    """
+    Prepares protected source storage and persistent state before translation continues.
+
+    :param source_lines: Exact preprocessed source SRT lines used for translation.
+    :param source_path: Logical source SRT path used by existing output rules.
+    :param source_storage_path: Physical file containing the preserved source representation.
+    :param output_file: Translated output SRT path.
+    :param resume_info: Preflight resume validation data.
+    :return: Active resume metadata and safely persisted translated output blocks.
+    """
+
+    in_place_output = output_file == source_path  # Identify generated-looking sources that must be replaced in place.
+    if in_place_output and source_storage_path == source_path:  # Protect the exact source before the first partial in-place output replacement.
+        backup_file = get_in_place_resume_backup_file(output_file)  # Resolve the internal protected source backup path.
+        write_srt_lines_atomic(backup_file, source_lines)  # Atomically preserve the exact preprocessed source for future restart validation.
+
+    if resume_info.get("valid") and isinstance(resume_info.get("state"), dict):  # Reuse only source-validated persistent resume state.
+        return reconcile_translation_resume_state(source_lines, output_file, resume_info)  # Persist any journaled prior DeepL result before new quota is consumed.
+
+    resume_state = create_translation_resume_state(source_lines, output_file, in_place_output)  # Persist exact source identity before the first new DeepL request.
+    return resume_state, []  # Start a fresh translation prefix without trusting existing invalid output content.
+
+
+def mark_translation_final_output(output_file: Path, resume_state: Dict[str, Any], final_lines: List[str]) -> None:
+    """
+    Journals the expected final translated output before final atomic cleanup replacement.
+
+    :param output_file: Translated output SRT path.
+    :param resume_state: Active persistent resume metadata.
+    :param final_lines: Structurally validated final output SRT lines.
+    :return: None.
+    """
+
+    final_blocks = parse_srt_blocks(final_lines)  # Parse structurally validated final output lines.
+    resume_state["final_output_fingerprint"] = build_srt_blocks_fingerprint(final_blocks)  # Journal final output identity before any cleanup replacement.
+    write_translation_resume_state_atomic(get_translation_resume_state_file(output_file), resume_state)  # Persist finalization recovery metadata atomically.
+
+
+def remove_translation_resume_artifacts(output_file: Path, resume_state: Dict[str, Any]) -> None:
+    """
+    Removes completed resume metadata and the protected in-place source backup.
+
+    :param output_file: Completed translated output SRT path.
+    :param resume_state: Completed persistent resume metadata.
+    :return: None.
+    """
+
+    state_file = get_translation_resume_state_file(output_file)  # Resolve completed resume metadata path.
+    if state_file.exists():  # Remove metadata only after final translated output persistence succeeds.
+        state_file.unlink()  # Delete completed resume metadata so normal complete-output skipping resumes.
+
+    if resume_state.get("in_place_output"):  # Remove protected source backup only for completed in-place translation.
+        backup_file = get_in_place_resume_backup_file(output_file)  # Resolve internal protected source backup path.
+        if backup_file.exists():  # Remove backup only after resume metadata is no longer needed.
+            backup_file.unlink()  # Delete protected source backup after successful finalization.
+
+
 def is_interactive_output() -> bool:
     """
     Determines whether terminal output supports in-place progress updates.
@@ -1080,6 +1476,48 @@ def is_complete_target_language_output(source_lines: List[str], output_file: Pat
     return is_target_language, detection_conclusive, detected_language_label  # Return validation result
 
 
+def configure_translation_resume_plan(record: Dict[str, Any], summary: Dict[str, int]) -> bool:
+    """
+    Applies validated reusable translation progress to one planned source record.
+
+    :param record: Translation source record being considered for planning.
+    :param summary: Mutable preflight summary counts.
+    :return: True when safely reusable translated progress exists, otherwise False.
+    """
+
+    source_characters = record["characters"]  # Preserve total source workload before subtracting reusable progress.
+    resume_info = build_translation_resume_info(record["lines"], record["output_file"])  # Validate persistent output progression against the exact planned source.
+    record["source_characters"] = source_characters  # Store full source character count for diagnostics and resume accounting.
+    record["resume_info"] = resume_info  # Preserve validated or rejected resume state for execution preparation.
+    record["resumed_characters"] = 0  # Default to no reusable translated characters.
+    record["resumed_blocks"] = 0  # Default to no reusable translated SRT blocks.
+    record["finalize_only"] = False  # Default to requiring translation work.
+
+    if not resume_info.get("valid") or resume_info.get("effective_blocks", 0) <= 0:  # Continue normal preflight when no translated progress is safely reusable.
+        return False  # Signal that existing output must follow the normal complete or invalid classification path.
+
+    resumed_characters = int(resume_info["effective_characters"])  # Read safely reusable translated source characters.
+    resumed_blocks = int(resume_info["effective_blocks"])  # Read safely reusable translated SRT block count.
+    if resumed_characters < 0 or resumed_characters > source_characters:  # Require mathematically possible reusable character progress.
+        record["resume_info"] = {**resume_info, "valid": False, "reason": "Reusable character progress exceeds the current source workload."}  # Reject inconsistent resume arithmetic conservatively.
+        return False  # Fall back to normal regeneration behavior for a distinct preserved source.
+
+    remaining_characters = source_characters - resumed_characters  # Plan only source characters that still require a new DeepL request.
+    record["characters"] = remaining_characters  # Replace planned workload with current-execution remaining characters.
+    record["resumed_characters"] = resumed_characters  # Preserve prior-run translated character count without adding it to current-run totals.
+    record["resumed_blocks"] = resumed_blocks  # Preserve the exact next safe SRT block position.
+    record["finalize_only"] = remaining_characters == 0  # Mark fully persisted output that only needs normal finalization.
+
+    if record["finalize_only"]:  # Track complete persisted output awaiting finalization after interruption.
+        summary["finalization_only_outputs"] += 1  # Count no-quota finalization work separately from complete normal skips.
+        print(f"{BackgroundColors.YELLOW}Complete translated output recovered for finalization without another DeepL request: {BackgroundColors.CYAN}{record['output_file']}{Style.RESET_ALL}")  # Log final-block crash recovery.
+    else:  # Track a valid partial target translation that will resume from its exact persisted prefix.
+        summary["resumable_partial_outputs"] += 1  # Count legitimate partial outputs separately from invalid-language generated files.
+        print(f"{BackgroundColors.YELLOW}Resuming partial translation: {BackgroundColors.CYAN}{record['output_file']}{BackgroundColors.YELLOW} | Reusing {BackgroundColors.CYAN}{resumed_characters:,}{BackgroundColors.YELLOW} characters | Remaining {BackgroundColors.CYAN}{remaining_characters:,}{Style.RESET_ALL}")  # Log exact reusable and remaining workload.
+
+    return True  # Signal that the persistent partial output is demonstrably reusable.
+
+
 def build_translation_plan(srt_files: List[Path], input_dir: Path, output_dir: Path, use_configured_output: bool) -> Tuple[List[Dict[str, Any]], Dict[str, int]]:
     """
     Builds the non-destructive translation plan.
@@ -1091,127 +1529,164 @@ def build_translation_plan(srt_files: List[Path], input_dir: Path, output_dir: P
     :return: Tuple containing plan entries and summary counts.
     """
 
-    plan = []  # Store pending translation work
-    records = []  # Store valid discovered SRT metadata before source/output dedupe
-    records_by_path = {}  # Map resolved paths to discovered records
-    summary = {"discovered": len(srt_files), "source_candidates": 0, "generated_skipped": 0, "existing_skipped": 0, "target_language_skipped": 0, "empty_skipped": 0, "invalid": 0, "cleanup_fallbacks": 0, "cleanup_warnings": 0, "invalid_language_outputs": 0, "mislabeled_source_files": 0, "other_skipped": 0, "total_characters": 0}  # Store preflight counts
+    plan = []  # Store pending translation or finalization work.
+    records = []  # Store valid discovered SRT metadata before source/output dedupe.
+    records_by_path = {}  # Map resolved paths to discovered records.
+    summary = {"discovered": len(srt_files), "source_candidates": 0, "generated_skipped": 0, "existing_skipped": 0, "target_language_skipped": 0, "empty_skipped": 0, "invalid": 0, "cleanup_fallbacks": 0, "cleanup_warnings": 0, "invalid_language_outputs": 0, "mislabeled_source_files": 0, "resumable_partial_outputs": 0, "finalization_only_outputs": 0, "other_skipped": 0, "total_characters": 0}  # Store preflight counts including resumable work.
 
-    for srt_file in srt_files:  # Analyze each discovered SRT
-        current_srt_path = srt_file.resolve()  # Resolve source path
-        if is_generated_srt_file(current_srt_path):
-            summary["other_skipped"] += 1  # Count internal files separately from generated outputs
-            continue  # Internal temporary or backup files are not source candidates
+    for srt_file in srt_files:  # Analyze each discovered SRT.
+        current_srt_path = srt_file.resolve()  # Resolve the logical source or generated-output path.
+        if is_generated_srt_file(current_srt_path):  # Exclude internal temporary and backup SRT files from source candidacy.
+            summary["other_skipped"] += 1  # Count internal files separately from generated outputs.
+            continue  # Preserve existing internal-file exclusion behavior.
 
-        output_file = get_translated_output_file(current_srt_path, input_dir, output_dir, use_configured_output)  # Resolve expected output without chaining target suffixes
+        output_file = get_translated_output_file(current_srt_path, input_dir, output_dir, use_configured_output)  # Resolve expected output without chaining target suffixes.
+        source_storage_path = current_srt_path  # Default physical source storage to the logical source path.
+        protected_in_place_resume = False  # Track restart sessions whose original source is preserved in an internal backup.
+        resume_state_file = get_translation_resume_state_file(current_srt_path)  # Resolve possible in-place resume metadata beside generated-looking paths.
+        resume_state_preview = read_translation_resume_state(resume_state_file) if resume_state_file.exists() else None  # Read state only when persistent resume metadata exists.
 
-        try:
-            source_lines = read_srt(current_srt_path)  # Read source SRT
-            srt_lines = source_lines  # Default to source lines
-            removed_entry_count = 0  # Default cleanup counts
-            mixed_cleaned_entry_count = 0  # Default cleanup counts
-            cleanup_fallback = False  # Track valid source translated without cleanup after cleanup validation failure
-            if not has_valid_srt_structure(source_lines):
-                summary["invalid"] += 1  # Count genuinely invalid source structure
-                print(f"{BackgroundColors.RED}Invalid SRT structure: {BackgroundColors.CYAN}{current_srt_path}{Style.RESET_ALL}")  # Log invalid source
-                continue
-            if DESCRIPTIVE_SUBTITLES_REMOVAL:
-                cleaned_lines, cleaned_removed_entry_count, cleaned_mixed_entry_count = clean_descriptive_subtitle_lines(source_lines)  # Plan cleanup without writing
-                if has_valid_srt_structure(cleaned_lines):
-                    srt_lines = cleaned_lines  # Use valid cleaned representation for all later processing
-                    removed_entry_count = cleaned_removed_entry_count  # Preserve cleanup metadata for valid cleanup
-                    mixed_cleaned_entry_count = cleaned_mixed_entry_count  # Preserve cleanup metadata for valid cleanup
-                else:
-                    cleanup_fallback = True  # Keep original valid source when cleanup breaks structure
+        if has_generated_filename_marker(current_srt_path) and resume_state_file.exists():  # Detect generated-looking paths that may currently contain in-place partial output.
+            backup_file = get_in_place_resume_backup_file(current_srt_path)  # Resolve the protected source backup used only for in-place resume sessions.
+            if resume_state_preview is None and backup_file.exists():  # Preserve ambiguous in-place artifacts when metadata cannot be interpreted.
+                summary["invalid"] += 1  # Count unusable resume state as invalid preflight input.
+                print(f"{BackgroundColors.RED}Resume metadata is malformed for an in-place partial translation. Preserving output and source backup without unsafe regeneration:{Style.RESET_ALL}\n{BackgroundColors.CYAN}{current_srt_path}{Style.RESET_ALL}")  # Log conservative in-place preservation.
+                continue  # Avoid treating partial translated output as new source content.
+            if isinstance(resume_state_preview, dict) and resume_state_preview.get("in_place_output"):  # Use the protected source representation for an active in-place resume session.
+                if not backup_file.exists():  # Require preserved source data before trusting in-place partial output.
+                    summary["invalid"] += 1  # Count missing protected source as invalid resume state.
+                    print(f"{BackgroundColors.RED}Protected source backup is missing for in-place resumable output. Preserving the current output without unsafe regeneration:{Style.RESET_ALL}\n{BackgroundColors.CYAN}{current_srt_path}{Style.RESET_ALL}")  # Log missing in-place source protection.
+                    continue  # Avoid destroying partial output when the exact source can no longer be proven.
+                source_storage_path = backup_file  # Read the exact preserved source instead of the partial translated output path.
+                protected_in_place_resume = True  # Mark this record as protected in-place resume work.
 
-            translatable_character_count = count_translatable_characters(srt_lines)  # Count exact DeepL text blocks
-            if translatable_character_count == 0:
-                summary["empty_skipped"] += 1  # Empty after cleanup is not pending translation
-                print(f"{BackgroundColors.YELLOW}{current_srt_path.name} contains no translatable dialogue after SDH cleanup.{Style.RESET_ALL}")  # Log empty skip
-                continue
+        try:  # Read and preprocess the actual source representation used for translation.
+            source_lines = read_srt(source_storage_path)  # Read logical source or protected in-place source backup.
+            srt_lines = source_lines  # Default translation representation to the stored source lines.
+            removed_entry_count = 0  # Default cleanup removed-entry count.
+            mixed_cleaned_entry_count = 0  # Default cleanup mixed-entry count.
+            cleanup_fallback = False  # Track valid source translated without cleanup after cleanup validation failure.
+            if not has_valid_srt_structure(source_lines):  # Reject genuinely malformed source structure.
+                summary["invalid"] += 1  # Count genuinely invalid source structure.
+                print(f"{BackgroundColors.RED}Invalid SRT structure: {BackgroundColors.CYAN}{source_storage_path}{Style.RESET_ALL}")  # Log invalid physical source representation.
+                continue  # Skip invalid source safely.
+            if DESCRIPTIVE_SUBTITLES_REMOVAL:  # Apply the same exact SDH preprocessing before resume fingerprint validation.
+                cleaned_lines, cleaned_removed_entry_count, cleaned_mixed_entry_count = clean_descriptive_subtitle_lines(source_lines)  # Plan cleanup without writing.
+                if has_valid_srt_structure(cleaned_lines):  # Use only structurally valid cleaned source representation.
+                    srt_lines = cleaned_lines  # Use valid cleaned representation for all later processing.
+                    removed_entry_count = cleaned_removed_entry_count  # Preserve cleanup metadata for valid cleanup.
+                    mixed_cleaned_entry_count = cleaned_mixed_entry_count  # Preserve cleanup metadata for valid cleanup.
+                else:  # Preserve original valid source when cleanup produces invalid structure.
+                    cleanup_fallback = True  # Keep original valid source for translation.
 
-            is_target_language, detection_conclusive, detected_language_label = detect_cleaned_subtitle_language(srt_lines, TARGET_LANG)  # Offline language detection
-            record = {"source_path": current_srt_path, "output_file": output_file, "lines": srt_lines, "characters": translatable_character_count, "removed_entries": removed_entry_count, "mixed_cleaned_entries": mixed_cleaned_entry_count, "cleanup_fallback": cleanup_fallback, "detection_conclusive": detection_conclusive, "detected_language_label": detected_language_label, "is_target_language": is_target_language, "filename_has_generated_marker": has_generated_filename_marker(current_srt_path), "family_key": get_srt_family_key(current_srt_path)}  # Store content-based classification record
-            records.append(record)  # Keep record for family dedupe
-            records_by_path[current_srt_path] = record  # Map by resolved path
-        except Exception as e:
-            summary["invalid"] += 1  # Count unreadable or invalid preflight file
-            print(f"{BackgroundColors.RED}Invalid preflight file: {BackgroundColors.CYAN}{current_srt_path}{BackgroundColors.RED} - {e}{Style.RESET_ALL}")  # Log preflight failure
+            translatable_character_count = count_translatable_characters(srt_lines)  # Count exact DeepL text blocks from the actual preprocessed source.
+            if translatable_character_count == 0:  # Skip sources with no translatable dialogue.
+                summary["empty_skipped"] += 1  # Count empty-after-cleanup sources separately.
+                print(f"{BackgroundColors.YELLOW}{current_srt_path.name} contains no translatable dialogue after SDH cleanup.{Style.RESET_ALL}")  # Log empty skip.
+                continue  # Avoid unnecessary API or resume work.
 
-    records_by_family = {}  # Group source/output family members
-    for record in records:
-        records_by_family.setdefault(record["family_key"], []).append(record)  # Group related filenames together
+            is_target_language, detection_conclusive, detected_language_label = detect_cleaned_subtitle_language(srt_lines, TARGET_LANG)  # Detect source language from the exact translation representation.
+            record = {"source_path": current_srt_path, "source_storage_path": source_storage_path, "output_file": output_file, "lines": srt_lines, "characters": translatable_character_count, "source_characters": translatable_character_count, "removed_entries": removed_entry_count, "mixed_cleaned_entries": mixed_cleaned_entry_count, "cleanup_fallback": cleanup_fallback, "detection_conclusive": detection_conclusive, "detected_language_label": detected_language_label, "is_target_language": is_target_language, "filename_has_generated_marker": has_generated_filename_marker(current_srt_path), "family_key": get_srt_family_key(current_srt_path), "protected_in_place_resume": protected_in_place_resume, "resume_info": {"valid": False}, "resumed_characters": 0, "resumed_blocks": 0, "finalize_only": False}  # Store content-based classification and resume-safe source storage.
+            records.append(record)  # Keep record for family dedupe.
+            records_by_path[current_srt_path] = record  # Map logical path to the discovered record.
+        except Exception as e:  # Preserve existing preflight failure isolation.
+            summary["invalid"] += 1  # Count unreadable or invalid preflight file.
+            print(f"{BackgroundColors.RED}Invalid preflight file: {BackgroundColors.CYAN}{source_storage_path}{BackgroundColors.RED} - {e}{Style.RESET_ALL}")  # Log preflight failure without altering source data.
 
-    for family_records in records_by_family.values():  # Build one translation decision per source/output family
-        family_records.sort(key=lambda record: str(record["source_path"]).lower())  # Keep deterministic selection
-        source_records = [record for record in family_records if not record["filename_has_generated_marker"]]  # Prefer clean source filenames
-        source_record = source_records[0] if source_records else None  # Pick unique source candidate when present
+    records_by_family = {}  # Group source and generated-output family members.
+    for record in records:  # Group every valid discovered record deterministically.
+        records_by_family.setdefault(record["family_key"], []).append(record)  # Group related filenames together.
 
-        if source_record:
-            summary["source_candidates"] += 1  # Count unique source family
-            output_file = source_record["output_file"]  # Expected translated output
-            output_record = records_by_path.get(output_file)  # Existing output if found in discovery snapshot
-            extra_records = [record for record in family_records if record is not source_record and record is not output_record]  # Avoid duplicate family work
+    for family_records in records_by_family.values():  # Build one translation decision per source/output family.
+        family_records.sort(key=lambda record: str(record["source_path"]).lower())  # Keep deterministic selection.
+        source_records = [record for record in family_records if not record["filename_has_generated_marker"]]  # Prefer clean source filenames.
+        source_record = source_records[0] if source_records else None  # Pick unique source candidate when present.
 
-            if source_record["is_target_language"]:
-                summary["target_language_skipped"] += 1  # Source already target language
-                summary["generated_skipped"] += sum(1 for record in extra_records if record["is_target_language"])  # Count valid generated companions
-                continue
+        if source_record:  # Handle normal source plus optional generated-output companions.
+            summary["source_candidates"] += 1  # Count unique source family.
+            output_file = source_record["output_file"]  # Read expected translated output.
+            output_record = records_by_path.get(output_file)  # Read existing generated output when discovered in the input snapshot.
+            extra_records = [record for record in family_records if record is not source_record and record is not output_record]  # Avoid duplicate family work.
 
-            if output_record and output_record is not source_record:
-                if output_record["is_target_language"] and is_translated_output_complete(source_record["lines"], output_file):
-                    summary["existing_skipped"] += 1  # Valid generated output completes this source
-                    summary["generated_skipped"] += 1  # Existing generated file excluded from independent work
-                    summary["generated_skipped"] += sum(1 for record in extra_records if record["is_target_language"])  # Count valid generated companions
-                    print(f"{BackgroundColors.YELLOW}Skipping already complete translation: {BackgroundColors.CYAN}{output_file}{Style.RESET_ALL}")  # Log complete skip
-                    continue
+            if source_record["is_target_language"]:  # Preserve existing skip for source already in target language.
+                summary["target_language_skipped"] += 1  # Count target-language source skip.
+                summary["generated_skipped"] += sum(1 for record in extra_records if record["is_target_language"])  # Count valid generated companions.
+                continue  # Consume no DeepL quota.
 
-                summary["invalid_language_outputs"] += 1  # Existing output is present but not valid target-language content
-                print(f"{BackgroundColors.YELLOW}Existing target output is not in {BackgroundColors.CYAN}{TARGET_LANG}{BackgroundColors.YELLOW} and will be regenerated:{Style.RESET_ALL}\n{BackgroundColors.CYAN}{output_file}{Style.RESET_ALL}")  # Log regeneration
-            elif is_complete_target_language_output(source_record["lines"], output_file)[0]:
-                summary["existing_skipped"] += 1  # Output outside discovery snapshot still completes source
-                print(f"{BackgroundColors.YELLOW}Skipping already complete translation: {BackgroundColors.CYAN}{output_file}{Style.RESET_ALL}")  # Log complete skip
-                continue
+            resume_recognized = configure_translation_resume_plan(source_record, summary)  # Validate legitimate partial or fully persisted interrupted output before language-based invalid classification.
+            if resume_recognized:  # Resume only demonstrably source-matching persistent translation state.
+                if output_record and output_record is not source_record:  # Exclude discovered partial output from independent family work.
+                    summary["generated_skipped"] += 1  # Count valid resumable generated output separately from invalid-language output.
+                summary["generated_skipped"] += sum(1 for record in extra_records if record["is_target_language"])  # Count valid generated companions without planning them.
+                summary["invalid_language_outputs"] += sum(1 for record in extra_records if not record["is_target_language"])  # Preserve invalid companion accounting outside the resumable output.
+                if source_record["cleanup_fallback"]:  # Preserve existing cleanup-fallback reporting.
+                    summary["cleanup_fallbacks"] += 1  # Count planned best-effort cleanup fallback separately from invalid files.
+                    print(f"{BackgroundColors.YELLOW}SDH cleanup failed structural validation. Original subtitle will be translated:{Style.RESET_ALL}\n{BackgroundColors.CYAN}{source_record['source_path']}{Style.RESET_ALL}")  # Log cleanup fallback.
+                plan.append(source_record)  # Add remaining translation or finalization-only work.
+                summary["total_characters"] += source_record["characters"]  # Add only characters requiring new DeepL requests in this execution.
+                continue  # Avoid misclassifying legitimate partial target output as invalid-language content.
 
-            summary["generated_skipped"] += sum(1 for record in extra_records if record["is_target_language"])  # Count valid generated companions without planning them
-            summary["invalid_language_outputs"] += sum(1 for record in extra_records if not record["is_target_language"])  # Track invalid generated companions
-            if source_record["cleanup_fallback"]:
-                summary["cleanup_fallbacks"] += 1  # Count planned best-effort cleanup fallback separately from invalid files
-                print(f"{BackgroundColors.YELLOW}SDH cleanup failed structural validation. Original subtitle will be translated:{Style.RESET_ALL}\n{BackgroundColors.CYAN}{source_record['source_path']}{Style.RESET_ALL}")  # Log cleanup fallback
-            plan.append(source_record)  # Add pending translation work
-            summary["total_characters"] += source_record["characters"]  # Add only planned translation characters
-            continue
+            if output_record and output_record is not source_record:  # Preserve existing discovered-output classification when no valid resume state exists.
+                if output_record["is_target_language"] and is_translated_output_complete(source_record["lines"], output_file):  # Skip structurally complete target-language output.
+                    summary["existing_skipped"] += 1  # Valid generated output completes this source.
+                    summary["generated_skipped"] += 1  # Existing generated file excluded from independent work.
+                    summary["generated_skipped"] += sum(1 for record in extra_records if record["is_target_language"])  # Count valid generated companions.
+                    print(f"{BackgroundColors.YELLOW}Skipping already complete translation: {BackgroundColors.CYAN}{output_file}{Style.RESET_ALL}")  # Log complete skip.
+                    continue  # Preserve exact complete-output skip behavior.
 
-        target_language_records = [record for record in family_records if record["is_target_language"]]  # Generated-looking files already in target language
-        non_target_records = [record for record in family_records if not record["is_target_language"]]  # Generated-looking files requiring translation or regeneration
+                summary["invalid_language_outputs"] += 1  # Existing output is present but not valid target-language content.
+                print(f"{BackgroundColors.YELLOW}Existing target output is not in {BackgroundColors.CYAN}{TARGET_LANG}{BackgroundColors.YELLOW} and will be regenerated:{Style.RESET_ALL}\n{BackgroundColors.CYAN}{output_file}{Style.RESET_ALL}")  # Log regeneration.
+            elif is_complete_target_language_output(source_record["lines"], output_file)[0]:  # Preserve complete-output skip outside the discovery snapshot.
+                summary["existing_skipped"] += 1  # Output outside discovery snapshot still completes source.
+                print(f"{BackgroundColors.YELLOW}Skipping already complete translation: {BackgroundColors.CYAN}{output_file}{Style.RESET_ALL}")  # Log complete skip.
+                continue  # Consume no DeepL quota.
 
-        if not non_target_records:
-            summary["target_language_skipped"] += len(target_language_records)  # Valid target-language SRTs consume no quota
-            summary["generated_skipped"] += len(target_language_records)  # Generated-looking files excluded from independent translation
-            continue
+            summary["generated_skipped"] += sum(1 for record in extra_records if record["is_target_language"])  # Count valid generated companions without planning them.
+            summary["invalid_language_outputs"] += sum(1 for record in extra_records if not record["is_target_language"])  # Track invalid generated companions.
+            if source_record["cleanup_fallback"]:  # Preserve existing cleanup-fallback reporting.
+                summary["cleanup_fallbacks"] += 1  # Count planned best-effort cleanup fallback separately from invalid files.
+                print(f"{BackgroundColors.YELLOW}SDH cleanup failed structural validation. Original subtitle will be translated:{Style.RESET_ALL}\n{BackgroundColors.CYAN}{source_record['source_path']}{Style.RESET_ALL}")  # Log cleanup fallback.
+            plan.append(source_record)  # Add fresh translation work.
+            summary["total_characters"] += source_record["characters"]  # Add full source workload when no valid translated progress can be reused.
+            continue  # Finish this source family decision.
 
-        source_record = non_target_records[0]  # Treat misleading target-looking file as source when no real source exists
-        summary["source_candidates"] += 1  # Count unique mislabeled source
-        summary["mislabeled_source_files"] += 1  # Track misleading filename
-        if source_record["detection_conclusive"]:
-            print(f"{BackgroundColors.YELLOW}Filename indicates {BackgroundColors.CYAN}{TARGET_LANG}{BackgroundColors.YELLOW}, but cleaned content was detected as {BackgroundColors.CYAN}{source_record['detected_language_label']}{BackgroundColors.YELLOW}. Scheduling translation:{Style.RESET_ALL}\n{BackgroundColors.CYAN}{source_record['source_path']}{Style.RESET_ALL}")  # Log mislabeled source
-        else:
-            print(f"{BackgroundColors.YELLOW}Language detection was inconclusive despite the target-language filename. Keeping file eligible for translation:{Style.RESET_ALL}\n{BackgroundColors.CYAN}{source_record['source_path']}{Style.RESET_ALL}")  # Log conservative classification
+        target_language_records = [record for record in family_records if record["is_target_language"]]  # Identify generated-looking files already in target language by content.
+        non_target_records = [record for record in family_records if not record["is_target_language"]]  # Identify generated-looking files requiring translation or resume.
 
-        if source_record["cleanup_fallback"]:
-            summary["cleanup_fallbacks"] += 1  # Count planned best-effort cleanup fallback separately from invalid files
-            print(f"{BackgroundColors.YELLOW}SDH cleanup failed structural validation. Original subtitle will be translated:{Style.RESET_ALL}\n{BackgroundColors.CYAN}{source_record['source_path']}{Style.RESET_ALL}")  # Log cleanup fallback
-        plan.append(source_record)  # Add pending translation work
-        summary["total_characters"] += source_record["characters"]  # Add only planned translation characters
-        for record in family_records:
-            if record is source_record:
-                continue
-            if record["is_target_language"]:
-                summary["target_language_skipped"] += 1  # Valid generated companion
-                summary["generated_skipped"] += 1  # Excluded from independent translation
-            else:
-                summary["invalid_language_outputs"] += 1  # Non-target generated-looking duplicate in same family
+        if not non_target_records:  # Preserve existing generated-only target-language skip behavior.
+            summary["target_language_skipped"] += len(target_language_records)  # Valid target-language SRTs consume no quota.
+            summary["generated_skipped"] += len(target_language_records)  # Generated-looking files excluded from independent translation.
+            continue  # Finish this generated-only family.
 
-    return plan, summary  # Return plan and counts
+        source_record = non_target_records[0]  # Treat misleading target-looking file or protected in-place source backup as logical source.
+        summary["source_candidates"] += 1  # Count unique mislabeled source.
+        summary["mislabeled_source_files"] += 1  # Track misleading filename.
+        resume_recognized = configure_translation_resume_plan(source_record, summary)  # Validate protected in-place or generated-only resumable progression.
+        if source_record["protected_in_place_resume"] and not source_record["resume_info"].get("valid"):  # Preserve partial in-place output when its metadata cannot prove a safe progression.
+            summary["invalid"] += 1  # Count unusable in-place resume state without destroying either artifact.
+            print(f"{BackgroundColors.RED}In-place partial translation could not be proven safe to resume. Preserving translated output and source backup:{Style.RESET_ALL}\n{BackgroundColors.CYAN}{source_record['source_path']}{Style.RESET_ALL}")  # Log conservative in-place refusal.
+            continue  # Avoid blind restart against ambiguous in-place state.
+
+        if source_record["detection_conclusive"]:  # Preserve existing misleading-filename language reporting.
+            print(f"{BackgroundColors.YELLOW}Filename indicates {BackgroundColors.CYAN}{TARGET_LANG}{BackgroundColors.YELLOW}, but cleaned content was detected as {BackgroundColors.CYAN}{source_record['detected_language_label']}{BackgroundColors.YELLOW}. Scheduling translation:{Style.RESET_ALL}\n{BackgroundColors.CYAN}{source_record['source_path']}{Style.RESET_ALL}")  # Log mislabeled source.
+        else:  # Preserve conservative translation eligibility when source language detection is inconclusive.
+            print(f"{BackgroundColors.YELLOW}Language detection was inconclusive despite the target-language filename. Keeping file eligible for translation:{Style.RESET_ALL}\n{BackgroundColors.CYAN}{source_record['source_path']}{Style.RESET_ALL}")  # Log conservative classification.
+
+        if source_record["cleanup_fallback"]:  # Preserve existing cleanup-fallback reporting.
+            summary["cleanup_fallbacks"] += 1  # Count planned best-effort cleanup fallback separately from invalid files.
+            print(f"{BackgroundColors.YELLOW}SDH cleanup failed structural validation. Original subtitle will be translated:{Style.RESET_ALL}\n{BackgroundColors.CYAN}{source_record['source_path']}{Style.RESET_ALL}")  # Log cleanup fallback.
+        plan.append(source_record)  # Add fresh, resumable, or finalization-only generated-path work.
+        summary["total_characters"] += source_record["characters"]  # Add only remaining DeepL workload after validated resume subtraction.
+        for record in family_records:  # Preserve companion generated-file accounting.
+            if record is source_record:  # Avoid counting the selected logical source twice.
+                continue  # Continue to other family records.
+            if record["is_target_language"]:  # Count valid generated companion.
+                summary["target_language_skipped"] += 1  # Count target-language companion skip.
+                summary["generated_skipped"] += 1  # Exclude valid companion from independent translation.
+            else:  # Preserve invalid generated companion accounting.
+                summary["invalid_language_outputs"] += 1  # Count non-target generated-looking duplicate in the same family.
+
+    return plan, summary  # Return pending work and exact current-execution character totals.
 
 
 def get_zero_plan_message(input_dir: Path, preflight_summary: Dict[str, int]) -> str:
@@ -1303,12 +1778,16 @@ def translate_text_block(text_block: str, account_items: List[Tuple[str, str]], 
         translator = translators[account_name]  # Select cached client for usage and translation
 
         quota_failed = False  # Track one quota attempt without double-counting
-        try:
-            remaining_chars = get_remaining_characters(translator)  # Read remaining characters
-        except deepl.QuotaExceededException:
-            quota_failed = True  # Count this verified quota failure once
-            print_progress_event(progress_state, f"{BackgroundColors.YELLOW}DeepL account {BackgroundColors.CYAN}{account_name}{BackgroundColors.YELLOW} quota exhausted. Trying next account.{Style.RESET_ALL}")  # Log quota-only rotation
-            remaining_chars = 0  # Keep variable defined after quota failure
+        try:  # Read account usage without treating API failures as translation success.
+            remaining_chars = get_remaining_characters(translator)  # Read remaining characters before submitting the pending translation unit.
+        except deepl.QuotaExceededException:  # Preserve existing quota-only account rotation behavior.
+            quota_failed = True  # Count this verified quota failure once.
+            print_progress_event(progress_state, f"{BackgroundColors.YELLOW}DeepL account {BackgroundColors.CYAN}{account_name}{BackgroundColors.YELLOW} quota exhausted. Trying next account.{Style.RESET_ALL}")  # Log quota-only rotation.
+            remaining_chars = 0  # Keep variable defined after quota failure.
+        except deepl.DeepLException as e:  # Treat usage rate-limit, server, and network failures as unsuccessful work.
+            raise RuntimeError(f"DeepL usage request failed with {type(e).__name__}: {e}") from e  # Preserve API failure semantics without consuming or completing the pending translation unit.
+        except Exception as e:  # Treat unexpected usage-query failures as unsuccessful work.
+            raise RuntimeError(f"DeepL usage request failed with {type(e).__name__}: {e}") from e  # Preserve the original failure without entering quota rotation incorrectly.
 
         if not quota_failed and remaining_chars is not None and len(text_block) > remaining_chars:  # Detect insufficient allowance before translation
             quota_failed = True  # Count this verified quota failure once
@@ -1332,12 +1811,8 @@ def translate_text_block(text_block: str, account_items: List[Tuple[str, str]], 
                 print_progress_event(progress_state, f"{BackgroundColors.YELLOW}Switching DeepL account from {BackgroundColors.CYAN}{previous_account_name}{BackgroundColors.YELLOW} to {BackgroundColors.CYAN}{next_account_name}{Style.RESET_ALL}")  # Log circular account switch
             continue  # Retry exact same untranslated block with next account
 
-        try:  # Perform translation
-            result = translator.translate_text(text_block, target_lang=TARGET_LANG)  # Let DeepL auto-detect the source language
-            if result is not None and hasattr(result, "text") and result.text:  # Ensure result is valid
-                return result.text.split("\n"), active_account_index  # Return translated lines and current account
-            else:
-                return text_block.split("\n"), active_account_index  # Fallback to original lines
+        try:  # Perform translation and require a genuine DeepL result.
+            result = translator.translate_text(text_block, target_lang=TARGET_LANG)  # Let DeepL auto-detect the source language.
         except deepl.QuotaExceededException:
             attempt_counts[account_name] += 1  # Count this verified quota failure once
             total_quota_attempts += 1  # Count one verified quota attempt
@@ -1356,81 +1831,72 @@ def translate_text_block(text_block: str, account_items: List[Tuple[str, str]], 
             elif previous_account_name != next_account_name:
                 print_progress_event(progress_state, f"{BackgroundColors.YELLOW}Switching DeepL account from {BackgroundColors.CYAN}{previous_account_name}{BackgroundColors.YELLOW} to {BackgroundColors.CYAN}{next_account_name}{Style.RESET_ALL}")  # Log circular account switch
             continue  # Continue with next account
-        except Exception as e:  # Handle any non-quota translation error
-            print_progress_event(progress_state, f"{BackgroundColors.RED}Translation failed: {e}. Returning original lines.{Style.RESET_ALL}")
-            return text_block.split("\n"), active_account_index  # Return original lines on failure
+        except deepl.DeepLException as e:  # Treat every non-quota DeepL failure as unsuccessful translation work.
+            raise RuntimeError(f"DeepL translation failed with {type(e).__name__}: {e}") from e  # Preserve rate-limit, server, and network failure semantics without false completion.
+        except Exception as e:  # Treat unexpected request or response failures as unsuccessful translation work.
+            raise RuntimeError(f"Translation failed with {type(e).__name__}: {e}") from e  # Preserve the original error without returning untranslated fallback content.
+
+        if result is None or not hasattr(result, "text") or not isinstance(result.text, str) or not result.text.strip():  # Require a non-empty translation returned by DeepL.
+            raise RuntimeError("DeepL returned no valid translated text for the pending subtitle block.")  # Prevent invalid API responses from being persisted or counted as translated.
+
+        translated_lines = result.text.split("\n")  # Preserve DeepL newline behavior for the existing subtitle translation unit.
+        return translated_lines, active_account_index  # Return only genuine DeepL-returned translation content.
 
     attempted_accounts = ", ".join(account_name for account_name, _ in account_items)  # Build safe account-name summary
     raise RuntimeError(f"All configured DeepL accounts were attempted at least twice and none has sufficient quota for pending block size {len(text_block)}. Accounts attempted: {attempted_accounts}")
 
 
-def translate_srt_lines(srt_file, lines, translatable_character_count: int, account_items: List[Tuple[str, str]], active_account_index: int, translators: Dict[str, deepl.DeepLClient], progress_state: Dict[str, Any] | None = None) -> Tuple[List[str], int]:
+def translate_srt_lines(srt_file: Path, lines: List[str], output_file: Path, translatable_character_count: int, account_items: List[Tuple[str, str]], active_account_index: int, translators: Dict[str, deepl.DeepLClient], resume_state: Dict[str, Any], output_blocks: List[Tuple[str, str, List[str]]], progress_state: Dict[str, Any] | None = None) -> Tuple[List[str], int, Dict[str, Any]]:
     """
-    Translates lines from an SRT file using DeepL API, keeping timing and index lines unchanged.
+    Translates remaining SRT blocks and atomically persists every successful translation unit.
 
-    :param srt_file: Path to the SRT file (for logging purposes).
-    :param lines: List of SRT lines.
-    :param translatable_character_count: Total cleaned characters eligible for DeepL translation.
+    :param srt_file: Path to the logical source SRT file for logging purposes.
+    :param lines: Exact preprocessed source SRT lines.
+    :param output_file: Persistent translated output SRT path.
+    :param translatable_character_count: Remaining source characters planned for DeepL in this execution.
     :param account_items: Ordered list of DeepL account names and API keys.
-    :param active_account_index: Process-wide active account index.
+    :param active_account_index: Process-wide active DeepL account index.
     :param translators: DeepL clients reused across files.
+    :param resume_state: Active persistent translation resume metadata.
+    :param output_blocks: Safely persisted translated output prefix.
     :param progress_state: Optional shared progress state.
-    :return: Tuple containing translated lines and active account index.
+    :return: Tuple containing complete translated lines, active account index, and committed resume metadata.
     """
 
-    verbose_output(
-        f"{BackgroundColors.GREEN}Translating SRT lines from file: {BackgroundColors.CYAN}{srt_file}{Style.RESET_ALL}"
-    )  # Output verbose message for translating SRT lines
+    verbose_output(f"{BackgroundColors.GREEN}Translating SRT lines from file: {BackgroundColors.CYAN}{srt_file}{Style.RESET_ALL}")  # Output verbose message for translating SRT lines.
 
-    translated_lines = []  # Initialize empty list for storing translated lines
-    buffer = []  # Initialize empty buffer for batching subtitle text lines
-    translated_character_count = 0  # Track completed translation workload
+    source_blocks = parse_srt_blocks(lines)  # Parse the exact source representation into existing translation units.
+    translated_character_count = 0  # Track only characters newly translated during this execution.
+    filename = srt_file.name  # Extract filename for remaining-character failure messages.
+    start_block_position = len(output_blocks)  # Resume immediately after the last safely persisted translated block.
 
-    filename = getattr(srt_file, "name", str(srt_file))  # Extract filename string for progress display
+    if resume_state.get("completed_blocks") != start_block_position:  # Require persistent metadata and translated output to begin at the same safe boundary.
+        raise RuntimeError(f"Resume state and translated output progression differ for file: {filename}")  # Refuse ambiguous resume progression before any new DeepL request.
 
-    for line in lines:  # Iterate through each line in the SRT file
-        stripped = line.strip()  # Remove leading and trailing whitespace from the current line
+    for block_position in range(start_block_position, len(source_blocks)):  # Translate only source blocks not already safely persisted.
+        source_block = source_blocks[block_position]  # Read the next exact source subtitle block.
+        text_block = "\n".join(source_block[2])  # Preserve the existing per-entry DeepL translation unit.
 
-        if (
-            stripped == "" or stripped.replace(":", "").replace(",", "").isdigit() or "-->" in line
-        ):  # Verify if the line is empty, a sequence index, or a timing marker
-            if buffer:  # Verify if the translation buffer contains pending text lines
-                text_block = "\n".join(buffer)  # Build exact text block for DeepL
-                try:
-                    translated, active_account_index = translate_text_block(text_block, account_items, active_account_index, translators, progress_state)  # Translate buffered text lines as one block
-                except RuntimeError as e:
-                    remaining_characters = translatable_character_count - translated_character_count  # Count untranslated workload
-                    raise RuntimeError(f"Error: {e}. File: {filename}. Remaining: {remaining_characters:,} characters.") from None
-                if translated is None:  # Verify if translation returned None instead of a result
-                    translated = buffer  # Fall back to the original buffer lines on failed translation
-                translated_lines.extend(translated)  # Append translated lines to the result list
-                translated_character_count += len(text_block)  # Count block after successful translation path
-                if progress_state:
-                    progress_state["file_translated_characters"] += len(text_block)  # Advance current-file progress after success
-                    progress_state["overall_translated_characters"] += len(text_block)  # Advance overall progress after success
-                    render_translation_progress(progress_state)  # Redraw progress after successful block
-                buffer = []  # Reset buffer after processing the current block
-            translated_lines.append(line.rstrip("\n"))  # Append the timing or index line to result unchanged
-        else:  # Handle regular subtitle text lines
-            buffer.append(stripped)  # Append the stripped text line to the translation buffer
+        if text_block:  # Submit only translatable subtitle text to DeepL.
+            try:  # Translate the next unpersisted subtitle block.
+                translated_lines, active_account_index = translate_text_block(text_block, account_items, active_account_index, translators, progress_state)  # Request one existing translation unit from DeepL.
+            except RuntimeError as e:  # Preserve all previously persisted translation work when the current request fails.
+                remaining_characters = max(0, translatable_character_count - translated_character_count)  # Count only still-untranslated characters from this execution plan.
+                raise RuntimeError(f"Error: {e}. File: {filename}. Remaining: {remaining_characters:,} characters.") from None  # Report exact remaining workload without counting resumed characters.
+        else:  # Preserve zero-character structural subtitle entries without consuming DeepL quota.
+            translated_lines = []  # Keep the empty subtitle text block structurally unchanged.
 
-    if buffer:  # Verify if the buffer still contains unprocessed text lines after the loop
-        text_block = "\n".join(buffer)  # Build exact final text block for DeepL
-        try:
-            translated, active_account_index = translate_text_block(text_block, account_items, active_account_index, translators, progress_state)  # Translate the remaining buffered text lines
-        except RuntimeError as e:
-            remaining_characters = translatable_character_count - translated_character_count  # Count untranslated workload
-            raise RuntimeError(f"Error: {e}. File: {filename}. Remaining: {remaining_characters:,} characters.") from None
-        if translated is None:  # Verify if translation returned None for the remaining block
-            translated = buffer  # Fall back to the original buffer lines on failed translation
-        translated_lines.extend(translated)  # Append the remaining translated lines to the result list
-        translated_character_count += len(text_block)  # Count final block after successful translation path
-        if progress_state:
-            progress_state["file_translated_characters"] += len(text_block)  # Advance current-file progress after final success
-            progress_state["overall_translated_characters"] += len(text_block)  # Advance overall progress after final success
-            render_translation_progress(progress_state)  # Redraw progress after successful block
+        output_blocks, resume_state = persist_translated_srt_block(source_blocks, output_blocks, block_position, translated_lines, output_file, resume_state)  # Journal and atomically persist the complete successful translation unit.
 
-    return translated_lines, active_account_index  # Return translated lines and preserved active account index
+        if text_block:  # Advance current-run progress only after successful translated SRT persistence.
+            translated_character_count += len(text_block)  # Count this newly translated source block once.
+            if progress_state:  # Update visible current-run progress when enabled.
+                progress_state["file_translated_characters"] += len(text_block)  # Advance current-file progress by newly translated characters only.
+                progress_state["overall_translated_characters"] += len(text_block)  # Advance overall progress by newly translated characters only.
+                render_translation_progress(progress_state)  # Redraw progress after durable translated-block persistence.
+
+    translated_lines = serialize_srt_blocks_preserving_indices(output_blocks)  # Serialize the complete persisted translated output deterministically.
+    return translated_lines, active_account_index, resume_state  # Return complete translated output and committed persistent state.
 
 
 def parse_srt_entries(lines: List[str]) -> List[Tuple[str, str, str]]:
@@ -1491,25 +1957,32 @@ def save_srt(lines, output_file, success_message: str = "Translated SRT saved as
     )  # Output the saved file message
 
 
-def cleanup_saved_translation(output_file: Path) -> bool:
+def cleanup_saved_translation(output_file: Path, resume_state: Dict[str, Any] | None = None) -> bool:
     """
     Attempts SDH cleanup on a saved translated SRT without risking the valid output.
 
     :param output_file: Saved translated SRT path.
+    :param resume_state: Optional persistent resume metadata used for crash-safe finalization.
     :return: True when cleanup was skipped because it produced invalid structure.
     """
 
-    output_lines = output_file.read_text(encoding="utf-8").splitlines()  # Read valid translated output
-    cleaned_lines, removed_entry_count, mixed_cleaned_entry_count = clean_descriptive_subtitle_lines(output_lines)  # Clean translated output in memory
-    if not removed_entry_count and not mixed_cleaned_entry_count:
-        return False  # No translated cleanup needed
+    output_lines = output_file.read_text(encoding="utf-8").splitlines()  # Read valid translated output.
+    cleaned_lines, removed_entry_count, mixed_cleaned_entry_count = clean_descriptive_subtitle_lines(output_lines)  # Clean translated output in memory.
+    if not removed_entry_count and not mixed_cleaned_entry_count:  # Finish without rewriting when translated cleanup changes nothing.
+        if resume_state is not None:  # Journal the already-persisted final output before resume metadata removal.
+            mark_translation_final_output(output_file, resume_state, output_lines)  # Record final translated output identity for interruption recovery.
+        return False  # No translated cleanup needed.
 
-    if not has_valid_srt_structure(cleaned_lines) or count_translatable_characters(cleaned_lines) == 0:
-        print(f"{BackgroundColors.YELLOW}Translated SRT saved successfully, but SDH cleanup was skipped because it produced an invalid structure:{Style.RESET_ALL}\n{BackgroundColors.CYAN}{output_file}{Style.RESET_ALL}")  # Preserve valid translated output
-        return True  # Cleanup warning emitted
+    if not has_valid_srt_structure(cleaned_lines) or count_translatable_characters(cleaned_lines) == 0:  # Preserve valid translation when cleanup would produce unusable output.
+        print(f"{BackgroundColors.YELLOW}Translated SRT saved successfully, but SDH cleanup was skipped because it produced an invalid structure:{Style.RESET_ALL}\n{BackgroundColors.CYAN}{output_file}{Style.RESET_ALL}")  # Preserve valid translated output.
+        if resume_state is not None:  # Journal the unchanged final output before resume metadata removal.
+            mark_translation_final_output(output_file, resume_state, output_lines)  # Record final translated output identity after cleanup rejection.
+        return True  # Cleanup warning emitted.
 
-    write_srt_lines_atomic(output_file, cleaned_lines)  # Replace only with validated cleaned translation
-    return False  # Cleanup succeeded
+    if resume_state is not None:  # Journal expected cleaned output before atomic replacement.
+        mark_translation_final_output(output_file, resume_state, cleaned_lines)  # Allow restart to recognize cleanup already persisted after interruption.
+    write_srt_lines_atomic(output_file, cleaned_lines)  # Replace only with validated cleaned translation.
+    return False  # Cleanup succeeded.
 
 
 def calculate_execution_time(start_time, finish_time):
@@ -1550,137 +2023,179 @@ def play_sound():
         )
 
 
-def main():
+def main() -> None:
     """
-    Main function.
+    Runs recursive subtitle preflight, translation, resume, persistence, and finalization.
 
-    Processes all .srt files in the INPUT_DIRECTORY. Each file is translated using DeepL API
-    from DeepL-detected source language to Brazilian Portuguese. Translated files are saved in the same directory
-    with '_ptBR' appended to the filename.
-
-    :param: None
-    :return: None
+    :return: None.
     """
 
-    print(
-        f"{BackgroundColors.CLEAR_TERMINAL}{BackgroundColors.BOLD}{BackgroundColors.GREEN}Welcome to the {BackgroundColors.CYAN}Subtitle (SRT) translation using DeepL API{BackgroundColors.GREEN} program!{Style.RESET_ALL}\n"
-    )  # Output the welcome message
-    start_time = datetime.datetime.now()  # Get the start time of the program
+    print(f"{BackgroundColors.CLEAR_TERMINAL}{BackgroundColors.BOLD}{BackgroundColors.GREEN}Welcome to the {BackgroundColors.CYAN}Subtitle (SRT) translation using DeepL API{BackgroundColors.GREEN} program!{Style.RESET_ALL}\n")  # Output the welcome message.
+    start_time = datetime.datetime.now()  # Record program start time.
 
-    ensure_env_file()  # Ensure .env file exists
+    ensure_env_file()  # Preserve existing environment-file initialization.
 
-    input_dir = resolve_from_script_dir(INPUT_DIRECTORY)  # Resolve configured input from script location
-    output_dir = resolve_from_script_dir(OUTPUT_DIR)  # Resolve configured output from script location
-    use_configured_output = is_path_inside(input_dir, SCRIPT_DIR)  # Internal inputs keep configured output layout
+    input_dir = resolve_from_script_dir(INPUT_DIRECTORY)  # Resolve configured input from script location.
+    output_dir = resolve_from_script_dir(OUTPUT_DIR)  # Resolve configured output from script location.
+    use_configured_output = is_path_inside(input_dir, SCRIPT_DIR)  # Preserve configured output layout for internal inputs.
 
-    if not input_dir.exists() or not input_dir.is_dir():  # If the input directory does not exist or is invalid
-        print(f"{BackgroundColors.RED}Input directory not found or is not a directory: {BackgroundColors.CYAN}{input_dir}{Style.RESET_ALL}")  # Output the error message
-        return  # Exit the program
+    if not input_dir.exists() or not input_dir.is_dir():  # Reject missing or invalid input directory.
+        print(f"{BackgroundColors.RED}Input directory not found or is not a directory: {BackgroundColors.CYAN}{input_dir}{Style.RESET_ALL}")  # Output the existing input error message.
+        return  # Exit before discovery.
 
-    srt_files = discover_srt_files(input_dir)  # Snapshot SRT file paths recursively before translation
+    srt_files = discover_srt_files(input_dir)  # Snapshot SRT file paths recursively before translation.
 
-    if not srt_files:  # If no SRT files were found
-        print(f"No SRT files were found in the input directory or any of its subdirectories: {input_dir}")  # Output message
-        return  # Exit the program
+    if not srt_files:  # Stop when recursive discovery found no SRT files.
+        print(f"No SRT files were found in the input directory or any of its subdirectories: {input_dir}")  # Output existing empty-discovery message.
+        return  # Exit without API initialization.
 
-    translation_plan, preflight_summary = build_translation_plan(srt_files, input_dir, output_dir, use_configured_output)  # Build non-destructive plan before DeepL
-    planned_files = len(translation_plan)  # Count pending files
-    total_planned_characters = preflight_summary["total_characters"]  # Count pending characters only
-    other_skipped_files = preflight_summary["empty_skipped"] + preflight_summary["other_skipped"]  # Count non-language skipped files
-    print(f"{BackgroundColors.GREEN}Translation plan: {BackgroundColors.CYAN}{planned_files}{BackgroundColors.GREEN} files | {BackgroundColors.CYAN}{total_planned_characters:,}{BackgroundColors.GREEN} characters | {BackgroundColors.CYAN}{preflight_summary['existing_skipped']}{BackgroundColors.GREEN} existing translations skipped | {BackgroundColors.CYAN}{preflight_summary['target_language_skipped']}{BackgroundColors.GREEN} target-language files skipped | {BackgroundColors.CYAN}{preflight_summary['invalid_language_outputs']}{BackgroundColors.GREEN} invalid-language outputs | {BackgroundColors.CYAN}{preflight_summary['cleanup_fallbacks']}{BackgroundColors.GREEN} cleanup fallbacks | {BackgroundColors.CYAN}{preflight_summary['invalid']}{BackgroundColors.GREEN} invalid files{Style.RESET_ALL}")  # Print preflight summary
+    translation_plan, preflight_summary = build_translation_plan(srt_files, input_dir, output_dir, use_configured_output)  # Build source-validated remaining translation and finalization work.
+    planned_files = len(translation_plan)  # Count pending translation or finalization files.
+    total_planned_characters = preflight_summary["total_characters"]  # Count only characters requiring new DeepL requests in this execution.
+    reused_characters = sum(int(planned_file.get("resumed_characters", 0)) for planned_file in translation_plan)  # Count safely reused prior-run translated characters separately.
+    other_skipped_files = preflight_summary["empty_skipped"] + preflight_summary["other_skipped"]  # Count non-language skipped files.
+    print(f"{BackgroundColors.GREEN}Translation plan: {BackgroundColors.CYAN}{planned_files}{BackgroundColors.GREEN} files | {BackgroundColors.CYAN}{total_planned_characters:,}{BackgroundColors.GREEN} new characters | {BackgroundColors.CYAN}{reused_characters:,}{BackgroundColors.GREEN} reused characters | {BackgroundColors.CYAN}{preflight_summary['resumable_partial_outputs']}{BackgroundColors.GREEN} resumable partial outputs | {BackgroundColors.CYAN}{preflight_summary['finalization_only_outputs']}{BackgroundColors.GREEN} recovered finalizations | {BackgroundColors.CYAN}{preflight_summary['existing_skipped']}{BackgroundColors.GREEN} existing translations skipped | {BackgroundColors.CYAN}{preflight_summary['target_language_skipped']}{BackgroundColors.GREEN} target-language files skipped | {BackgroundColors.CYAN}{preflight_summary['invalid_language_outputs']}{BackgroundColors.GREEN} invalid-language outputs | {BackgroundColors.CYAN}{preflight_summary['cleanup_fallbacks']}{BackgroundColors.GREEN} cleanup fallbacks | {BackgroundColors.CYAN}{preflight_summary['invalid']}{BackgroundColors.GREEN} invalid files{Style.RESET_ALL}")  # Print preflight summary with current-run and reusable work separated.
 
-    translated_files = 0  # Count files translated in this run
-    failed_files = 0  # Count failed planned files
-    translated_characters = 0  # Count successfully translated characters
+    translated_files = 0  # Count files that consumed new DeepL translation work and completed in this run.
+    finalized_files = 0  # Count interrupted complete outputs finalized without new DeepL translation work.
+    failed_files = 0  # Count failed planned files.
+    translated_characters = 0  # Count only successfully translated characters from this execution.
 
-    if not translation_plan:
-        print(f"{BackgroundColors.YELLOW}{get_zero_plan_message(input_dir, preflight_summary)}{Style.RESET_ALL}")  # Print no-op summary
-    else:
-        if use_configured_output and not output_dir.exists():  # If configured output is needed and missing
-            output_dir.mkdir(parents=True, exist_ok=True)  # Create output directory only when work exists
+    if not translation_plan:  # Preserve existing no-op preflight behavior.
+        print(f"{BackgroundColors.YELLOW}{get_zero_plan_message(input_dir, preflight_summary)}{Style.RESET_ALL}")  # Print specific zero-plan summary.
+    else:  # Execute remaining translation or finalization work.
+        if use_configured_output and not output_dir.exists():  # Create configured output root only when planned work exists.
+            output_dir.mkdir(parents=True, exist_ok=True)  # Preserve lazy output directory creation.
 
-        if not get_api_keys():  # Load DeepL API keys only after pending work exists
-            print(
-                f"{BackgroundColors.RED}DEEPL_API_KEYS not found or invalid in .env file. Please set it before running the program.{Style.RESET_ALL}"
-            )  # Output error message
-            return  # Exit the program
+        account_items: List[Tuple[str, str]] = []  # Default to no API accounts when every planned file only needs finalization.
+        active_account_index = 0  # Initialize process-wide active account index.
+        translators: Dict[str, deepl.DeepLClient] = {}  # Initialize process-wide DeepL clients reused across files.
+        if total_planned_characters > 0:  # Load API credentials only when new DeepL quota is actually required.
+            if not get_api_keys():  # Preserve existing API-key validation before new translation requests.
+                print(f"{BackgroundColors.RED}DEEPL_API_KEYS not found or invalid in .env file. Please set it before running the program.{Style.RESET_ALL}")  # Output configuration error.
+                return  # Leave persisted partial outputs untouched for the next run.
+            account_items = list(DEEPL_API_KEYS.items())  # Preserve configured account order across files.
 
-        account_items = list(DEEPL_API_KEYS.items())  # Preserve configured account order across files
-        active_account_index = 0  # Process-wide active account index
-        translators = {}  # Process-wide DeepL clients reused across files
-        progress_state = {"interactive": is_interactive_output(), "overall_total_characters": total_planned_characters, "overall_translated_characters": 0, "overall_start_time": time.monotonic(), "total_files": planned_files, "completed_files": 0, "progress_visible": False, "last_snapshot_time": 0.0}  # Shared progress state
+        progress_state = {"interactive": is_interactive_output(), "overall_total_characters": total_planned_characters, "overall_translated_characters": 0, "overall_start_time": time.monotonic(), "total_files": planned_files, "completed_files": 0, "progress_visible": False, "last_snapshot_time": 0.0}  # Track only current-execution character progress while retaining planned file completion.
 
-        for file_number, planned_file in enumerate(translation_plan, start=1):  # Translate each planned file
-            current_srt_path = planned_file["source_path"]  # Source path
-            output_file = planned_file["output_file"]  # Output path
-            srt_lines = planned_file["lines"]  # Planned cleaned lines
-            translatable_character_count = planned_file["characters"]  # Planned exact character count
-            filename = current_srt_path.name  # Display filename
+        for file_number, planned_file in enumerate(translation_plan, start=1):  # Process every planned translation or recovered finalization deterministically.
+            current_srt_path = planned_file["source_path"]  # Read logical source path used by existing output rules.
+            source_storage_path = planned_file["source_storage_path"]  # Read physical preserved source representation used for resume validation.
+            output_file = planned_file["output_file"]  # Read persistent translated output path.
+            srt_lines = planned_file["lines"]  # Read exact preprocessed source representation.
+            translatable_character_count = planned_file["characters"]  # Read only remaining current-run DeepL character workload.
+            filename = current_srt_path.name  # Build display filename.
 
-            if planned_file["removed_entries"] or planned_file["mixed_cleaned_entries"]:  # Log concise cleanup summary when cleanup changed content
-                write_srt_lines_atomic(current_srt_path, srt_lines)  # Preserve existing source cleanup behavior after preflight
-                print(f"{BackgroundColors.YELLOW}SDH cleanup: {BackgroundColors.CYAN}{filename}{BackgroundColors.YELLOW} removed {BackgroundColors.CYAN}{planned_file['removed_entries']}{BackgroundColors.YELLOW} entries, cleaned {BackgroundColors.CYAN}{planned_file['mixed_cleaned_entries']}{BackgroundColors.YELLOW} mixed entries.{Style.RESET_ALL}")  # Log cleanup summary
-            if planned_file["cleanup_fallback"]:
-                print(f"{BackgroundColors.YELLOW}Cleanup mode: Original subtitle content{Style.RESET_ALL}")  # Identify fallback source representation once
+            if planned_file["removed_entries"] or planned_file["mixed_cleaned_entries"]:  # Persist source preprocessing only after preflight selected this source.
+                write_srt_lines_atomic(source_storage_path, srt_lines)  # Preserve cleanup in the actual source storage without overwriting in-place partial output.
+                print(f"{BackgroundColors.YELLOW}SDH cleanup: {BackgroundColors.CYAN}{filename}{BackgroundColors.YELLOW} removed {BackgroundColors.CYAN}{planned_file['removed_entries']}{BackgroundColors.YELLOW} entries, cleaned {BackgroundColors.CYAN}{planned_file['mixed_cleaned_entries']}{BackgroundColors.YELLOW} mixed entries.{Style.RESET_ALL}")  # Log concise source cleanup summary.
+            if planned_file["cleanup_fallback"]:  # Preserve existing cleanup fallback visibility.
+                print(f"{BackgroundColors.YELLOW}Cleanup mode: Original subtitle content{Style.RESET_ALL}")  # Identify fallback source representation once.
 
-            if not planned_file["detection_conclusive"]:  # Continue normally when language detection is not reliable
-                print(f"{BackgroundColors.YELLOW}Source language detection was inconclusive for {BackgroundColors.CYAN}{filename}{BackgroundColors.YELLOW}. DeepL will determine the source language during translation.{Style.RESET_ALL}")  # Log inconclusive detection
+            if not planned_file["detection_conclusive"]:  # Preserve existing DeepL source-language autodetection behavior.
+                print(f"{BackgroundColors.YELLOW}Source language detection was inconclusive for {BackgroundColors.CYAN}{filename}{BackgroundColors.YELLOW}. DeepL will determine the source language during translation.{Style.RESET_ALL}")  # Log inconclusive offline detection.
 
-            output_file.parent.mkdir(parents=True, exist_ok=True)  # Ensure output directory exists for this file
-            progress_state.update({"file_total_characters": translatable_character_count, "file_translated_characters": 0, "file_start_time": time.monotonic(), "progress_visible": False, "last_snapshot_time": 0.0})  # Reset file progress only
-            print(f"{BackgroundColors.GREEN}File {BackgroundColors.CYAN}{file_number}/{planned_files}{BackgroundColors.GREEN}: {BackgroundColors.CYAN}{filename}{Style.RESET_ALL}")  # Print compact file header once
-            print(f"{BackgroundColors.GREEN}Characters: {BackgroundColors.CYAN}{translatable_character_count:,}{Style.RESET_ALL}")  # Print character total once
-            render_translation_progress(progress_state, force=True)  # Render 0% progress
+            output_file.parent.mkdir(parents=True, exist_ok=True)  # Ensure output directory exists before resume metadata or SRT persistence.
+            progress_state.update({"file_total_characters": translatable_character_count, "file_translated_characters": 0, "file_start_time": time.monotonic(), "progress_visible": False, "last_snapshot_time": 0.0})  # Reset file progress to current-run remaining work only.
+            print(f"{BackgroundColors.GREEN}File {BackgroundColors.CYAN}{file_number}/{planned_files}{BackgroundColors.GREEN}: {BackgroundColors.CYAN}{filename}{Style.RESET_ALL}")  # Print compact file header once.
+            print(f"{BackgroundColors.GREEN}Characters remaining: {BackgroundColors.CYAN}{translatable_character_count:,}{Style.RESET_ALL}")  # Print new DeepL workload without counting persisted prior-run characters.
+            if planned_file.get("resumed_characters", 0):  # Report persistent translation work reused from earlier execution.
+                print(f"{BackgroundColors.GREEN}Characters reused: {BackgroundColors.CYAN}{planned_file['resumed_characters']:,}{Style.RESET_ALL}")  # Keep resumed characters separate from current-run translated totals.
 
-            try:
-                translated_lines, active_account_index = translate_srt_lines(current_srt_path, srt_lines, translatable_character_count, account_items, active_account_index, translators, progress_state)  # Translate SRT lines using DeepL API
-            except RuntimeError as e:
-                failed_files += 1  # Count failed planned file
-                translated_characters = progress_state["overall_translated_characters"]  # Preserve partial successful character progress
-                print_progress_event(progress_state, f"{BackgroundColors.RED}{e}{Style.RESET_ALL}")  # Log fatal quota exhaustion cleanly
-                break  # Preserve existing stop-on-fatal-quota behavior
+            try:  # Prepare or reconcile persistent translation state before any new API request.
+                resume_state, output_blocks = prepare_translation_resume_session(srt_lines, current_srt_path, source_storage_path, output_file, planned_file["resume_info"])  # Recover journaled DeepL output or initialize source-bound resume metadata.
+            except RuntimeError as e:  # Preserve all existing source and partial output when resume reconciliation fails.
+                failed_files += 1  # Count failed planned file.
+                print_progress_event(progress_state, f"{BackgroundColors.RED}{e}{Style.RESET_ALL}")  # Log resume preparation failure without destructive fallback.
+                break  # Stop because the current output progression is intentionally preserved for review.
 
-            if translated_lines and not has_valid_srt_structure(translated_lines):
-                failed_files += 1  # Count invalid translated serialization as failed work
-                print_progress_event(progress_state, f"{BackgroundColors.RED}Translated SRT structure is invalid and was not saved: {BackgroundColors.CYAN}{output_file}{Style.RESET_ALL}")  # Preserve output safety
-                continue
-            progress_state["completed_files"] += 1  # Count fully translated file
-            translated_files += 1  # Count successful file
-            translated_characters = progress_state["overall_translated_characters"]  # Store successful character progress
-            render_translation_progress(progress_state, force=True)  # Finalize successful file progress
-            save_srt(translated_lines, output_file)  # Save the translated SRT to the output file
-            if DESCRIPTIVE_SUBTITLES_REMOVAL and cleanup_saved_translation(output_file):
-                preflight_summary["cleanup_warnings"] += 1  # Count skipped translated cleanup separately from translation failure
+            if planned_file["finalize_only"]:  # Finalize a complete persisted translation without consuming new DeepL quota.
+                try:  # Complete normal save and cleanup semantics from persistent translated output.
+                    if planned_file["resume_info"].get("final_output_ready"):  # Recognize cleanup already atomically persisted before the previous interruption.
+                        remove_translation_resume_artifacts(output_file, resume_state)  # Remove only completed resume artifacts without rewriting final output.
+                    else:  # Finish normal final validation and cleanup when interruption occurred before finalization completed.
+                        if not is_translated_output_complete(srt_lines, output_file):  # Require complete source index and timing correspondence before finalization.
+                            raise RuntimeError(f"Recovered translated output is structurally incomplete for finalization: {output_file}")  # Refuse finalization of ambiguous output.
+                        translated_lines = serialize_srt_blocks_preserving_indices(output_blocks)  # Rebuild complete persisted translation from validated blocks.
+                        save_srt(translated_lines, output_file)  # Preserve existing final saved-output message and atomic final write.
+                        if DESCRIPTIVE_SUBTITLES_REMOVAL:  # Preserve existing translated-output SDH cleanup behavior.
+                            if cleanup_saved_translation(output_file, resume_state):  # Run cleanup with crash-safe final-output journaling.
+                                preflight_summary["cleanup_warnings"] += 1  # Count skipped translated cleanup separately from translation failure.
+                        else:  # Journal unchanged final output when translated cleanup is disabled.
+                            mark_translation_final_output(output_file, resume_state, translated_lines)  # Record final output identity before resume metadata removal.
+                        remove_translation_resume_artifacts(output_file, resume_state)  # Remove persistent resume artifacts only after final output is safely complete.
+                except Exception as e:  # Preserve complete translated output and resume metadata when finalization fails.
+                    failed_files += 1  # Count failed finalization work.
+                    print_progress_event(progress_state, f"{BackgroundColors.RED}Finalization failed for {BackgroundColors.CYAN}{output_file}{BackgroundColors.RED}: {e}{Style.RESET_ALL}")  # Log finalization error without retranslating content.
+                    break  # Leave valid resume metadata for deterministic next-run recovery.
 
-    finish_time = datetime.datetime.now()  # Get the finish time of the program
-    print(
-        f"\n{BackgroundColors.GREEN}Translation completed.{Style.RESET_ALL}\n\n"
-        f"{BackgroundColors.GREEN}Files discovered: {BackgroundColors.CYAN}{preflight_summary['discovered']}{Style.RESET_ALL}\n"
-        f"{BackgroundColors.GREEN}Files planned: {BackgroundColors.CYAN}{planned_files}{Style.RESET_ALL}\n"
-        f"{BackgroundColors.GREEN}Files translated: {BackgroundColors.CYAN}{translated_files}{Style.RESET_ALL}\n"
-        f"{BackgroundColors.GREEN}Source candidates: {BackgroundColors.CYAN}{preflight_summary['source_candidates']}{Style.RESET_ALL}\n"
-        f"{BackgroundColors.GREEN}Existing translations skipped: {BackgroundColors.CYAN}{preflight_summary['existing_skipped']}{Style.RESET_ALL}\n"
-        f"{BackgroundColors.GREEN}Target-language files skipped: {BackgroundColors.CYAN}{preflight_summary['target_language_skipped']}{Style.RESET_ALL}\n"
-        f"{BackgroundColors.GREEN}Generated files skipped: {BackgroundColors.CYAN}{preflight_summary['generated_skipped']}{Style.RESET_ALL}\n"
-        f"{BackgroundColors.GREEN}Invalid-language outputs: {BackgroundColors.CYAN}{preflight_summary['invalid_language_outputs']}{Style.RESET_ALL}\n"
-        f"{BackgroundColors.GREEN}Mislabeled source files: {BackgroundColors.CYAN}{preflight_summary['mislabeled_source_files']}{Style.RESET_ALL}\n"
-        f"{BackgroundColors.GREEN}Cleanup fallbacks: {BackgroundColors.CYAN}{preflight_summary['cleanup_fallbacks']}{Style.RESET_ALL}\n"
-        f"{BackgroundColors.GREEN}Cleanup warnings: {BackgroundColors.CYAN}{preflight_summary['cleanup_warnings']}{Style.RESET_ALL}\n"
-        f"{BackgroundColors.GREEN}Other files skipped: {BackgroundColors.CYAN}{other_skipped_files}{Style.RESET_ALL}\n"
-        f"{BackgroundColors.GREEN}Invalid files: {BackgroundColors.CYAN}{preflight_summary['invalid']}{Style.RESET_ALL}\n"
-        f"{BackgroundColors.GREEN}Files failed: {BackgroundColors.CYAN}{failed_files}{Style.RESET_ALL}\n"
-        f"{BackgroundColors.GREEN}Characters translated: {BackgroundColors.CYAN}{translated_characters:,}/{total_planned_characters:,}{Style.RESET_ALL}"
-    )  # Output concise translation summary
-    print(
-        f"{BackgroundColors.GREEN}Start time: {BackgroundColors.CYAN}{start_time.strftime('%d/%m/%Y - %H:%M:%S')}\n{BackgroundColors.GREEN}Finish time: {BackgroundColors.CYAN}{finish_time.strftime('%d/%m/%Y - %H:%M:%S')}\n{BackgroundColors.GREEN}Execution time: {BackgroundColors.CYAN}{calculate_execution_time(start_time, finish_time)}{Style.RESET_ALL}"
-    )  # Output start, finish, and execution times
-    print(
-        f"\n{BackgroundColors.BOLD}{BackgroundColors.GREEN}Program finished.{Style.RESET_ALL}"
-    )  # Output end of program message
+                progress_state["completed_files"] += 1  # Count recovered finalized file in overall file progress.
+                finalized_files += 1  # Count no-quota recovered finalization separately from translated files.
+                render_translation_progress(progress_state, force=True)  # Refresh overall file completion after recovered finalization.
+                continue  # Proceed to the next planned file without a DeepL request.
 
-    (
-        atexit.register(play_sound) if RUN_FUNCTIONS["Play Sound"] else None
-    )  # Register the play_sound function to be called when the program finishes
+            render_translation_progress(progress_state, force=True)  # Render 0% of current-run remaining characters before translation starts.
+
+            try:  # Translate only blocks beyond the reconciled persisted prefix.
+                translated_lines, active_account_index, resume_state = translate_srt_lines(current_srt_path, srt_lines, output_file, translatable_character_count, account_items, active_account_index, translators, resume_state, output_blocks, progress_state)  # Translate and atomically persist each remaining existing translation unit.
+            except RuntimeError as e:  # Preserve partial progress for quota, rate-limit, network, API, or persistence failure.
+                failed_files += 1  # Count failed planned file.
+                translated_characters = progress_state["overall_translated_characters"]  # Preserve only current-run successfully persisted translated characters.
+                print_progress_event(progress_state, f"{BackgroundColors.RED}{e}{Style.RESET_ALL}")  # Log fatal request or persistence failure cleanly.
+                break  # Preserve existing stop-on-fatal translation behavior while leaving partial output resumable.
+
+            if translated_lines and not has_valid_srt_structure(translated_lines):  # Reject impossible complete translated serialization before finalization.
+                failed_files += 1  # Count invalid translated serialization as failed work.
+                print_progress_event(progress_state, f"{BackgroundColors.RED}Translated SRT structure is invalid and remains resumable for review: {BackgroundColors.CYAN}{output_file}{Style.RESET_ALL}")  # Preserve persisted state instead of deleting it.
+                continue  # Leave resume artifacts intact for conservative recovery.
+            if not is_translated_output_complete(srt_lines, output_file):  # Require exact source index and timing correspondence at full completion.
+                failed_files += 1  # Count structurally incomplete final output as failed work.
+                print_progress_event(progress_state, f"{BackgroundColors.RED}Translated SRT does not completely match the source progression and remains resumable: {BackgroundColors.CYAN}{output_file}{Style.RESET_ALL}")  # Preserve persistent translated prefix and metadata.
+                continue  # Avoid final cleanup or metadata deletion for incomplete output.
+
+            progress_state["completed_files"] += 1  # Count fully translated file.
+            translated_files += 1  # Count file completed with new DeepL translation work this run.
+            translated_characters = progress_state["overall_translated_characters"]  # Store only current-run successful translated character progress.
+            render_translation_progress(progress_state, force=True)  # Finalize successful file progress.
+            save_srt(translated_lines, output_file)  # Preserve existing final atomic save and success message after per-block persistence.
+            if DESCRIPTIVE_SUBTITLES_REMOVAL:  # Preserve existing translated-output cleanup behavior.
+                if cleanup_saved_translation(output_file, resume_state):  # Run cleanup with final-output crash journaling.
+                    preflight_summary["cleanup_warnings"] += 1  # Count skipped translated cleanup separately from translation failure.
+            else:  # Journal unchanged final output when translated cleanup is disabled.
+                mark_translation_final_output(output_file, resume_state, translated_lines)  # Record final output identity before completed resume metadata removal.
+            remove_translation_resume_artifacts(output_file, resume_state)  # Remove persistent state only after complete final validation and cleanup.
+
+    finish_time = datetime.datetime.now()  # Record program finish time.
+    print(  # Output concise summary with reused and newly translated characters separated.
+        f"\n{BackgroundColors.GREEN}Translation completed.{Style.RESET_ALL}\n\n"  # Add summary heading.
+        f"{BackgroundColors.GREEN}Files discovered: {BackgroundColors.CYAN}{preflight_summary['discovered']}{Style.RESET_ALL}\n"  # Add discovered file count.
+        f"{BackgroundColors.GREEN}Files planned: {BackgroundColors.CYAN}{planned_files}{Style.RESET_ALL}\n"  # Add planned file count.
+        f"{BackgroundColors.GREEN}Files translated: {BackgroundColors.CYAN}{translated_files}{Style.RESET_ALL}\n"  # Add current-run translated file count.
+        f"{BackgroundColors.GREEN}Files finalized from persisted output: {BackgroundColors.CYAN}{finalized_files}{Style.RESET_ALL}\n"  # Add recovered finalization count.
+        f"{BackgroundColors.GREEN}Resumable partial outputs: {BackgroundColors.CYAN}{preflight_summary['resumable_partial_outputs']}{Style.RESET_ALL}\n"  # Add resumable partial output count.
+        f"{BackgroundColors.GREEN}Characters reused from persisted output: {BackgroundColors.CYAN}{reused_characters:,}{Style.RESET_ALL}\n"  # Add prior-run reusable character count.
+        f"{BackgroundColors.GREEN}Source candidates: {BackgroundColors.CYAN}{preflight_summary['source_candidates']}{Style.RESET_ALL}\n"  # Add source candidate count.
+        f"{BackgroundColors.GREEN}Existing translations skipped: {BackgroundColors.CYAN}{preflight_summary['existing_skipped']}{Style.RESET_ALL}\n"  # Add complete existing-output skip count.
+        f"{BackgroundColors.GREEN}Target-language files skipped: {BackgroundColors.CYAN}{preflight_summary['target_language_skipped']}{Style.RESET_ALL}\n"  # Add target-language source skip count.
+        f"{BackgroundColors.GREEN}Generated files skipped: {BackgroundColors.CYAN}{preflight_summary['generated_skipped']}{Style.RESET_ALL}\n"  # Add generated companion skip count.
+        f"{BackgroundColors.GREEN}Invalid-language outputs: {BackgroundColors.CYAN}{preflight_summary['invalid_language_outputs']}{Style.RESET_ALL}\n"  # Add invalid-language output count.
+        f"{BackgroundColors.GREEN}Mislabeled source files: {BackgroundColors.CYAN}{preflight_summary['mislabeled_source_files']}{Style.RESET_ALL}\n"  # Add mislabeled source count.
+        f"{BackgroundColors.GREEN}Cleanup fallbacks: {BackgroundColors.CYAN}{preflight_summary['cleanup_fallbacks']}{Style.RESET_ALL}\n"  # Add source cleanup fallback count.
+        f"{BackgroundColors.GREEN}Cleanup warnings: {BackgroundColors.CYAN}{preflight_summary['cleanup_warnings']}{Style.RESET_ALL}\n"  # Add translated cleanup warning count.
+        f"{BackgroundColors.GREEN}Other files skipped: {BackgroundColors.CYAN}{other_skipped_files}{Style.RESET_ALL}\n"  # Add other skipped file count.
+        f"{BackgroundColors.GREEN}Invalid files: {BackgroundColors.CYAN}{preflight_summary['invalid']}{Style.RESET_ALL}\n"  # Add invalid file count.
+        f"{BackgroundColors.GREEN}Files failed: {BackgroundColors.CYAN}{failed_files}{Style.RESET_ALL}\n"  # Add failed planned file count.
+        f"{BackgroundColors.GREEN}Characters translated this run: {BackgroundColors.CYAN}{translated_characters:,}/{total_planned_characters:,}{Style.RESET_ALL}"  # Add current-run translated character total.
+    )  # Finish concise translation summary output.
+    print(  # Output start, finish, and execution times.
+        f"{BackgroundColors.GREEN}Start time: {BackgroundColors.CYAN}{start_time.strftime('%d/%m/%Y - %H:%M:%S')}\n"  # Add execution start time.
+        f"{BackgroundColors.GREEN}Finish time: {BackgroundColors.CYAN}{finish_time.strftime('%d/%m/%Y - %H:%M:%S')}\n"  # Add execution finish time.
+        f"{BackgroundColors.GREEN}Execution time: {BackgroundColors.CYAN}{calculate_execution_time(start_time, finish_time)}{Style.RESET_ALL}"  # Add total execution duration.
+    )  # Finish execution timing output.
+    print(f"\n{BackgroundColors.BOLD}{BackgroundColors.GREEN}Program finished.{Style.RESET_ALL}")  # Output end-of-program message.
+
+    atexit.register(play_sound) if RUN_FUNCTIONS["Play Sound"] else None  # Register completion sound using existing configuration behavior.
+
 
 
 if __name__ == "__main__":
