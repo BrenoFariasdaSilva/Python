@@ -151,7 +151,9 @@ VERBOSE = False  # Set to True to output verbose messages
 
 # Facebook Constants:
 PROFILE_URL = "https://www.facebook.com/BrenoFariasDaSilva"  # Facebook profile containing the posts to download
-PROFILE_DISPLAY_NAME = "Breno Farias"  # Display name used to remove author-only lines from title extraction
+PROFILE_DISPLAY_NAME = "Breno Farias"  # Preferred display name used when deriving titles
+PROFILE_AUTHOR_NAMES = ("Breno Farias", "Breno Farias da Silva")  # Accepted owner names for top-level post validation
+ONLY_PROFILE_OWNER_POSTS = True  # Ignore comments and posts authored by other people on the profile timeline
 FACEBOOK_BASE_URL = "https://www.facebook.com/"  # Base URL used to resolve relative Facebook links
 BROWSER_CHANNEL = "chrome"  # Prefer the locally installed stable Google Chrome browser
 HEADLESS_AFTER_AUTHENTICATION = True  # Keep scraping invisible after any required manual Facebook authentication
@@ -167,14 +169,18 @@ AUTHENTICATION_STATUS_LOG_INTERVAL_SECONDS = 15.0  # Minimum delay between repea
 HEADLESS_AUTHENTICATION_CHECK_TIMEOUT_SECONDS = 15.0  # Maximum time to verify a persisted Facebook session without user interaction
 BROWSER_RELAUNCH_DELAY_SECONDS = 1.5  # Delay after closing a persistent context before reopening the same browser profile
 PROFILE_READY_TIMEOUT_SECONDS = 60  # Maximum time to wait for the authenticated profile page to render usable content
-SCROLL_PAUSE_SECONDS = 2.0  # Delay after each profile scroll to allow lazy-loaded posts to appear
-NO_NEW_POST_SCROLL_LIMIT = 12  # Consecutive scrolls without new posts before the scraper stops
+SCROLL_PAUSE_SECONDS = 2.5  # Delay after each incremental profile scroll to allow lazy-loaded posts to appear
+SCROLL_STEP_PX = 900  # Incremental scroll distance used to avoid jumping over virtualized posts
+NO_NEW_POST_SCROLL_LIMIT = 12  # Consecutive scrolls without newly discovered canonical post URLs before stopping
 MAX_SCROLL_ITERATIONS = 10_000  # Hard safety limit protecting against endless scrolling
-ARTICLE_SETTLE_MS = 350  # Small delay after bringing a post into the viewport
-VIDEO_NETWORK_CAPTURE_MS = 2_000  # Time spent collecting video requests after a post becomes visible
+ARTICLE_SETTLE_MS = 700  # Delay after bringing a post into the viewport so lazy media can render
+VIDEO_NETWORK_CAPTURE_MS = 4_000  # Time spent collecting video/audio requests after a post becomes visible
+VIDEO_RANGE_CHUNK_BYTES = 16 * 1024 * 1024  # Chunk size used when reconstructing HTTP 206 ranged media responses
 
 # Output Constants:
 POST_METADATA_FILENAME = "post.json"  # Metadata file written inside every post directory
+SCRAPE_SCHEMA_VERSION = 3  # Metadata schema version; older broken/profile-feed outputs are intentionally reprocessed
+REPROCESS_LEGACY_METADATA = True  # Ignore pre-schema metadata so previously misidentified posts/media are scanned again
 MAX_TITLE_LENGTH = 96  # Maximum filesystem title length used after the date prefix
 MAX_CONTENT_TITLE_LENGTH = 160  # Maximum amount of post text considered while deriving a title
 MAX_MEDIA_FILE_SIZE_BYTES = 4 * 1024 * 1024 * 1024  # Four GiB safety ceiling per media file
@@ -222,20 +228,33 @@ TRACKING_QUERY_PARAMETERS = {
 }  # Tracking-only parameters removed from normalized Facebook permalinks
 
 POST_URL_PATTERNS = (
-    re.compile(r"/posts/(\d+)", re.IGNORECASE),
-    re.compile(r"[?&]story_fbid=(\d+)", re.IGNORECASE),
-    re.compile(r"/videos/(?:[^/]+/)?(\d+)", re.IGNORECASE),
-    re.compile(r"[?&]fbid=(\d+)", re.IGNORECASE),
-)  # Patterns used to recover stable post identifiers
+    re.compile(r"/posts/(pfbid[A-Za-z0-9]+|\d+)", re.IGNORECASE),
+    re.compile(r"[?&]story_fbid=(pfbid[A-Za-z0-9]+|\d+)", re.IGNORECASE),
+)  # Patterns used to recover stable post identifiers from canonical post URLs
 
 POST_LINK_HINTS = (
     "/posts/",
-    "/permalink/",
+    "/permalink.php",
+    "/story.php",
     "story_fbid=",
-    "/videos/",
+)  # URL fragments used only for canonical top-level post permalinks
+
+PHOTO_LINK_HINTS = (
     "/photo/",
-    "fbid=",
-)  # URL fragments that identify likely post permalinks
+    "/photos/",
+    "/photo.php",
+)  # URL fragments that identify Facebook post-photo links
+
+VIDEO_LINK_HINTS = (
+    "/videos/",
+    "/reel/",
+    "/watch/",
+)  # URL fragments that identify Facebook video/reel links inside a post
+
+VIDEO_RANGE_QUERY_PARAMETERS = {
+    "bytestart",
+    "byteend",
+}  # Facebook CDN range query parameters removed to recover the complete media resource
 
 MESSAGE_SELECTORS = (
     '[data-ad-preview="message"]',
@@ -244,16 +263,14 @@ MESSAGE_SELECTORS = (
 )  # Selectors used in order to recover the textual body of each post
 
 ARTICLE_SELECTORS = (
-    'div[role="article"]',
+    'div[role="main"] div[role="article"]',
     'div[data-pagelet^="FeedUnit_"]',
-)  # Selectors used to locate loaded timeline posts
+)  # Selectors used to locate loaded timeline posts inside Facebook's main profile feed
 
 DATE_ELEMENT_SELECTORS = (
     "abbr[data-utime]",
     "time[datetime]",
-    "a[aria-label]",
-    "a[title]",
-)  # Selectors containing likely machine-readable or human-readable post dates
+)  # Machine-readable date elements used only as a fallback after the canonical permalink timestamp
 
 SEE_MORE_TEXTS = (
     "See more",
@@ -672,50 +689,142 @@ def is_probable_post_url(url: str) -> bool:
     return any(hint in lowered for hint in POST_LINK_HINTS)  # Return whether any supported hint is present
 
 
+def collect_post_permalink_candidates(article) -> list[dict]:
+    """
+    Collect canonical post-permalink candidates that belong to the current top-level article only.
+
+    Nested comments can also use role="article" and contain photo/video links. The JavaScript
+    ownership check ensures descendants whose nearest role="article" is a nested comment are not
+    allowed to define the parent post identity.
+
+    :param article: Playwright locator representing a Facebook article.
+    :return: Canonical permalink candidate dictionaries ordered later by Python scoring.
+    """
+
+    try:  # Extract candidate anchors in one browser-side pass to reduce locator churn
+        raw_candidates = article.evaluate(
+            """root => {
+                const rootArticle = root.matches('div[role="article"]') ? root : null;
+                const belongsToRoot = element => !rootArticle || element.closest('div[role="article"]') === rootArticle;
+                return Array.from(root.querySelectorAll('a[href]'))
+                    .filter(belongsToRoot)
+                    .map(anchor => ({
+                        href: anchor.href || anchor.getAttribute('href') || '',
+                        text: (anchor.innerText || anchor.textContent || '').trim(),
+                        ariaLabel: anchor.getAttribute('aria-label') || '',
+                        title: anchor.getAttribute('title') || '',
+                        hasAbbr: !!anchor.querySelector('abbr[data-utime], abbr'),
+                        hasTime: !!anchor.querySelector('time[datetime], time'),
+                    }));
+            }"""
+        )  # Read only anchors that semantically belong to the current article
+    except Exception:  # Detached articles cannot provide reliable permalink candidates
+        return []  # Return no candidates
+
+    profile_path = (urlparse(PROFILE_URL).path or '').casefold().rstrip('/')  # Resolve configured profile path once
+    candidates = []  # Initialize scored permalink candidates
+
+    for raw_candidate in raw_candidates or []:  # Inspect browser-returned candidate dictionaries
+        href = str(raw_candidate.get('href') or '').strip()  # Normalize candidate href
+        if not href or not is_probable_post_url(href):  # Reject photos, videos, comments, and unrelated links
+            continue  # Continue to the next candidate
+
+        normalized = normalize_facebook_url(href)  # Normalize tracking parameters from the candidate
+        lowered = normalized.casefold()  # Build case-insensitive form for scoring
+        score = 0  # Initialize canonical-link score
+
+        if '/posts/pfbid' in lowered:  # Modern canonical post URLs are the strongest identity signal
+            score += 600  # Prefer modern pfbid permalinks
+        elif '/posts/' in lowered:  # Legacy numeric post permalinks are also strong
+            score += 550  # Prefer direct /posts/ links
+        elif '/permalink.php' in lowered or '/story.php' in lowered:  # Accept legacy Facebook permalink endpoints
+            score += 500  # Prefer legacy post routes over all unrelated links
+
+        if profile_path and profile_path in (urlparse(normalized).path or '').casefold():  # Prefer links explicitly owned by configured profile
+            score += 150  # Add profile-ownership preference
+
+        text_value = normalize_whitespace(str(raw_candidate.get('text') or ''))  # Normalize visible timestamp text
+        aria_value = normalize_whitespace(str(raw_candidate.get('ariaLabel') or ''))  # Normalize accessible timestamp text
+        title_value = normalize_whitespace(str(raw_candidate.get('title') or ''))  # Normalize tooltip timestamp text
+
+        if raw_candidate.get('hasAbbr') or raw_candidate.get('hasTime'):  # Timestamp anchors often contain abbr/time descendants
+            score += 300  # Strongly prefer timestamp-bearing post links
+        if any(looks_like_date_candidate(value) for value in (text_value, aria_value, title_value) if value):  # Detect date-like labels
+            score += 250  # Prefer the post timestamp link rather than other links to the same post
+
+        candidates.append(
+            {
+                'url': normalized,
+                'score': score,
+                'text': text_value,
+                'aria_label': aria_value,
+                'title': title_value,
+            }
+        )  # Preserve candidate and timestamp metadata
+
+    candidates.sort(key=lambda item: (-int(item['score']), len(str(item['url'])), str(item['url'])))  # Prefer strongest shortest canonical URL
+    return candidates  # Return scored canonical post candidates
+
+
+def is_profile_owner_post_article(article, post_url: str) -> bool:
+    """
+    Determine whether a top-level Facebook article was authored by the configured profile owner.
+
+    :param article: Facebook article locator.
+    :param post_url: Canonical permalink already extracted from the article.
+    :return: True when the article belongs to the configured profile owner or owner filtering is disabled.
+    """
+
+    if not ONLY_PROFILE_OWNER_POSTS:  # Allow callers to archive all timeline authors when explicitly configured
+        return True  # Skip owner validation
+
+    profile_path = (urlparse(PROFILE_URL).path or '').casefold().rstrip('/')  # Normalize configured profile path
+    post_path = (urlparse(post_url).path or '').casefold().rstrip('/')  # Normalize canonical post path
+
+    if profile_path and post_path.startswith(f'{profile_path}/posts/'):  # Modern canonical URL explicitly names the configured profile
+        return True  # Accept direct owner post immediately
+
+    try:  # Inspect likely author anchors that belong to the current article rather than nested comments
+        authors = article.evaluate(
+            """root => {
+                const rootArticle = root.matches('div[role="article"]') ? root : null;
+                const belongsToRoot = element => !rootArticle || element.closest('div[role="article"]') === rootArticle;
+                return Array.from(root.querySelectorAll('h2 a[href], h3 a[href], h4 a[href], strong a[href]'))
+                    .filter(belongsToRoot)
+                    .map(anchor => ({
+                        text: (anchor.innerText || anchor.textContent || '').trim(),
+                        href: anchor.href || anchor.getAttribute('href') || '',
+                    }));
+            }"""
+        )  # Read article-owner candidates in one browser-side pass
+    except Exception:  # Detached articles cannot be positively identified as owner posts
+        return False  # Reject ambiguous article
+
+    accepted_names = {normalize_whitespace(name).casefold() for name in PROFILE_AUTHOR_NAMES if normalize_whitespace(name)}  # Normalize configured names
+
+    for author in authors or []:  # Inspect author identity candidates
+        author_text = normalize_whitespace(str(author.get('text') or '')).casefold()  # Normalize visible author text
+        author_href = normalize_facebook_url(str(author.get('href') or ''))  # Normalize author profile URL
+        author_path = (urlparse(author_href).path or '').casefold().rstrip('/')  # Normalize author profile path
+
+        if author_text in accepted_names:  # Accept either configured visible owner name
+            return True  # Article belongs to the configured user
+        if profile_path and author_path == profile_path:  # Accept direct link to configured profile path
+            return True  # Article belongs to the configured user
+
+    return False  # Reject comments, nested articles, and posts authored by other users
+
+
 def extract_post_permalink(article) -> str:
     """
-    Extract the most likely canonical permalink from a loaded Facebook post element.
+    Extract the strongest canonical permalink from a top-level Facebook post article.
 
     :param article: Playwright locator representing a Facebook post.
     :return: Normalized post permalink or an empty string.
     """
 
-    candidates = []  # Initialize candidate links
-
-    try:  # Attempt to enumerate links inside the post
-        links = article.locator("a[href]")  # Locate every anchor containing an href
-        for index in range(links.count()):  # Iterate through loaded anchors
-            try:  # Isolate per-anchor extraction failures
-                href = links.nth(index).get_attribute("href") or ""  # Read the href attribute
-                if not href or not is_probable_post_url(href):  # Ignore unrelated links
-                    continue  # Continue to the next anchor
-
-                normalized = normalize_facebook_url(href)  # Normalize the candidate URL
-                score = 0  # Initialize a preference score
-                lowered = normalized.lower()  # Normalize once for scoring
-
-                if "/posts/" in lowered or "/permalink/" in lowered:  # Prefer explicit post permalinks
-                    score += 100  # Assign highest priority
-                if "story_fbid=" in lowered:  # Prefer story identifiers
-                    score += 95  # Assign near-highest priority
-                if "/videos/" in lowered:  # Prefer dedicated video post links
-                    score += 90  # Assign high priority
-                if "/photo/" in lowered or "fbid=" in lowered:  # Accept photo permalinks as a fallback
-                    score += 70  # Assign medium priority
-                if PROFILE_URL.lower().rstrip("/") in lowered:  # Prefer links belonging to the configured profile
-                    score += 20  # Add profile ownership preference
-
-                candidates.append((score, len(normalized), normalized))  # Store candidate metadata
-            except Exception:  # Ignore malformed or detached anchors
-                continue  # Continue scanning the remaining links
-    except Exception:  # Handle detached or transient post elements
-        return ""  # Return empty when link enumeration fails
-
-    if not candidates:  # Verify at least one permalink candidate exists
-        return ""  # Return empty when none can be resolved
-
-    candidates.sort(key=lambda item: (-item[0], item[1], item[2]))  # Prefer highest score and shortest canonical URL
-    return candidates[0][2]  # Return the strongest candidate
+    candidates = collect_post_permalink_candidates(article)  # Collect same-article canonical post links only
+    return str(candidates[0]['url']) if candidates else ''  # Return the strongest canonical permalink
 
 
 def expand_post_text(article) -> None:
@@ -835,56 +944,45 @@ def derive_post_title(content: str, post_id: str) -> str:
 
 def collect_date_candidates(article) -> list[str]:
     """
-    Collect machine-readable and human-readable date strings from a Facebook post.
+    Collect date strings from the canonical post timestamp instead of arbitrary nested links.
 
     :param article: Playwright locator representing a Facebook post.
     :return: Ordered list of distinct date candidates.
     """
 
-    candidates = []  # Initialize date candidate list
+    candidates = []  # Initialize ordered date candidates
 
-    try:  # First inspect likely permalink anchors because they usually carry the post timestamp
-        links = article.locator("a[href]")  # Locate anchors inside the post
-        for index in range(min(links.count(), 100)):  # Bound work on unexpectedly complex posts
-            try:  # Isolate individual link failures
-                link = links.nth(index)  # Resolve the current link
-                href = link.get_attribute("href") or ""  # Read its target
-                if not is_probable_post_url(href):  # Ignore links unrelated to the post timestamp
-                    continue  # Continue to the next link
-                for attribute in ("aria-label", "title"):  # Inspect date-bearing accessibility attributes
-                    value = normalize_whitespace(link.get_attribute(attribute) or "")  # Read and normalize the attribute
-                    if value and value not in candidates:  # Preserve unique values only
-                        candidates.append(value)  # Store the candidate
-                text = normalize_whitespace(link.inner_text(timeout=500))  # Read visible relative/absolute date text
-                if text and text not in candidates:  # Preserve unique visible date strings
-                    candidates.append(text)  # Store the candidate
-            except Exception:  # Ignore transient anchors
-                continue  # Continue scanning
-    except Exception:  # Continue with generic date elements when anchor enumeration fails
-        pass  # No action required
+    for permalink_candidate in collect_post_permalink_candidates(article):  # Inspect canonical post links in score order
+        for key in ('aria_label', 'title', 'text'):  # Prefer timestamp metadata attached to the canonical link itself
+            value = normalize_whitespace(str(permalink_candidate.get(key) or ''))  # Normalize candidate text
+            if value and looks_like_date_candidate(value) and value not in candidates:  # Preserve date-like values only
+                candidates.append(value)  # Store timestamp candidate
 
-    for selector in DATE_ELEMENT_SELECTORS:  # Inspect generic machine-readable date elements
-        try:  # Isolate selector-specific failures
-            elements = article.locator(selector)  # Locate matching elements
-            for index in range(min(elements.count(), 50)):  # Bound extraction cost
-                try:  # Isolate individual element failures
-                    element = elements.nth(index)  # Resolve the current element
-                    utime = element.get_attribute("data-utime") or ""  # Read Unix timestamp when present
-                    datetime_value = element.get_attribute("datetime") or ""  # Read ISO datetime when present
-                    aria_label = element.get_attribute("aria-label") or ""  # Read accessibility date label
-                    title = element.get_attribute("title") or ""  # Read tooltip date label
-                    text = element.inner_text(timeout=300) if element.is_visible() else ""  # Read visible date text
+    try:  # Fall back to machine-readable date descendants that belong to this article only
+        fallback_values = article.evaluate(
+            """root => {
+                const rootArticle = root.matches('div[role="article"]') ? root : null;
+                const belongsToRoot = element => !rootArticle || element.closest('div[role="article"]') === rootArticle;
+                return Array.from(root.querySelectorAll('abbr[data-utime], time[datetime]'))
+                    .filter(belongsToRoot)
+                    .flatMap(element => [
+                        element.getAttribute('data-utime') || '',
+                        element.getAttribute('datetime') || '',
+                        element.getAttribute('aria-label') || '',
+                        element.getAttribute('title') || '',
+                        (element.innerText || element.textContent || '').trim(),
+                    ]);
+            }"""
+        )  # Read same-article timestamp values
+    except Exception:  # Detached articles provide no safe fallback date
+        fallback_values = []  # Continue with canonical-link candidates only
 
-                    for value in (utime, datetime_value, aria_label, title, text):  # Iterate all discovered date forms
-                        normalized = normalize_whitespace(value)  # Normalize candidate text
-                        if normalized and normalized not in candidates:  # Avoid duplicate candidates
-                            candidates.append(normalized)  # Preserve the candidate
-                except Exception:  # Ignore detached date elements
-                    continue  # Continue to the next element
-        except Exception:  # Ignore selectors that no longer match current Facebook markup
-            continue  # Continue to the next selector
+    for raw_value in fallback_values or []:  # Normalize machine-readable fallback values
+        value = normalize_whitespace(str(raw_value or ''))  # Normalize candidate
+        if value and value not in candidates:  # Avoid duplicates
+            candidates.append(value)  # Preserve fallback timestamp
 
-    return candidates  # Return all collected date candidates
+    return candidates  # Return only post-level timestamp candidates
 
 
 def looks_like_date_candidate(value: str) -> bool:
@@ -1024,7 +1122,7 @@ def get_article_locator(page: Page):
     """
     Return the first Facebook article selector that currently matches loaded posts.
 
-    :param page: Facebook profile page.
+    :param page: Facebook profile timeline page.
     :return: Playwright locator for loaded posts.
     """
 
@@ -1437,7 +1535,7 @@ def wait_for_profile_ready(
     allow_interactive_authentication: bool = True,
 ) -> Page:
     """
-    Wait until the authenticated Facebook profile page has rendered usable main/timeline content.
+    Wait until the authenticated Facebook profile root page has rendered usable main/timeline content.
 
     :param page: Browser page opened at PROFILE_URL.
     :param context: Persistent authenticated browser context.
@@ -1571,68 +1669,64 @@ def navigate_to_profile(
     allow_interactive_authentication: bool = True,
 ) -> Page:
     """
-    Verify authentication, navigate to the configured Facebook profile, and wait until it is usable.
-
-    In visible mode the function can wait for CAPTCHA, 2FA, checkpoints, and confirmation prompts.
-    In headless mode it only accepts authentication already persisted in AUTOMATION_PROFILE_DIR and
-    raises FacebookAuthenticationRequiredError when manual interaction is required.
+    Verify authentication and open a fresh profile root timeline from its newest position.
 
     :param page: Initial browser page used by the downloader.
     :param context: Persistent browser context containing Facebook authentication state.
     :param allow_interactive_authentication: Whether manual browser authentication is available.
-    :return: Current authenticated profile page that should be used by the scraper.
+    :return: Current authenticated profile root page ready for scraping.
     """
 
-    page.set_default_timeout(10_000)  # Configure a conservative default action timeout
-    page.set_default_navigation_timeout(PAGE_LOAD_TIMEOUT_MS)  # Configure page navigation timeout
+    page.set_default_timeout(10_000)  # Configure conservative default action timeout
+    page.set_default_navigation_timeout(PAGE_LOAD_TIMEOUT_MS)  # Configure navigation timeout
 
     current_url = get_live_page_url(page)  # Resolve current live browser location
+    if not is_facebook_url(current_url):  # Open Facebook first when persistent browser starts elsewhere
+        page.goto(FACEBOOK_BASE_URL, wait_until='domcontentloaded', timeout=PAGE_LOAD_TIMEOUT_MS)  # Enter Facebook before session validation
 
-    if not is_facebook_url(current_url):  # Open Facebook first when the persistent browser starts on a blank/non-Facebook page
-        page.goto(FACEBOOK_BASE_URL, wait_until="domcontentloaded", timeout=PAGE_LOAD_TIMEOUT_MS)  # Enter Facebook before validating session state
+    if allow_interactive_authentication:  # Visible mode can wait for CAPTCHA/2FA/checkpoint interaction
+        page = wait_for_facebook_login(page, context)  # Follow current page through full authentication flow
+    else:  # Headless mode requires already persisted authentication
+        existing_page = wait_for_existing_facebook_authentication(page, context)  # Probe saved session
+        if existing_page is None:  # No usable authenticated state restored
+            raise FacebookAuthenticationRequiredError('The persistent Facebook session requires manual authentication.')  # Request visible auth
+        page = existing_page  # Continue with authenticated headless page
 
-    if allow_interactive_authentication:  # Visible browser mode can wait for user-completed authentication challenges
-        page = wait_for_facebook_login(page, context)  # Follow the actual page through the complete authentication flow
-    else:  # Headless mode must never wait indefinitely for interaction that the user cannot see
-        existing_page = wait_for_existing_facebook_authentication(page, context)  # Probe the persisted login without user interaction
-        if existing_page is None:  # No usable authenticated state was restored headlessly
-            raise FacebookAuthenticationRequiredError(
-                "The persistent Facebook session requires manual authentication."
-            )  # Ask the lifecycle manager to reopen the profile visibly
-        page = existing_page  # Continue with the positively authenticated headless page
+    page.set_default_timeout(10_000)  # Reapply timeout if Facebook replaced page
+    page.set_default_navigation_timeout(PAGE_LOAD_TIMEOUT_MS)  # Reapply navigation timeout
 
-    page.set_default_timeout(10_000)  # Reapply action timeout in case Facebook created/replaced the page
-    page.set_default_navigation_timeout(PAGE_LOAD_TIMEOUT_MS)  # Reapply navigation timeout to the selected page
+    # Always perform a fresh navigation after authentication. Persistent Chrome may restore a
+    # previous deep scroll position, so explicitly reopening the profile root ensures the timeline
+    # starts from its newest visible state. Do not append '/posts': that route is not available for
+    # every Facebook profile and can render Facebook's "content unavailable" page.
+    page.goto(PROFILE_URL, wait_until='domcontentloaded', timeout=PAGE_LOAD_TIMEOUT_MS)  # Open the configured profile root fresh
+    page = select_current_facebook_page(context, page)  # Recover current page if Facebook replaced it during navigation
 
-    target_prefix = PROFILE_URL.casefold().rstrip("/")  # Normalize configured profile URL
-    current_url = get_live_page_url(page).casefold().rstrip("/")  # Re-read the current live location after authentication
-
-    if not current_url.startswith(target_prefix):  # Navigate to the requested profile only after authentication is valid
-        page.goto(PROFILE_URL, wait_until="domcontentloaded", timeout=PAGE_LOAD_TIMEOUT_MS)  # Open the configured profile
-
-    page = select_current_facebook_page(context, page)  # Recover the current page if Facebook replaced it during navigation
-
-    if not is_facebook_authenticated(page, context):  # Facebook can request another challenge when the profile is opened
-        if not allow_interactive_authentication:  # Headless mode cannot resolve a newly requested verification step
-            raise FacebookAuthenticationRequiredError(
-                "Facebook requested additional verification after profile navigation."
-            )  # Reopen visible authentication instead of hanging headlessly
-
-        page = wait_for_facebook_login(page, context)  # Wait through any additional account verification
-        if not get_live_page_url(page).casefold().rstrip("/").startswith(target_prefix):  # Return to profile after challenge
-            page.goto(PROFILE_URL, wait_until="domcontentloaded", timeout=PAGE_LOAD_TIMEOUT_MS)  # Re-open configured profile
+    if not is_facebook_authenticated(page, context):  # Profile navigation can trigger another challenge
+        if not allow_interactive_authentication:  # Headless mode cannot resolve new verification
+            raise FacebookAuthenticationRequiredError('Facebook requested additional verification after profile navigation.')  # Reopen visible auth
+        page = wait_for_facebook_login(page, context)  # Wait through additional verification
+        page.goto(PROFILE_URL, wait_until='domcontentloaded', timeout=PAGE_LOAD_TIMEOUT_MS)  # Reopen profile root after challenge
+        page = select_current_facebook_page(context, page)  # Recover current page after challenge navigation
 
     page = wait_for_profile_ready(
         page,
         context,
         allow_interactive_authentication=allow_interactive_authentication,
-    )  # Require authenticated main/timeline content before scraping begins
+    )  # Require authenticated profile content before scraping
+
+    try:  # Explicitly reset browser viewport to newest timeline position
+        page.evaluate('window.scrollTo(0, 0)')  # Start from top even if persistent history restored a deep scroll offset
+        page.wait_for_timeout(1_500)  # Allow the profile header and newest timeline posts to settle
+    except Exception:  # Scrolling reset is best-effort after successful fresh navigation
+        pass  # Continue with current top position
 
     print(
-        f"{BackgroundColors.GREEN}Profile loaded and authenticated: {BackgroundColors.CYAN}{PROFILE_URL}{Style.RESET_ALL}"
-    )  # Log successful authentication and profile readiness
+        f"{BackgroundColors.GREEN}Profile timeline loaded from newest position: "
+        f"{BackgroundColors.CYAN}{PROFILE_URL}{Style.RESET_ALL}"
+    )  # Log profile-root timeline readiness
 
-    return page  # Return the exact Page object that is ready for timeline scraping
+    return page  # Return exact Page object ready for timeline scraping
 
 
 def establish_authenticated_scraping_session(
@@ -1745,7 +1839,7 @@ def establish_authenticated_scraping_session(
 
 def ensure_scraping_profile_ready(page: Page, context: BrowserContext) -> Page:
     """
-    Ensure the current headless scraping page remains authenticated and points to PROFILE_URL.
+    Ensure the current scraping page remains authenticated and belongs to the configured profile feed.
 
     :param page: Current scraping page.
     :param context: Current authenticated browser context.
@@ -1754,26 +1848,25 @@ def ensure_scraping_profile_ready(page: Page, context: BrowserContext) -> Page:
 
     page = select_current_facebook_page(context, page)  # Follow Facebook page replacement if one occurred
 
-    if not is_facebook_authenticated(page, context):  # Detect expired login, checkpoint, CAPTCHA, or 2FA interruption
-        raise FacebookAuthenticationRequiredError(
-            "Facebook authentication was interrupted during scraping."
-        )  # Let main close headless Chrome and reopen interactive authentication
+    if not is_facebook_authenticated(page, context):  # Detect expired login/checkpoint/CAPTCHA/2FA interruption
+        raise FacebookAuthenticationRequiredError('Facebook authentication was interrupted during scraping.')  # Reopen visible auth
 
-    target_prefix = PROFILE_URL.casefold().rstrip("/")  # Normalize configured profile URL
-    if not get_live_page_url(page).casefold().rstrip("/").startswith(target_prefix):  # Recover from unexpected navigation
-        page.goto(PROFILE_URL, wait_until="domcontentloaded", timeout=PAGE_LOAD_TIMEOUT_MS)  # Return to configured profile
-        page = wait_for_profile_ready(
-            page,
-            context,
-            allow_interactive_authentication=False,
-        )  # Require headless profile readiness without waiting for invisible user input
+    target_prefix = PROFILE_URL.casefold().rstrip('/')  # Require the configured profile root
+    current_url = get_live_page_url(page).casefold().rstrip('/')  # Read current live URL
 
-    return page  # Return the usable scraping page
+    if not current_url.startswith(target_prefix):  # Recover from unexpected navigation away from configured profile
+        page.goto(PROFILE_URL, wait_until='domcontentloaded', timeout=PAGE_LOAD_TIMEOUT_MS)  # Return to the configured profile root
+        page = wait_for_profile_ready(page, context, allow_interactive_authentication=False)  # Require headless readiness
+
+    return page  # Return usable scraping page
 
 
 def load_existing_post_keys() -> set[str]:
     """
-    Load identifiers from previously written post.json files so reruns can skip completed posts.
+    Load identifiers only from complete metadata written by the current scrape schema.
+
+    Legacy metadata from earlier broken DOM/media extraction is deliberately ignored when
+    REPROCESS_LEGACY_METADATA is True so the fixed scraper revisits those posts automatically.
 
     :param: None
     :return: Set containing known post identifiers and normalized post URLs.
@@ -1784,18 +1877,27 @@ def load_existing_post_keys() -> set[str]:
     if not OUTPUT_DIR.exists():  # Verify an output directory already exists
         return known_keys  # Nothing has been downloaded yet
 
-    for metadata_file in OUTPUT_DIR.glob(f"*/{POST_METADATA_FILENAME}"):  # Iterate existing post metadata files
+    for metadata_file in OUTPUT_DIR.glob(f'*/{POST_METADATA_FILENAME}'):  # Iterate existing post metadata files
         try:  # Isolate malformed or interrupted metadata files
-            with metadata_file.open("r", encoding="utf-8") as file:  # Open metadata safely
+            with metadata_file.open('r', encoding='utf-8') as file:  # Open metadata safely
                 metadata = json.load(file)  # Parse JSON metadata
 
-            post_id = str(metadata.get("post_id") or "").strip()  # Read the stored post identifier
-            post_url = normalize_facebook_url(str(metadata.get("post_url") or ""))  # Normalize the stored permalink
+            schema_version = int(metadata.get('scrape_schema_version') or 0)  # Read extraction schema version
+            complete = bool(metadata.get('complete'))  # Read explicit completion state
 
-            if post_id:  # Preserve stable numeric/hash identifier
-                known_keys.add(f"id:{post_id}")  # Store identifier key
-            if post_url:  # Preserve permalink as a second deduplication mechanism
-                known_keys.add(f"url:{post_url}")  # Store URL key
+            if schema_version != SCRAPE_SCHEMA_VERSION:  # Detect metadata created by obsolete extraction logic
+                if REPROCESS_LEGACY_METADATA:  # Fixed scraper should revisit old broken outputs
+                    continue  # Do not add legacy post identifiers to the skip set
+            if not complete:  # Never permanently skip a post whose media/extraction was incomplete
+                continue  # Keep the post retryable on the next pass/run
+
+            post_id = str(metadata.get('post_id') or '').strip()  # Read the stored post identifier
+            post_url = normalize_facebook_url(str(metadata.get('post_url') or ''))  # Normalize the stored permalink
+
+            if post_id:  # Preserve stable post identifier
+                known_keys.add(f'id:{post_id}')  # Store identifier key
+            if post_url:  # Preserve canonical permalink as a second deduplication mechanism
+                known_keys.add(f'url:{post_url}')  # Store URL key
         except Exception as error:  # A damaged metadata file should be visible but must not abort all downloads
             print(
                 f"{BackgroundColors.YELLOW}Skipping unreadable metadata file: "
@@ -1803,24 +1905,35 @@ def load_existing_post_keys() -> set[str]:
                 f"{BackgroundColors.YELLOW} ({error}){Style.RESET_ALL}"
             )  # Log the damaged file
 
-    return known_keys  # Return the discovered keys
+    return known_keys  # Return completed current-schema post keys
 
 
 def count_completed_post_outputs() -> int:
     """
-    Count completed post output directories by their successfully written post.json metadata file.
+    Count completed post outputs written by the current scrape schema.
 
     :param: None
-    :return: Number of completed post outputs currently stored under OUTPUT_DIR.
+    :return: Number of current-schema complete post outputs under OUTPUT_DIR.
     """
 
-    if not OUTPUT_DIR.exists():  # No output root means no post has been completed yet
+    if not OUTPUT_DIR.exists():  # No output root means no current-schema post is complete
         return 0  # Return an empty count
 
-    return sum(
-        1 for metadata_file in OUTPUT_DIR.glob(f"*/{POST_METADATA_FILENAME}") if metadata_file.is_file()
-    )  # Count one completed output per post metadata file
+    completed = 0  # Initialize current-schema completed-post count
 
+    for metadata_file in OUTPUT_DIR.glob(f'*/{POST_METADATA_FILENAME}'):  # Inspect each post metadata file
+        try:  # Ignore legacy/damaged metadata when counting the current run
+            with metadata_file.open('r', encoding='utf-8') as file:  # Open metadata safely
+                metadata = json.load(file)  # Parse JSON metadata
+            if int(metadata.get('scrape_schema_version') or 0) != SCRAPE_SCHEMA_VERSION:  # Ignore outputs from obsolete extraction logic
+                continue  # Legacy metadata is intentionally reprocessed
+            if not bool(metadata.get('complete')):  # Ignore posts whose required media could not be archived
+                continue  # Incomplete posts must remain retryable
+            completed += 1  # Count one fully completed current-schema post
+        except Exception:  # Damaged files are not completed outputs
+            continue  # Continue scanning remaining metadata
+
+    return completed  # Return current-schema completed count
 
 
 def build_post_keys(post_id: str, post_url: str) -> set[str]:
@@ -1840,187 +1953,316 @@ def build_post_keys(post_id: str, post_url: str) -> set[str]:
     return keys  # Return available keys
 
 
+def normalize_facebook_video_media_url(url: str) -> str:
+    """
+    Normalize a Facebook CDN video/audio URL by removing byte-range query parameters.
+
+    Facebook frequently requests MP4 media using bytestart/byteend query parameters. Those URLs
+    identify only a byte range; removing the range parameters allows the downloader to request the
+    complete signed media resource while preserving all authentication/signature parameters.
+
+    :param url: Raw Facebook CDN media URL.
+    :return: URL without Facebook byte-range query parameters.
+    """
+
+    try:  # Parse the URL safely
+        parsed = urlparse(str(url or ''))  # Split URL into components
+        filtered_query = [
+            (key, value)
+            for key, value in parse_qsl(parsed.query, keep_blank_values=True)
+            if key.casefold() not in VIDEO_RANGE_QUERY_PARAMETERS
+        ]  # Remove only known byte-range query parameters
+        return urlunparse(parsed._replace(query=urlencode(filtered_query, doseq=True), fragment=''))  # Rebuild normalized URL
+    except Exception:  # Preserve original URL when parsing fails
+        return str(url or '')  # Return raw candidate
+
+
+def parse_http_content_range(value: str) -> tuple[int, int, int | None] | None:
+    """
+    Parse an HTTP Content-Range header such as "bytes 0-1023/4096".
+
+    :param value: Raw Content-Range header value.
+    :return: Tuple of start, end, total bytes, or None when parsing fails.
+    """
+
+    match = re.fullmatch(r'bytes\s+(\d+)-(\d+)/(\d+|\*)', str(value or '').strip(), re.IGNORECASE)  # Parse byte range
+    if not match:  # Verify header format
+        return None  # Return no parsed range
+
+    start = int(match.group(1))  # Parse first byte index
+    end = int(match.group(2))  # Parse last byte index
+    total = None if match.group(3) == '*' else int(match.group(3))  # Parse complete resource size when known
+    return start, end, total  # Return parsed range metadata
+
+
+def count_post_media_indicators(article) -> tuple[int, int]:
+    """
+    Count visible top-level photo/video indicators in a post article before media extraction.
+
+    :param article: Facebook post article.
+    :return: Tuple containing photo-indicator count and video-indicator count.
+    """
+
+    try:  # Count only elements whose nearest article is the current post, excluding comments
+        counts = article.evaluate(
+            """root => {
+                const rootArticle = root.matches('div[role="article"]') ? root : null;
+                const belongsToRoot = element => !rootArticle || element.closest('div[role="article"]') === rootArticle;
+                const anchors = Array.from(root.querySelectorAll('a[href]')).filter(belongsToRoot);
+                const photoLinks = new Set(anchors
+                    .map(anchor => anchor.href || anchor.getAttribute('href') || '')
+                    .filter(href => href.includes('/photo/') || href.includes('/photos/') || href.includes('/photo.php')));
+                const mediaImages = Array.from(root.querySelectorAll('img[data-visualcompletion="media-vc-image"]')).filter(belongsToRoot);
+                const videos = Array.from(root.querySelectorAll('video')).filter(belongsToRoot);
+                const videoLinks = new Set(anchors
+                    .map(anchor => anchor.href || anchor.getAttribute('href') || '')
+                    .filter(href => href.includes('/videos/') || href.includes('/reel/') || href.includes('/watch/')));
+                return { photos: Math.max(photoLinks.size, mediaImages.length), videos: Math.max(videos.length, videoLinks.size) };
+            }"""
+        )  # Read top-level media indicators
+        return int(counts.get('photos') or 0), int(counts.get('videos') or 0)  # Normalize counts
+    except Exception:  # Detached articles provide no reliable indicator counts
+        return 0, 0  # Treat media presence as unknown/absent
+
+
 def collect_image_candidates(article) -> list[dict]:
     """
-    Collect likely post images while excluding small avatars, icons, and reaction graphics.
+    Collect top-level post-photo URLs while excluding avatars, comments, icons, and reactions.
 
     :param article: Playwright locator representing a Facebook post.
     :return: List of image candidate dictionaries.
     """
 
-    candidates = []  # Initialize image candidate list
-    seen_urls = set()  # Track media URLs within the current post
+    try:  # Read image/media relationship data in one browser-side pass
+        raw_images = article.evaluate(
+            """root => {
+                const rootArticle = root.matches('div[role="article"]') ? root : null;
+                const belongsToRoot = element => !rootArticle || element.closest('div[role="article"]') === rootArticle;
+                const chooseLargestSrcset = srcset => {
+                    if (!srcset) return '';
+                    const entries = srcset.split(',').map(item => item.trim()).filter(Boolean).map(item => {
+                        const parts = item.split(/\\s+/);
+                        const descriptor = parts[1] || '0w';
+                        const weight = parseFloat(descriptor) || 0;
+                        return { url: parts[0] || '', weight };
+                    }).filter(item => item.url);
+                    entries.sort((a, b) => b.weight - a.weight);
+                    return entries.length ? entries[0].url : '';
+                };
+                return Array.from(root.querySelectorAll('img[src], img[srcset]'))
+                    .filter(belongsToRoot)
+                    .map(image => {
+                        const anchor = image.closest('a[href]');
+                        return {
+                            src: chooseLargestSrcset(image.getAttribute('srcset') || '') || image.currentSrc || image.src || '',
+                            width: image.naturalWidth || image.width || 0,
+                            height: image.naturalHeight || image.height || 0,
+                            displayWidth: image.clientWidth || 0,
+                            displayHeight: image.clientHeight || 0,
+                            alt: image.alt || '',
+                            anchorHref: anchor ? (anchor.href || anchor.getAttribute('href') || '') : '',
+                            visualCompletion: image.getAttribute('data-visualcompletion') || '',
+                        };
+                    });
+            }"""
+        )  # Extract only images belonging to the current top-level post
+    except Exception:  # Detached articles cannot provide reliable images
+        return []  # Return no candidates
 
-    try:  # Enumerate images currently rendered inside the post
-        images = article.locator("img[src]")  # Locate image elements with resolved sources
-        for index in range(min(images.count(), 100)):  # Bound work for unusually complex posts
-            try:  # Isolate individual image failures
-                image = images.nth(index)  # Resolve the current image
-                info = image.evaluate(
-                    """element => ({
-                        src: element.currentSrc || element.src || "",
-                        width: element.naturalWidth || element.width || 0,
-                        height: element.naturalHeight || element.height || 0,
-                        displayWidth: element.clientWidth || 0,
-                        displayHeight: element.clientHeight || 0,
-                        alt: element.alt || ""
-                    })"""
-                )  # Read resolved source and intrinsic dimensions
+    candidates = []  # Initialize retained post-photo candidates
+    seen_urls = set()  # Track duplicate responsive image URLs
 
-                src = str(info.get("src") or "")  # Normalize media source
-                width = int(info.get("width") or 0)  # Normalize intrinsic width
-                height = int(info.get("height") or 0)  # Normalize intrinsic height
-                display_width = int(info.get("displayWidth") or 0)  # Read rendered width for avatar/icon filtering
-                display_height = int(info.get("displayHeight") or 0)  # Read rendered height for avatar/icon filtering
-                alt = normalize_whitespace(str(info.get("alt") or ""))  # Normalize alternative text
+    for info in raw_images or []:  # Inspect browser-returned image metadata
+        src = str(info.get('src') or '').strip()  # Normalize resolved image URL
+        width = int(info.get('width') or 0)  # Normalize intrinsic width
+        height = int(info.get('height') or 0)  # Normalize intrinsic height
+        display_width = int(info.get('displayWidth') or 0)  # Normalize rendered width
+        display_height = int(info.get('displayHeight') or 0)  # Normalize rendered height
+        alt = normalize_whitespace(str(info.get('alt') or ''))  # Normalize alternative text
+        anchor_href = str(info.get('anchorHref') or '').strip()  # Read surrounding media link
+        visual_completion = str(info.get('visualCompletion') or '').casefold()  # Read Facebook media marker
+        anchor_lower = anchor_href.casefold()  # Normalize anchor URL for semantic filtering
+        src_lower = src.casefold()  # Normalize image URL for filtering
 
-                if not src.startswith(("http://", "https://")):  # Ignore data/blob/UI sources
-                    continue  # Continue to the next image
-                if src in seen_urls:  # Ignore duplicate responsive image references
-                    continue  # Continue to the next image
-                if width < 200 or height < 150:  # Exclude intrinsically tiny icons and reactions
-                    continue  # Continue to the next image
-                if max(display_width, display_height) < 160:  # Exclude high-resolution avatars rendered as tiny UI elements
-                    continue  # Continue to the next image
-                if "emoji.php" in src.lower():  # Exclude Facebook emoji rendering endpoints
-                    continue  # Continue to the next image
+        if not src.startswith(('http://', 'https://')):  # Ignore data/blob/UI-only image sources
+            continue  # Continue to the next image
+        if src in seen_urls:  # Ignore duplicate responsive references
+            continue  # Continue to the next image
+        if 'emoji.php' in src_lower or '/emoji/' in src_lower:  # Exclude Facebook emoji/reaction rendering
+            continue  # Continue to the next image
 
-                seen_urls.add(src)  # Mark the image source as discovered
-                candidates.append(
-                    {
-                        "type": "photo",
-                        "url": src,
-                        "width": width,
-                        "height": height,
-                        "display_width": display_width,
-                        "display_height": display_height,
-                        "alt": alt,
-                    }
-                )  # Store the image candidate
-            except Exception:  # Ignore detached image elements
-                continue  # Continue to the next image
-    except Exception:  # Return what was discovered before a post became detached
-        pass  # No further action required
+        linked_as_photo = any(hint in anchor_lower for hint in PHOTO_LINK_HINTS)  # Detect a Facebook photo/media anchor
+        explicit_media_image = visual_completion == 'media-vc-image'  # Detect Facebook's post/media-viewer image marker
+        rendered_large_enough = max(display_width, display_height) >= 120  # Distinguish post media from tiny author avatars
+        intrinsically_large = max(width, height) >= 240  # Reject small icons even if layout information is missing
 
-    candidates.sort(key=lambda item: (item["width"] * item["height"]), reverse=True)  # Prefer full-size media before previews
-    return candidates  # Return all likely post images
+        if not ((linked_as_photo or explicit_media_image) and (rendered_large_enough or intrinsically_large)):  # Keep semantic post photos only
+            continue  # Ignore avatars, link icons, reactions, and unrelated images
+
+        seen_urls.add(src)  # Mark post-photo source as retained
+        candidates.append(
+            {
+                'type': 'photo',
+                'url': src,
+                'width': width,
+                'height': height,
+                'display_width': display_width,
+                'display_height': display_height,
+                'alt': alt,
+                'photo_url': normalize_facebook_url(anchor_href) if anchor_href else None,
+            }
+        )  # Preserve post-photo candidate
+
+    candidates.sort(key=lambda item: (int(item.get('width') or 0) * int(item.get('height') or 0)), reverse=True)  # Prefer larger resolved media first
+    return candidates  # Return top-level post photos
 
 
 def collect_video_element_candidates(article) -> list[dict]:
     """
-    Collect directly resolved HTTP(S) video URLs from video elements inside a Facebook post.
+    Collect direct HTTP(S) video URLs from top-level video elements in a Facebook post.
 
     :param article: Playwright locator representing a Facebook post.
-    :return: List of video candidate dictionaries.
+    :return: List of direct video candidate dictionaries.
     """
 
-    candidates = []  # Initialize video candidate list
-    seen_urls = set()  # Track duplicate video sources
+    try:  # Inspect only video elements belonging to the current post rather than nested comments
+        raw_videos = article.evaluate(
+            """root => {
+                const rootArticle = root.matches('div[role="article"]') ? root : null;
+                const belongsToRoot = element => !rootArticle || element.closest('div[role="article"]') === rootArticle;
+                return Array.from(root.querySelectorAll('video')).filter(belongsToRoot).map(video => ({
+                    src: video.currentSrc || video.src || '',
+                    poster: video.poster || '',
+                    width: video.videoWidth || video.clientWidth || 0,
+                    height: video.videoHeight || video.clientHeight || 0,
+                }));
+            }"""
+        )  # Read direct top-level video sources
+    except Exception:  # Detached article
+        return []  # Return no candidates
 
-    try:  # Enumerate loaded video elements
-        videos = article.locator("video")  # Locate post video elements
-        for index in range(min(videos.count(), 20)):  # Bound work for posts with embedded galleries
-            try:  # Isolate individual video extraction failures
-                video = videos.nth(index)  # Resolve the current video
-                info = video.evaluate(
-                    """element => ({
-                        src: element.currentSrc || element.src || "",
-                        poster: element.poster || "",
-                        width: element.videoWidth || element.clientWidth || 0,
-                        height: element.videoHeight || element.clientHeight || 0
-                    })"""
-                )  # Read the browser-resolved video URL
+    candidates = []  # Initialize direct video candidates
+    seen_urls = set()  # Track normalized direct URLs
 
-                src = str(info.get("src") or "")  # Normalize source URL
-                if src.startswith(("http://", "https://")) and src not in seen_urls:  # Preserve direct downloadable URLs
-                    seen_urls.add(src)  # Mark source as discovered
-                    candidates.append(
-                        {
-                            "type": "video",
-                            "url": src,
-                            "width": int(info.get("width") or 0),
-                            "height": int(info.get("height") or 0),
-                        }
-                    )  # Store direct video source
-            except Exception:  # Ignore detached video elements
-                continue  # Continue to the next video
-    except Exception:  # Return any already collected direct sources
-        pass  # No further action required
+    for info in raw_videos or []:  # Inspect resolved video elements
+        src = normalize_facebook_video_media_url(str(info.get('src') or '').strip())  # Remove Facebook byte-range query parameters
+        if not src.startswith(('http://', 'https://')):  # Blob-backed players require network capture instead
+            continue  # Continue to next video element
+        if src in seen_urls:  # Avoid duplicate source entries
+            continue  # Continue to next video element
+        seen_urls.add(src)  # Mark normalized URL
+        candidates.append(
+            {
+                'type': 'video',
+                'url': src,
+                'width': int(info.get('width') or 0),
+                'height': int(info.get('height') or 0),
+                'source': 'video_element',
+            }
+        )  # Preserve direct downloadable media
 
-    return candidates  # Return direct HTTP(S) video sources
+    return candidates  # Return direct top-level video sources
 
 
 def capture_video_network_candidates(page: Page, article) -> list[dict]:
     """
-    Capture likely video media requests triggered while a specific post is visible.
+    Capture Facebook CDN media requests for a top-level post video, including already-loaded resources.
 
-    :param page: Facebook page containing the post.
+    :param page: Facebook profile timeline page containing the post.
     :param article: Playwright locator representing the Facebook post.
-    :return: List of captured video URL candidates.
+    :return: Deduplicated video/audio resource candidates represented as downloadable media URLs.
     """
 
-    try:  # Avoid listening to unrelated page media when this post contains no video element
-        if article.locator("video").count() == 0:  # Verify the current post actually contains video playback
-            return []  # Do not capture neighboring autoplay/background media
-    except Exception:  # Detached articles cannot provide reliable media attribution
-        return []  # Return no network candidates
+    photo_count, video_count = count_post_media_indicators(article)  # Determine whether this post actually contains video media
+    if video_count <= 0:  # Do not capture unrelated autoplay/background traffic for non-video posts
+        return []  # Return no video candidates
 
-    captured = []  # Initialize captured response list
-    seen_urls = set()  # Track duplicate response URLs
+    captured = []  # Initialize captured media candidates
+    seen_urls = set()  # Track normalized media URLs
+
+    def add_candidate(raw_url: str, source: str, content_type: str = '') -> None:
+        """Normalize and retain one likely Facebook CDN media URL."""
+
+        url = normalize_facebook_video_media_url(str(raw_url or '').strip())  # Recover complete resource URL from range request
+        lowered = url.casefold()  # Normalize URL for filtering
+        normalized_content_type = str(content_type or '').casefold()  # Normalize response MIME type
+
+        if not url.startswith(('http://', 'https://')):  # Ignore blob/data resources
+            return  # Do not retain unsupported URL
+        if not (
+            normalized_content_type.startswith(('video/', 'audio/'))
+            or ('.mp4' in lowered and ('fbcdn.net' in lowered or 'facebook.com' in lowered))
+            or ('.webm' in lowered and 'fbcdn.net' in lowered)
+        ):  # Keep only likely Facebook video/audio CDN resources
+            return  # Ignore scripts/images/unrelated requests
+        if url in seen_urls:  # Ignore duplicate byte-range variants after normalization
+            return  # Candidate already retained
+
+        seen_urls.add(url)  # Mark normalized media URL
+        captured.append(
+            {
+                'type': 'video',
+                'url': url,
+                'source': source,
+                'content_type': normalized_content_type or None,
+            }
+        )  # Preserve candidate for streaming download
+
+    def collect_performance_entries(source: str) -> None:
+        """Collect already-issued resource requests visible through the Performance API."""
+
+        try:  # Performance entries recover media requests that started before the response listener was attached
+            urls = page.evaluate(
+                """() => performance.getEntriesByType('resource').map(entry => entry.name || '').filter(Boolean)"""
+            )  # Read current resource URLs
+            for url in urls or []:  # Inspect browser resource history
+                add_candidate(str(url), source)  # Retain likely Facebook media URLs
+        except Exception:  # Performance API failure should not abort post processing
+            return  # Continue with response-listener candidates
 
     def handle_response(response: Response) -> None:
         """Collect media-like responses without reading their bodies."""
 
-        try:  # Protect the page event loop from response parsing errors
-            url = response.url or ""  # Read the response URL
-            if not url.startswith(("http://", "https://")):  # Ignore unsupported response schemes
-                return  # Do not process the response
+        try:  # Protect the Playwright event loop from transient response failures
+            headers = response.headers  # Read response headers already available in Playwright
+            add_candidate(
+                response.url or '',
+                'network_response',
+                headers.get('content-type') or '',
+            )  # Retain likely complete media URL after range normalization
+        except Exception:  # Never allow one malformed response to terminate scraping
+            return  # Ignore the response
 
-            headers = response.headers  # Read already-available response headers
-            content_type = (headers.get("content-type") or "").lower()  # Normalize content type
-            resource_type = response.request.resource_type  # Read Playwright resource classification
+    collect_performance_entries('performance_before_playback')  # Recover media that loaded before listener registration
+    page.on('response', handle_response)  # Start collecting new media traffic
 
-            if not (
-                content_type.startswith("video/")
-                or resource_type == "media"
-                or (".mp4" in url.lower() and "fbcdn" in url.lower())
-            ):  # Keep only likely video responses
-                return  # Ignore unrelated traffic
+    try:  # Trigger lazy media loading for this specific top-level post
+        article.scroll_into_view_if_needed(timeout=3_000)  # Bring post into viewport
+        page.wait_for_timeout(ARTICLE_SETTLE_MS)  # Allow lazy media elements to mount
 
-            if url in seen_urls:  # Avoid duplicate range requests for the exact same URL
-                return  # Ignore duplicate response
-            seen_urls.add(url)  # Mark response URL as captured
-            captured.append({"type": "video", "url": url})  # Store the candidate
-        except Exception:  # Never allow a response-listener failure to abort browser automation
-            return  # Ignore the malformed response
-
-    page.on("response", handle_response)  # Start collecting media traffic
-
-    try:  # Trigger lazy video loading for the current post
-        article.scroll_into_view_if_needed(timeout=3_000)  # Bring the post into the viewport
-        page.wait_for_timeout(ARTICLE_SETTLE_MS)  # Allow viewport-triggered requests to begin
-
-        videos = article.locator("video")  # Locate videos in the current post
-        for index in range(min(videos.count(), 5)):  # Trigger only a few videos per post
-            try:  # Isolate browser playback restrictions
+        videos = article.locator('video')  # Locate potential video players in the current post
+        for index in range(min(videos.count(), 10)):  # Trigger a bounded number of post videos
+            try:  # Ignore autoplay restrictions or detached elements
                 videos.nth(index).evaluate(
                     """element => {
                         element.muted = true;
+                        element.preload = 'auto';
                         const promise = element.play();
                         if (promise && promise.catch) promise.catch(() => {});
                     }"""
-                )  # Ask the browser to start enough playback to resolve network media
-            except Exception:  # Playback may be blocked or the element may detach
-                continue  # Continue with network traffic already observed
+                )  # Start enough playback to resolve CDN media URLs
+            except Exception:  # One blocked player should not prevent other candidates
+                continue  # Continue to next video
 
-        page.wait_for_timeout(VIDEO_NETWORK_CAPTURE_MS)  # Capture media requests for a bounded interval
-    finally:  # Always unregister the listener
-        try:  # Protect cleanup when the page closes unexpectedly
-            page.remove_listener("response", handle_response)  # Stop collecting responses
-        except Exception:  # Ignore listener-cleanup failures
-            pass  # No further action required
+        page.wait_for_timeout(VIDEO_NETWORK_CAPTURE_MS)  # Observe video/audio resource traffic
+        collect_performance_entries('performance_after_playback')  # Recover all media URLs now present in browser resource history
+    finally:  # Always unregister the response listener
+        try:  # Protect cleanup if page was replaced/closed
+            page.remove_listener('response', handle_response)  # Stop response collection
+        except Exception:  # Listener may already be gone
+            pass  # No action required
 
-    return captured  # Return captured media URLs
+    return captured  # Return normalized Facebook media resources
 
 
 def deduplicate_media_candidates(candidates: list[dict]) -> list[dict]:
@@ -2120,7 +2362,12 @@ def build_authenticated_requests_session(context: BrowserContext, url: str) -> r
 
 def download_media(context: BrowserContext, page: Page, candidate: dict, output_path_without_extension: Path, referer: str) -> tuple[Path | None, str]:
     """
-    Download one Facebook media URL using a streaming HTTP request and in-memory browser authentication.
+    Download one Facebook media URL using authenticated streaming HTTP requests.
+
+    Facebook video CDN requests may return HTTP 206 ranges. The downloader normalizes known
+    bytestart/byteend URL parameters and, when the CDN still responds with Content-Range, requests
+    the remaining byte ranges sequentially so a complete media resource is written instead of a
+    corrupt fragment.
 
     :param context: Browser context containing the authenticated Facebook session.
     :param page: Browser page used to obtain the current browser User-Agent.
@@ -2130,81 +2377,137 @@ def download_media(context: BrowserContext, page: Page, candidate: dict, output_
     :return: Tuple containing saved path and an error string.
     """
 
-    url = str(candidate.get("url") or "").strip()  # Resolve media URL
-    media_type = str(candidate.get("type") or "").strip()  # Resolve logical media type
+    media_type = str(candidate.get('type') or '').strip()  # Resolve logical media type
+    raw_url = str(candidate.get('url') or '').strip()  # Resolve candidate URL
+    url = normalize_facebook_video_media_url(raw_url) if media_type == 'video' else raw_url  # Normalize ranged video URLs
 
-    if not url.startswith(("http://", "https://")):  # Verify direct HTTP(S) media can be requested
-        return None, f"Unsupported media URL scheme: {url[:80]}"  # Report unsupported blob/data URLs explicitly
+    if not url.startswith(('http://', 'https://')):  # Verify direct HTTP(S) media can be requested
+        return None, f'Unsupported media URL scheme: {url[:80]}'  # Report unsupported blob/data URLs explicitly
 
-    temporary_path = output_path_without_extension.with_suffix(".download")  # Use a temporary file until validation completes
-    session = build_authenticated_requests_session(context, url)  # Build an ephemeral authenticated streaming session
+    temporary_path = output_path_without_extension.with_suffix('.download')  # Use temporary file until validation completes
+    session = build_authenticated_requests_session(context, url)  # Build ephemeral authenticated streaming session
 
-    try:  # Resolve the same User-Agent used by the browser when possible
-        user_agent = str(page.evaluate("navigator.userAgent"))  # Read current browser User-Agent
-    except Exception:  # Use a normal browser-compatible fallback only if the page is unavailable
-        user_agent = "Mozilla/5.0"  # Minimal fallback User-Agent
+    try:  # Resolve same browser User-Agent when possible
+        user_agent = str(page.evaluate('navigator.userAgent'))  # Read current browser User-Agent
+    except Exception:  # Use browser-compatible fallback only when page is unavailable
+        user_agent = 'Mozilla/5.0'  # Minimal fallback User-Agent
 
-    headers = {
-        "Referer": referer or PROFILE_URL,
-        "User-Agent": user_agent,
-        "Accept": "*/*",
+    base_headers = {
+        'Referer': referer or PROFILE_URL,
+        'User-Agent': user_agent,
+        'Accept': '*/*',
+        'Accept-Encoding': 'identity',
     }  # Build browser-like request headers without exposing credentials
 
-    try:  # Stream media to disk so large videos do not consume equivalent RAM
-        with session.get(
+    response = None  # Track current response for guaranteed cleanup
+
+    try:  # Stream media without loading large videos entirely into memory
+        response = session.get(
             url,
-            headers=headers,
+            headers=base_headers,
             stream=True,
             allow_redirects=True,
             timeout=(30, 120),
-        ) as response:  # Open the media response
+        )  # Open the initial media response
 
-            if not 200 <= response.status_code < 300:  # Verify an HTTP success status
-                return None, f"HTTP {response.status_code} while downloading {url}"  # Report the server failure
+        if response.status_code not in (200, 206):  # Require a successful complete/ranged media response
+            return None, f'HTTP {response.status_code} while downloading {url}'  # Report server failure
 
-            content_type = (response.headers.get("content-type") or "").split(";", 1)[0].strip().lower()  # Normalize MIME type
-            content_length = response.headers.get("content-length", "")  # Read expected size when available
-            content_range = response.headers.get("content-range", "")  # Detect partial/range-only video responses
+        content_type = (response.headers.get('content-type') or '').split(';', 1)[0].strip().casefold()  # Normalize MIME type
 
-            if media_type == "photo" and content_type and not content_type.startswith("image/"):  # Prevent HTML/error pages from being saved as photos
-                return None, f"Unexpected photo Content-Type '{content_type}' for {url}"  # Report MIME mismatch
+        if media_type == 'photo' and content_type and not content_type.startswith('image/'):  # Prevent HTML/error pages as photos
+            return None, f"Unexpected photo Content-Type '{content_type}' for {url}"  # Report MIME mismatch
+        if media_type == 'video' and content_type and not (
+            content_type.startswith(('video/', 'audio/')) or content_type == 'application/octet-stream'
+        ):  # Prevent HTML/error pages as media files
+            return None, f"Unexpected video Content-Type '{content_type}' for {url}"  # Report MIME mismatch
 
-            if media_type == "video" and content_type and not (
-                content_type.startswith("video/") or content_type == "application/octet-stream"
-            ):  # Prevent HTML/error pages from being saved as videos
-                return None, f"Unexpected video Content-Type '{content_type}' for {url}"  # Report MIME mismatch
+        total_written = 0  # Track bytes persisted across complete/ranged requests
+        expected_total = None  # Track total resource size when Content-Range supplies it
+        next_start = 0  # Track next required byte for ranged downloads
 
-            if media_type == "video" and (response.status_code == 206 or content_range):  # Reject isolated byte-range media segments
-                return None, f"Facebook exposed only a partial video response ({content_range or 'HTTP 206'}) for {url}"  # Avoid corrupt video files
+        with temporary_path.open('wb') as file:  # Open destination once and append ranges sequentially
+            while True:  # Continue until a 200 response finishes or all known ranges are reconstructed
+                if response.status_code == 206:  # Parse ranged response metadata
+                    parsed_range = parse_http_content_range(response.headers.get('content-range') or '')  # Parse current range
+                    if parsed_range is None:  # Cannot safely reconstruct an unlabelled partial response
+                        return None, f"Facebook returned HTTP 206 without a usable Content-Range for {url}"  # Avoid corrupt output
+                    range_start, range_end, range_total = parsed_range  # Unpack byte-range metadata
+                    if range_start != next_start:  # Require contiguous resource reconstruction from byte zero
+                        if total_written == 0 and range_start != 0:  # Initial response may still reflect a stale CDN range
+                            response.close()  # Release stale partial response
+                            response = session.get(
+                                url,
+                                headers={**base_headers, 'Range': f'bytes=0-{VIDEO_RANGE_CHUNK_BYTES - 1}'},
+                                stream=True,
+                                allow_redirects=True,
+                                timeout=(30, 120),
+                            )  # Explicitly restart from byte zero
+                            next_start = 0  # Reset expected position
+                            if response.status_code not in (200, 206):  # Verify restart response
+                                return None, f'HTTP {response.status_code} while restarting ranged media {url}'
+                            continue  # Parse restarted response on the next iteration
+                        return None, f'Non-contiguous Facebook media range {range_start}-{range_end}; expected {next_start}'  # Reject corrupt sequence
+                    if range_total is not None:  # Preserve complete resource size when known
+                        expected_total = range_total  # Store expected total bytes
 
-            if content_length.isdigit() and int(content_length) > MAX_MEDIA_FILE_SIZE_BYTES:  # Enforce configured safety ceiling
-                return None, f"Media exceeds {MAX_MEDIA_FILE_SIZE_BYTES} bytes: {url}"  # Skip unexpectedly huge files
-
-            total_written = 0  # Track actual streamed size
-            with temporary_path.open("wb") as file:  # Open temporary destination
                 for chunk in response.iter_content(chunk_size=1024 * 1024):  # Stream one MiB chunks
-                    if not chunk:  # Ignore HTTP keep-alive chunks
+                    if not chunk:  # Ignore keep-alive chunks
                         continue  # Continue streaming
-                    total_written += len(chunk)  # Update actual downloaded size
-                    if total_written > MAX_MEDIA_FILE_SIZE_BYTES:  # Enforce size ceiling during transfer
-                        raise ValueError(f"Downloaded media exceeds {MAX_MEDIA_FILE_SIZE_BYTES} bytes.")  # Abort oversized transfer
+                    total_written += len(chunk)  # Update persisted byte count
+                    if total_written > MAX_MEDIA_FILE_SIZE_BYTES:  # Enforce configured safety ceiling
+                        raise ValueError(f'Downloaded media exceeds {MAX_MEDIA_FILE_SIZE_BYTES} bytes.')  # Abort oversized transfer
                     file.write(chunk)  # Persist chunk immediately
 
-            if total_written == 0:  # Reject empty files
-                return None, f"Downloaded media body was empty: {url}"  # Report invalid empty response
+                if response.status_code == 200:  # Complete non-ranged response finished
+                    break  # Media resource is complete
 
-            extension = extension_from_response(content_type, str(response.url or url), media_type)  # Resolve final file extension
-            output_path = output_path_without_extension.with_suffix(extension)  # Build final media path
-            os.replace(temporary_path, output_path)  # Atomically promote completed media file
-            return output_path, ""  # Return successful output path
-    except Exception as error:  # Capture network and filesystem failures per media item
-        return None, str(error)  # Return the error for JSON reporting
+                parsed_range = parse_http_content_range(response.headers.get('content-range') or '')  # Re-read completed range
+                if parsed_range is None:  # Defensive validation
+                    return None, f'Could not parse completed Facebook Content-Range for {url}'  # Reject ambiguous file
+                _, range_end, range_total = parsed_range  # Read completed range end/total
+                if range_total is not None:  # Preserve total resource size
+                    expected_total = range_total  # Update expected total
+
+                next_start = range_end + 1  # Continue immediately after completed byte range
+                if expected_total is None or next_start >= expected_total:  # All known bytes have been written
+                    break  # Ranged resource is complete
+
+                response.close()  # Release completed range before requesting next one
+                range_end_request = min(next_start + VIDEO_RANGE_CHUNK_BYTES - 1, expected_total - 1)  # Bound next chunk
+                response = session.get(
+                    url,
+                    headers={**base_headers, 'Range': f'bytes={next_start}-{range_end_request}'},
+                    stream=True,
+                    allow_redirects=True,
+                    timeout=(30, 120),
+                )  # Fetch next contiguous range
+
+                if response.status_code not in (200, 206):  # Verify continuation request
+                    return None, f'HTTP {response.status_code} while continuing ranged media {url}'  # Report range failure
+
+        if total_written == 0:  # Reject empty files
+            return None, f'Downloaded media body was empty: {url}'  # Report invalid empty response
+        if expected_total is not None and total_written != expected_total:  # Verify byte-perfect ranged reconstruction
+            return None, f'Incomplete ranged media: wrote {total_written} of {expected_total} bytes for {url}'  # Reject partial file
+
+        extension = extension_from_response(content_type, str(response.url or url) if response is not None else url, media_type)  # Resolve extension
+        output_path = output_path_without_extension.with_suffix(extension)  # Build final media path
+        os.replace(temporary_path, output_path)  # Atomically promote completed media file
+        return output_path, ''  # Return successful output path
+    except Exception as error:  # Capture network/filesystem failures per media item
+        return None, str(error)  # Return error for JSON reporting
     finally:  # Always clean temporary resources
+        try:  # Close current HTTP response
+            if response is not None:
+                response.close()  # Release connection
+        except Exception:  # Ignore cleanup failure
+            pass  # No action required
         try:  # Remove incomplete temporary downloads
-            if temporary_path.exists():  # Verify a partial file remains
-                temporary_path.unlink()  # Delete the partial file
-        except Exception:  # Cleanup failure should not hide the original download result
-            pass  # No further action required
+            if temporary_path.exists():
+                temporary_path.unlink()  # Delete partial file
+        except Exception:  # Cleanup failure should not hide original result
+            pass  # No action required
         session.close()  # Release HTTP connections and in-memory cookies
 
 
@@ -2302,64 +2605,79 @@ def resolve_post_date_from_permalink(context: BrowserContext, post_url: str) -> 
 
 def process_article(page: Page, context: BrowserContext, article, known_keys: set[str]) -> tuple[bool, str]:
     """
-    Extract and download one loaded Facebook post.
+    Extract and download one top-level profile-owner Facebook post.
 
-    :param page: Facebook profile page.
+    :param page: Facebook profile timeline page.
     :param context: Authenticated browser context.
-    :param article: Playwright locator representing the post.
+    :param article: Playwright locator representing the candidate post.
     :param known_keys: Cross-run and current-run deduplication keys.
-    :return: Tuple containing whether a new post was saved and its primary key.
+    :return: Tuple containing whether a post metadata file was written and its primary key.
     """
 
-    try:  # Bring the post into view before reading lazy-loaded media
-        article.scroll_into_view_if_needed(timeout=3_000)  # Ensure the post and media are mounted
-        page.wait_for_timeout(ARTICLE_SETTLE_MS)  # Allow the DOM to settle
-    except Exception:  # A detached article will be retried naturally during later scrolling
-        return False, ""  # Report no saved post
+    try:  # Bring post into view so lazy text/media resolve before extraction
+        article.scroll_into_view_if_needed(timeout=3_000)  # Ensure current post is mounted/visible
+        page.wait_for_timeout(ARTICLE_SETTLE_MS)  # Allow lazy media to settle
+    except Exception:  # Detached article will be retried naturally during later incremental scrolling
+        return False, ''  # Report no processed post
 
-    post_url = extract_post_permalink(article)  # Resolve the most likely permalink
-    if not post_url:  # Reject nested comments/UI articles that do not expose a supported post permalink
-        return False, ""  # Only top-level post-like containers should be archived
-    content = extract_post_content(article)  # Extract post body
-    post_date, date_raw = resolve_post_date(article)  # Resolve exact or relative post date
-    if post_date is None and post_url:  # Use a dedicated post page only when the timeline card lacks a safe date
-        post_date, date_raw = resolve_post_date_from_permalink(context, post_url)  # Retry date extraction from permalink
-    post_id = extract_post_id(post_url)  # Extract stable numeric identifier
+    post_url = extract_post_permalink(article)  # Resolve canonical top-level post permalink
+    if not post_url:  # Reject comments/UI cards lacking canonical post identity
+        return False, ''  # Only canonical post cards are archived
+    if not is_profile_owner_post_article(article, post_url):  # Reject other people's timeline posts and nested comments
+        return False, ''  # Skip non-owner content
 
-    if not post_id:  # Build a deterministic key for URL formats without numeric identifiers
+    post_id = extract_post_id(post_url)  # Extract stable numeric/pfbid identifier when available
+    content = extract_post_content(article)  # Extract post body from the validated top-level article
+    post_date, date_raw = resolve_post_date(article)  # Resolve timestamp from canonical post-link metadata
+
+    if post_date is None and post_url:  # Use dedicated permalink page only when top-level timestamp cannot be parsed
+        post_date, date_raw = resolve_post_date_from_permalink(context, post_url)  # Retry exact post page timestamp extraction
+
+    if not post_id:  # Build deterministic key only for uncommon canonical URLs without recoverable identifier
         post_id = build_fallback_post_key(post_url, content, date_raw)  # Generate fallback identifier
 
     post_keys = build_post_keys(post_id, post_url)  # Build deduplication keys
-    if post_keys and post_keys.intersection(known_keys):  # Skip posts already completed in a previous or current run
+    if post_keys and post_keys.intersection(known_keys):  # Skip complete current-schema posts already archived
         return False, next(iter(post_keys))  # Return one key for diagnostics
 
-    if post_date is None:  # Never create an incorrect date-based directory
+    if post_date is None:  # Never invent a date-based directory
         print(
-            f"{BackgroundColors.YELLOW}Skipping post because its date could not be resolved safely: "
+            f"{BackgroundColors.YELLOW}Skipping canonical post because its date could not be resolved safely: "
             f"{BackgroundColors.CYAN}{post_url or post_id}{Style.RESET_ALL}"
-        )  # Log explicit date-resolution failure
-        return False, f"id:{post_id}"  # Return its key so the caller can observe the post was encountered
+        )  # Log explicit timestamp-resolution failure
+        return False, f'id:{post_id}'  # Keep post retryable
 
+    expected_photo_count, expected_video_count = count_post_media_indicators(article)  # Detect whether the post visibly contains media
     title = derive_post_title(content, post_id)  # Derive requested directory title
     post_dir = choose_post_output_directory(post_date, title, post_id)  # Resolve collision-safe output path
-    post_dir.mkdir(parents=True, exist_ok=True)  # Create the post directory before downloading media
+    post_dir.mkdir(parents=True, exist_ok=True)  # Create post directory before downloads
 
-    image_candidates = collect_image_candidates(article)  # Collect rendered post images
+    image_candidates = collect_image_candidates(article)  # Collect semantic top-level post photos
     direct_video_candidates = collect_video_element_candidates(article)  # Collect directly exposed video URLs
-    network_video_candidates = capture_video_network_candidates(page, article)  # Capture lazy media requests
-    media_candidates = deduplicate_media_candidates(image_candidates + direct_video_candidates + network_video_candidates)  # Merge media sources
+    network_video_candidates = capture_video_network_candidates(page, article)  # Recover blob/ranged Facebook CDN video resources
+    media_candidates = deduplicate_media_candidates(
+        image_candidates + direct_video_candidates + network_video_candidates
+    )  # Merge and deduplicate media sources
+
+    print(
+        f"{BackgroundColors.GREEN}Post media: photos detected {BackgroundColors.CYAN}{expected_photo_count}"
+        f"{BackgroundColors.GREEN}, photo candidates {BackgroundColors.CYAN}{len(image_candidates)}"
+        f"{BackgroundColors.GREEN}, videos detected {BackgroundColors.CYAN}{expected_video_count}"
+        f"{BackgroundColors.GREEN}, video candidates {BackgroundColors.CYAN}{len(direct_video_candidates) + len(network_video_candidates)}"
+        f"{Style.RESET_ALL}"
+    )  # Expose media extraction health instead of silently writing JSON-only outputs
 
     media_results = []  # Initialize downloaded media metadata
-    counters = {"photo": 0, "video": 0}  # Track deterministic filenames by media type
+    counters = {'photo': 0, 'video': 0}  # Track deterministic filenames by media type
 
     for candidate in media_candidates:  # Download each discovered media source
-        media_type = candidate["type"]  # Read logical media type
+        media_type = str(candidate.get('type') or '')  # Read logical media type
         if media_type not in counters:  # Ignore unexpected media categories
-            continue  # Continue to the next candidate
+            continue  # Continue to next candidate
 
-        counters[media_type] += 1  # Allocate the next deterministic media number
-        filename_prefix = "photo" if media_type == "photo" else "video"  # Resolve filename prefix
-        output_without_extension = post_dir / f"{filename_prefix}_{counters[media_type]:03d}"  # Build destination stem
+        counters[media_type] += 1  # Allocate deterministic media number
+        filename_prefix = 'photo' if media_type == 'photo' else 'video'  # Resolve filename prefix
+        output_without_extension = post_dir / f'{filename_prefix}_{counters[media_type]:03d}'  # Build destination stem
 
         saved_path, error = download_media(
             context,
@@ -2367,192 +2685,214 @@ def process_article(page: Page, context: BrowserContext, article, known_keys: se
             candidate,
             output_without_extension,
             post_url or PROFILE_URL,
-        )  # Stream media using in-memory authentication from the browser context
+        )  # Stream media using in-memory authentication from browser context
 
         media_result = {
-            "type": media_type,
-            "source_url": candidate.get("url", ""),
-            "filename": saved_path.name if saved_path else None,
-            "downloaded": saved_path is not None,
-            "error": error or None,
+            'type': media_type,
+            'source_url': candidate.get('url', ''),
+            'source': candidate.get('source'),
+            'filename': saved_path.name if saved_path else None,
+            'downloaded': saved_path is not None,
+            'error': error or None,
         }  # Build transparent per-media result
 
-        if candidate.get("width"):  # Preserve source width when known
-            media_result["width"] = candidate["width"]  # Store width
-        if candidate.get("height"):  # Preserve source height when known
-            media_result["height"] = candidate["height"]  # Store height
-        if candidate.get("display_width") is not None:  # Preserve rendered width when known
-            media_result["display_width"] = candidate.get("display_width")  # Store rendered width
-        if candidate.get("display_height") is not None:  # Preserve rendered height when known
-            media_result["display_height"] = candidate.get("display_height")  # Store rendered height
-        if candidate.get("alt"):  # Preserve source alternative text when known
-            media_result["alt"] = candidate["alt"]  # Store alt text
+        for key in ('width', 'height', 'display_width', 'display_height', 'alt', 'photo_url', 'content_type'):  # Preserve optional diagnostics
+            if candidate.get(key) is not None and candidate.get(key) != '':
+                media_result[key] = candidate.get(key)  # Store available candidate metadata
 
         media_results.append(media_result)  # Preserve download outcome
 
-        if saved_path:  # Log successful media downloads
+        if saved_path:  # Log successful media download
             print(
                 f"{BackgroundColors.GREEN}Downloaded {media_type}: "
                 f"{BackgroundColors.CYAN}{saved_path.relative_to(PROJECT_DIR).as_posix()}{Style.RESET_ALL}"
             )  # Output saved path
-        else:  # Log media failures without aborting the post
+        else:  # Log media failure without aborting unrelated posts
             print(
                 f"{BackgroundColors.YELLOW}Failed {media_type}: "
-                f"{BackgroundColors.CYAN}{candidate.get('url', '')}"
+                f"{BackgroundColors.CYAN}{format_url_for_log(str(candidate.get('url') or ''))}"
                 f"{BackgroundColors.YELLOW} ({error}){Style.RESET_ALL}"
-            )  # Output failure reason
+            )  # Output sanitized failure reason
+
+    downloaded_photos = sum(1 for item in media_results if item.get('downloaded') and item.get('type') == 'photo')  # Count successful photos
+    downloaded_videos = sum(1 for item in media_results if item.get('downloaded') and item.get('type') == 'video')  # Count successful video resources
+    photo_complete = expected_photo_count <= 0 or downloaded_photos > 0  # Require at least one photo if photo media is visibly present
+    video_complete = expected_video_count <= 0 or downloaded_videos > 0  # Require at least one video resource if video media is visibly present
+    complete = photo_complete and video_complete  # Mark post complete only when visibly-required media was archived
 
     metadata = {
-        "post_id": post_id,
-        "post_url": post_url or None,
-        "profile_url": PROFILE_URL,
-        "date": post_date.date().isoformat(),
-        "datetime": post_date.isoformat(),
-        "date_raw": date_raw or None,
-        "title": title,
-        "content": content,
-        "output_directory": post_dir.relative_to(PROJECT_DIR).as_posix(),
-        "media_count": len(media_results),
-        "downloaded_media_count": sum(1 for item in media_results if item["downloaded"]),
-        "failed_media_count": sum(1 for item in media_results if not item["downloaded"]),
-        "media": media_results,
-        "scraped_at": datetime.datetime.now().astimezone().isoformat(),
-    }  # Build complete per-post metadata
+        'scrape_schema_version': SCRAPE_SCHEMA_VERSION,
+        'complete': complete,
+        'post_id': post_id,
+        'post_url': post_url or None,
+        'profile_url': PROFILE_URL,
+        'date': post_date.date().isoformat(),
+        'datetime': post_date.isoformat(),
+        'date_raw': date_raw or None,
+        'title': title,
+        'content': content,
+        'output_directory': post_dir.relative_to(PROJECT_DIR).as_posix(),
+        'expected_photo_indicators': expected_photo_count,
+        'expected_video_indicators': expected_video_count,
+        'photo_candidate_count': len(image_candidates),
+        'video_candidate_count': len(direct_video_candidates) + len(network_video_candidates),
+        'media_count': len(media_results),
+        'downloaded_media_count': sum(1 for item in media_results if item.get('downloaded')),
+        'failed_media_count': sum(1 for item in media_results if not item.get('downloaded')),
+        'media': media_results,
+        'scraped_at': datetime.datetime.now().astimezone().isoformat(),
+    }  # Build current-schema per-post metadata
 
-    write_post_metadata(post_dir, metadata)  # Persist metadata after media attempts
-    known_keys.update(post_keys)  # Mark the post completed only after metadata is written
+    write_post_metadata(post_dir, metadata)  # Persist metadata after all media attempts
 
-    print(
-        f"{BackgroundColors.GREEN}Saved post: "
-        f"{BackgroundColors.CYAN}{post_dir.relative_to(PROJECT_DIR).as_posix()}{Style.RESET_ALL}"
-    )  # Log completed post
+    if complete:  # Only complete posts may be skipped on future runs
+        known_keys.update(post_keys)  # Mark post completed after media requirements are satisfied
+        print(
+            f"{BackgroundColors.GREEN}Saved complete post: "
+            f"{BackgroundColors.CYAN}{post_dir.relative_to(PROJECT_DIR).as_posix()}{Style.RESET_ALL}"
+        )  # Log completed post
+    else:  # Keep incomplete post retryable
+        print(
+            f"{BackgroundColors.YELLOW}Saved incomplete post metadata; media will be retried on later passes/runs: "
+            f"{BackgroundColors.CYAN}{post_dir.relative_to(PROJECT_DIR).as_posix()}{Style.RESET_ALL}"
+        )  # Explain why this post was not added to known keys
 
-    return True, f"id:{post_id}"  # Report successful new post
+    return True, f'id:{post_id}'  # Report processed post metadata
 
 
 def scroll_profile_and_download(page: Page, context: BrowserContext) -> dict:
     """
-    Scroll the configured Facebook profile and download every newly discovered post.
+    Incrementally scroll the profile root timeline and archive every newly discovered owner post.
 
-    Authentication is revalidated throughout the run. If Facebook interrupts headless scraping
-    with a CAPTCHA, 2FA, checkpoint, or expired session, FacebookAuthenticationRequiredError is
-    raised. Completed posts remain on disk and a later browser session resumes from post.json files.
+    The stop condition is based on newly discovered canonical post URLs, not newly saved outputs.
+    This is critical for resumable runs: already-downloaded posts can occupy many consecutive screens
+    before the scraper reaches an older post that still needs processing.
 
-    :param page: Facebook profile page.
+    :param page: Authenticated profile root timeline page.
     :param context: Authenticated browser context.
     :return: Execution statistics.
     """
 
-    page = ensure_scraping_profile_ready(page, context)  # Refuse to start against an invalid or challenged Facebook session
+    page = ensure_scraping_profile_ready(page, context)  # Refuse to start against challenged session
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)  # Ensure output root exists
+    known_keys = load_existing_post_keys()  # Load only complete current-schema posts
 
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)  # Ensure the output root exists
-    known_keys = load_existing_post_keys()  # Load cross-run deduplication state
+    try:  # Always start newest-first regardless of persisted browser history
+        page.evaluate('window.scrollTo(0, 0)')  # Reset feed to newest position
+        page.wait_for_timeout(1_000)  # Allow top batch to settle
+    except Exception:  # Fresh navigation should already be near top
+        pass  # Continue safely
 
-    saved_posts = 0  # Count posts saved during this browser session
-    encountered_posts = set()  # Track current-run post elements/keys
-    no_new_scrolls = 0  # Track consecutive scrolls without new content
-    previous_scroll_height = 0  # Track document height for end-of-feed detection
+    processed_posts = 0  # Count metadata files written during this browser session
+    discovered_post_urls = set()  # Track canonical profile post URLs seen while scrolling
+    no_new_discovery_scrolls = 0  # Track consecutive scrolls without new canonical URLs
+    previous_scroll_y = -1  # Track actual viewport movement for end-of-feed detection
 
     print(
-        f"{BackgroundColors.GREEN}Previously downloaded post keys: "
+        f"{BackgroundColors.GREEN}Previously completed current-schema post keys: "
         f"{BackgroundColors.CYAN}{len(known_keys)}{Style.RESET_ALL}"
     )  # Log resume state
 
-    for scroll_iteration in range(1, MAX_SCROLL_ITERATIONS + 1):  # Scroll until the timeline reaches a stable end
-        page = ensure_scraping_profile_ready(page, context)  # Detect authentication interruptions before touching timeline DOM
-        articles = get_article_locator(page)  # Resolve currently mounted timeline posts
-        current_count = articles.count()  # Count loaded/mounted posts
-        new_this_iteration = 0  # Track new posts found before this scroll
+    for scroll_iteration in range(1, MAX_SCROLL_ITERATIONS + 1):  # Scroll until feed discovery stabilizes
+        page = ensure_scraping_profile_ready(page, context)  # Revalidate authentication before touching DOM
+        articles = get_article_locator(page)  # Resolve mounted timeline articles
+        current_count = articles.count()  # Count currently mounted article-like containers
+        new_discovered_this_iteration = 0  # Count new canonical owner-post URLs in this viewport batch
+        processed_this_iteration = 0  # Count posts whose metadata was written in this pass
 
-        verbose_output(
-            true_string=f"{BackgroundColors.GREEN}Scroll {BackgroundColors.CYAN}{scroll_iteration}"
-            f"{BackgroundColors.GREEN}: mounted posts = {BackgroundColors.CYAN}{current_count}{Style.RESET_ALL}"
-        )  # Output verbose scroll diagnostics
+        for index in range(current_count):  # Process mounted posts before Facebook virtualizes them away
+            try:  # Isolate individual post-card failures
+                article = articles.nth(index)  # Resolve current article locator
+                post_url = extract_post_permalink(article)  # Resolve strict canonical post identity
+                if not post_url:  # Ignore comments/UI cards without canonical post permalink
+                    continue  # Continue to next article
+                if not is_profile_owner_post_article(article, post_url):  # Ignore other authors and nested comments
+                    continue  # Continue to next article
 
-        for index in range(current_count):  # Process every currently mounted post before Facebook virtualizes it away
-            try:  # Isolate individual post failures
-                article = articles.nth(index)  # Resolve current post locator
-                post_url = extract_post_permalink(article)  # Build a cheap pre-processing identity
-                preliminary_id = extract_post_id(post_url)  # Extract fast numeric identifier when available
-                preliminary_key = f"id:{preliminary_id}" if preliminary_id else (f"url:{post_url}" if post_url else "")  # Build fast key
+                normalized_post_url = normalize_facebook_url(post_url)  # Normalize canonical discovery key
+                if normalized_post_url in discovered_post_urls:  # Process each canonical post only once per browser session
+                    continue  # Continue to next article
 
-                if preliminary_key and preliminary_key in encountered_posts:  # Avoid repeatedly processing the same mounted post
-                    continue  # Continue to the next post
+                discovered_post_urls.add(normalized_post_url)  # Mark newly discovered canonical post
+                new_discovered_this_iteration += 1  # Reset end-of-feed confidence for genuine new URL
 
-                saved, processed_key = process_article(page, context, article, known_keys)  # Extract and persist the post
-                if preliminary_key:  # Mark cheap identity as encountered
-                    encountered_posts.add(preliminary_key)  # Store current-run identity
-                if processed_key:  # Mark final identity as encountered
-                    encountered_posts.add(processed_key)  # Store final identity
-
-                if saved:  # Count newly persisted posts
-                    saved_posts += 1  # Increment total saved posts for this browser session
-                    new_this_iteration += 1  # Increment iteration count
-            except FacebookAuthenticationRequiredError:  # Never swallow a request for manual Facebook verification
-                raise  # Let the browser lifecycle manager reopen visible authentication
-            except Exception as error:  # One malformed post must not terminate the entire timeline export
-                try:  # Distinguish a normal post parsing error from a Facebook authentication interruption
-                    page = ensure_scraping_profile_ready(page, context)  # Revalidate authentication after the post failure
+                processed, _ = process_article(page, context, article, known_keys)  # Extract post and media when not already complete
+                if processed:  # Metadata was written or refreshed
+                    processed_posts += 1  # Increment session total
+                    processed_this_iteration += 1  # Increment pass total
+            except FacebookAuthenticationRequiredError:  # Never swallow manual verification requirement
+                raise  # Let browser lifecycle reopen visible authentication
+            except Exception as error:  # One malformed post must not terminate full export
+                try:  # Distinguish parsing failure from authentication interruption
+                    page = ensure_scraping_profile_ready(page, context)  # Revalidate session
                 except FacebookAuthenticationRequiredError:
-                    raise  # Recover interactively instead of logging hundreds of misleading post failures
+                    raise  # Recover interactively instead of producing misleading failures
 
                 print(
                     f"{BackgroundColors.YELLOW}Post extraction failed at mounted index "
                     f"{BackgroundColors.CYAN}{index}{BackgroundColors.YELLOW}: "
                     f"{BackgroundColors.CYAN}{error}{Style.RESET_ALL}"
-                )  # Log the post-level error
-                continue  # Continue to the next post
+                )  # Log genuine post-level failure
 
-        page = ensure_scraping_profile_ready(page, context)  # Detect a challenge that appeared during the article-processing pass
+        if new_discovered_this_iteration > 0:  # New canonical URLs mean the feed is still advancing
+            no_new_discovery_scrolls = 0  # Reset stability streak
+        else:  # No new canonical owner post appeared in this viewport batch
+            no_new_discovery_scrolls += 1  # Increase end-of-feed confidence
 
-        if new_this_iteration > 0:  # Reset stability counter when new posts were saved
-            no_new_scrolls = 0  # New timeline content is still being discovered
-        else:  # No new posts were saved during this pass
-            no_new_scrolls += 1  # Increase end-of-feed confidence
-
-        try:  # Read current page height before scrolling
-            current_scroll_height = int(page.evaluate("document.documentElement.scrollHeight"))  # Capture loaded document height
-        except Exception as error:  # Determine whether the page failed because Facebook interrupted authentication
-            page = ensure_scraping_profile_ready(page, context)  # Raise if the failure is authentication-related
-            verbose_output(
-                true_string=f"{BackgroundColors.YELLOW}Could not read current timeline height: "
-                f"{BackgroundColors.CYAN}{error}{Style.RESET_ALL}"
-            )  # Log non-authentication DOM failure only in verbose mode
-            current_scroll_height = 0  # Reset height observation
+        try:  # Read scroll position and document geometry before next movement
+            scroll_state = page.evaluate(
+                """() => ({
+                    y: window.scrollY || window.pageYOffset || 0,
+                    height: document.documentElement.scrollHeight || document.body.scrollHeight || 0,
+                    viewport: window.innerHeight || 0,
+                })"""
+            )  # Capture current feed geometry
+            current_scroll_y = int(scroll_state.get('y') or 0)  # Normalize vertical position
+            current_height = int(scroll_state.get('height') or 0)  # Normalize document height
+            viewport_height = int(scroll_state.get('viewport') or 0)  # Normalize viewport height
+            at_bottom = current_scroll_y + viewport_height >= max(0, current_height - 100)  # Detect current bottom threshold
+        except Exception as error:  # Determine whether geometry failure is authentication-related
+            page = ensure_scraping_profile_ready(page, context)  # Raise if challenge replaced feed
+            verbose_output(true_string=f"{BackgroundColors.YELLOW}Could not read timeline geometry: {BackgroundColors.CYAN}{error}{Style.RESET_ALL}")
+            current_scroll_y = previous_scroll_y  # Preserve previous position
+            at_bottom = False  # Continue attempting incremental scrolling
 
         print(
             f"{BackgroundColors.GREEN}Timeline pass {BackgroundColors.CYAN}{scroll_iteration}"
-            f"{BackgroundColors.GREEN}: new posts {BackgroundColors.CYAN}{new_this_iteration}"
-            f"{BackgroundColors.GREEN}, total saved {BackgroundColors.CYAN}{saved_posts}"
-            f"{BackgroundColors.GREEN}, no-new streak {BackgroundColors.CYAN}{no_new_scrolls}/{NO_NEW_POST_SCROLL_LIMIT}{Style.RESET_ALL}"
-        )  # Provide visible progress
+            f"{BackgroundColors.GREEN}: mounted {BackgroundColors.CYAN}{current_count}"
+            f"{BackgroundColors.GREEN}, new canonical posts {BackgroundColors.CYAN}{new_discovered_this_iteration}"
+            f"{BackgroundColors.GREEN}, processed {BackgroundColors.CYAN}{processed_this_iteration}"
+            f"{BackgroundColors.GREEN}, total discovered {BackgroundColors.CYAN}{len(discovered_post_urls)}"
+            f"{BackgroundColors.GREEN}, no-new streak {BackgroundColors.CYAN}{no_new_discovery_scrolls}/{NO_NEW_POST_SCROLL_LIMIT}"
+            f"{Style.RESET_ALL}"
+        )  # Provide discovery-oriented progress
 
-        if no_new_scrolls >= NO_NEW_POST_SCROLL_LIMIT and current_scroll_height <= previous_scroll_height:  # Confirm both content and height stabilized
+        if no_new_discovery_scrolls >= NO_NEW_POST_SCROLL_LIMIT and (at_bottom or current_scroll_y == previous_scroll_y):  # Confirm stable discovery and no movement
             print(f"{BackgroundColors.GREEN}Timeline end/stability condition reached.{Style.RESET_ALL}")  # Log stop reason
             break  # Stop scrolling
 
-        previous_scroll_height = max(previous_scroll_height, current_scroll_height)  # Preserve maximum observed document height
-        page = ensure_scraping_profile_ready(page, context)  # Revalidate authentication immediately before the next lazy-load scroll
+        previous_scroll_y = current_scroll_y  # Preserve current position before incremental movement
+        page = ensure_scraping_profile_ready(page, context)  # Revalidate immediately before next lazy-load scroll
 
-        try:  # Scroll close to the bottom to trigger Facebook lazy loading
-            page.evaluate("window.scrollTo(0, document.documentElement.scrollHeight)")  # Move to the current timeline bottom
-            page.wait_for_timeout(int(SCROLL_PAUSE_SECONDS * 1000))  # Wait for the next post batch
-        except PlaywrightTimeoutError:  # A timeout should not immediately abort a long export
-            page = ensure_scraping_profile_ready(page, context)  # Raise if Facebook replaced the timeline with an auth challenge
-            time.sleep(SCROLL_PAUSE_SECONDS)  # Pause before another extraction attempt
-        except Exception as error:  # Surface unexpected scroll failures
-            page = ensure_scraping_profile_ready(page, context)  # Raise instead when the underlying failure is authentication-related
+        try:  # Scroll incrementally instead of jumping to document bottom
+            page.evaluate(f'window.scrollBy(0, {SCROLL_STEP_PX})')  # Advance approximately one post/screen batch
+            page.wait_for_timeout(int(SCROLL_PAUSE_SECONDS * 1000))  # Allow virtualized posts to mount
+        except PlaywrightTimeoutError:  # Timeout should not immediately abort long export
+            page = ensure_scraping_profile_ready(page, context)  # Raise if auth challenge appeared
+            time.sleep(SCROLL_PAUSE_SECONDS)  # Pause before next extraction attempt
+        except Exception as error:  # Surface genuine scroll failures
+            page = ensure_scraping_profile_ready(page, context)  # Raise instead if auth-related
             print(
                 f"{BackgroundColors.YELLOW}Timeline scroll failed: "
                 f"{BackgroundColors.CYAN}{error}{Style.RESET_ALL}"
-            )  # Log a genuine non-authentication scroll failure
-            time.sleep(SCROLL_PAUSE_SECONDS)  # Allow the page to recover
+            )  # Log non-authentication scroll failure
+            time.sleep(SCROLL_PAUSE_SECONDS)  # Allow page to recover
 
     return {
-        "saved_posts": saved_posts,
-        "known_post_keys": len(known_keys),
-        "encountered_post_keys": len(encountered_posts),
-    }  # Return execution statistics
+        'saved_posts': processed_posts,
+        'known_post_keys': len(known_keys),
+        'encountered_post_keys': len(discovered_post_urls),
+    }  # Return session statistics
 
 
 def close_browser_session(session: BrowserSession) -> None:
