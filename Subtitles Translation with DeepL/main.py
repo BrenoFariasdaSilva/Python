@@ -89,7 +89,7 @@ DESCRIPTIVE_SUBTITLES_REMOVAL = (
     True  # Set to True to remove descriptive lines (e.g., [music], (laughs)) from SRT before translation
 )
 DEEPL_API_KEYS = {}  # DeepL API accounts (will be loaded in load_dotenv function)
-INPUT_DIRECTORY = f"./Input/"  # Directory containing the input SRT files
+INPUT_DIRECTORY = f"D:/Sem Backup/Download/Torrent/Completed/Subs/"  # Directory containing the input SRT files
 OUTPUT_DIR = Path("./Output")  # Base output directory
 TARGET_LANG = "PT-BR"  # DeepL target language code
 SCRIPT_DIR = Path(__file__).resolve().parent  # Directory containing this script
@@ -1332,8 +1332,8 @@ def render_translation_progress(progress_state: Dict[str, Any] | None, force: bo
     file_eta = format_eta(file_done, file_total, progress_state["file_start_time"])  # Current file ETA
     overall_eta = format_eta(overall_done, overall_total, progress_state["overall_start_time"])  # Overall ETA
     api_key_name = str(progress_state.get("active_api_key_name", "N/A"))  # Read the currently selected DeepL account name without exposing its API key.
-    file_line = f"{BackgroundColors.GREEN}File - API Key: {BackgroundColors.CYAN}{api_key_name}{BackgroundColors.GREEN} [{build_progress_bar(file_done, file_total)}] {file_percent:5.1f}% | {file_done:,}/{file_total:,} chars | ETA {file_eta}{Style.RESET_ALL}"  # Build the green file progress line with only the active API key name in cyan.
-    overall_line = f"{BackgroundColors.GREEN}Overall - API Key: {BackgroundColors.CYAN}{api_key_name}{BackgroundColors.GREEN} [{build_progress_bar(overall_done, overall_total)}] {overall_percent:5.1f}% | {overall_done:,}/{overall_total:,} chars | Files {progress_state['completed_files']}/{progress_state['total_files']} | ETA {overall_eta}{Style.RESET_ALL}"  # Build the green overall progress line with only the active API key name in cyan.
+    file_line = f"{BackgroundColors.GREEN}File - API Key: {BackgroundColors.CYAN}{api_key_name}{BackgroundColors.GREEN} [{build_progress_bar(file_done, file_total)}] {file_percent:5.1f}% | {BackgroundColors.CYAN}{file_done:,}{BackgroundColors.GREEN}/{BackgroundColors.CYAN}{file_total:,}{BackgroundColors.GREEN} chars | {BackgroundColors.CYAN}ETA {file_eta}{Style.RESET_ALL}"  # Build the green file progress line with only the active API key name in cyan.
+    overall_line = f"{BackgroundColors.GREEN}Overall - API Key: {BackgroundColors.CYAN}{api_key_name}{BackgroundColors.GREEN} [{build_progress_bar(overall_done, overall_total)}] {overall_percent:5.1f}% | {BackgroundColors.CYAN}{overall_done:,}{BackgroundColors.GREEN}/{BackgroundColors.CYAN}{overall_total:,}{BackgroundColors.GREEN} chars | Files {progress_state['completed_files']}/{progress_state['total_files']} | ETA {BackgroundColors.CYAN}{overall_eta}{Style.RESET_ALL}"  # Build the green overall progress line with only the active API key name in cyan.
 
     stream = sys.__stdout__  # Read the original terminal stream once so Pylance can narrow the optional type safely
 
