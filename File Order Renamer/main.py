@@ -18,7 +18,7 @@ class BackgroundColors:  # Colors for the terminal
 
 # Execution Constants:
 VERBOSE = False  # Set to True to output verbose messages
-INPUT_DIRECTORIES = ["./Input"]  # The input directories to process files from
+INPUT_DIRECTORIES = ["G:/Series/Breaking Bad/"]  # The input directories to process files from
 
 # Ignored Files and Directories:
 IGNORED_FILES = {"Makefile", "main.py", "requirements.txt"}  # Files to be ignored
@@ -426,7 +426,7 @@ def rename_with_subtitle(file_number, dir_path, related_subtitle, has_portuguese
         new_sub_name = f"{file_number}-{lang_code}.srt"  # Subtitle with language code suffix
 
     print(
-        f"Renaming subtitle: {BackgroundColors.CYAN}{related_subtitle}{BackgroundColors.GREEN} -> {BackgroundColors.CYAN}{new_sub_name}{Style.RESET_ALL}"
+        f"{BackgroundColors.GREEN}Renaming subtitle: {BackgroundColors.CYAN}{related_subtitle}{BackgroundColors.GREEN} -> {BackgroundColors.CYAN}{new_sub_name}{Style.RESET_ALL}"
     )
 
     os.rename(
