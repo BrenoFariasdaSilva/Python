@@ -2023,149 +2023,262 @@ def play_sound():
         )
 
 
-def main() -> None:
+def print_translation_plan_summary(planned_files: int, total_planned_characters: int, reused_characters: int, preflight_summary: Dict[str, int]) -> None:
     """
-    Runs recursive subtitle preflight, translation, resume, persistence, and finalization.
+    Prints the translation plan summary with new and reusable work separated.
 
+    :param planned_files: Number of files requiring translation or recovered finalization work.
+    :param total_planned_characters: Number of characters requiring new DeepL requests in this execution.
+    :param reused_characters: Number of safely persisted translated characters reused from prior executions.
+    :param preflight_summary: Preflight classification and planning counters.
     :return: None.
     """
 
-    print(f"{BackgroundColors.CLEAR_TERMINAL}{BackgroundColors.BOLD}{BackgroundColors.GREEN}Welcome to the {BackgroundColors.CYAN}Subtitle (SRT) translation using DeepL API{BackgroundColors.GREEN} program!{Style.RESET_ALL}\n")  # Output the welcome message.
-    start_time = datetime.datetime.now()  # Record program start time.
-
-    ensure_env_file()  # Preserve existing environment-file initialization.
-
-    input_dir = resolve_from_script_dir(INPUT_DIRECTORY)  # Resolve configured input from script location.
-    output_dir = resolve_from_script_dir(OUTPUT_DIR)  # Resolve configured output from script location.
-    use_configured_output = is_path_inside(input_dir, SCRIPT_DIR)  # Preserve configured output layout for internal inputs.
-
-    if not input_dir.exists() or not input_dir.is_dir():  # Reject missing or invalid input directory.
-        print(f"{BackgroundColors.RED}Input directory not found or is not a directory: {BackgroundColors.CYAN}{input_dir}{Style.RESET_ALL}")  # Output the existing input error message.
-        return  # Exit before discovery.
-
-    srt_files = discover_srt_files(input_dir)  # Snapshot SRT file paths recursively before translation.
-
-    if not srt_files:  # Stop when recursive discovery found no SRT files.
-        print(f"No SRT files were found in the input directory or any of its subdirectories: {input_dir}")  # Output existing empty-discovery message.
-        return  # Exit without API initialization.
-
-    translation_plan, preflight_summary = build_translation_plan(srt_files, input_dir, output_dir, use_configured_output)  # Build source-validated remaining translation and finalization work.
-    planned_files = len(translation_plan)  # Count pending translation or finalization files.
-    total_planned_characters = preflight_summary["total_characters"]  # Count only characters requiring new DeepL requests in this execution.
-    reused_characters = sum(int(planned_file.get("resumed_characters", 0)) for planned_file in translation_plan)  # Count safely reused prior-run translated characters separately.
-    other_skipped_files = preflight_summary["empty_skipped"] + preflight_summary["other_skipped"]  # Count non-language skipped files.
     print(f"{BackgroundColors.GREEN}Translation plan: {BackgroundColors.CYAN}{planned_files}{BackgroundColors.GREEN} files | {BackgroundColors.CYAN}{total_planned_characters:,}{BackgroundColors.GREEN} new characters | {BackgroundColors.CYAN}{reused_characters:,}{BackgroundColors.GREEN} reused characters | {BackgroundColors.CYAN}{preflight_summary['resumable_partial_outputs']}{BackgroundColors.GREEN} resumable partial outputs | {BackgroundColors.CYAN}{preflight_summary['finalization_only_outputs']}{BackgroundColors.GREEN} recovered finalizations | {BackgroundColors.CYAN}{preflight_summary['existing_skipped']}{BackgroundColors.GREEN} existing translations skipped | {BackgroundColors.CYAN}{preflight_summary['target_language_skipped']}{BackgroundColors.GREEN} target-language files skipped | {BackgroundColors.CYAN}{preflight_summary['invalid_language_outputs']}{BackgroundColors.GREEN} invalid-language outputs | {BackgroundColors.CYAN}{preflight_summary['cleanup_fallbacks']}{BackgroundColors.GREEN} cleanup fallbacks | {BackgroundColors.CYAN}{preflight_summary['invalid']}{BackgroundColors.GREEN} invalid files{Style.RESET_ALL}")  # Print preflight summary with current-run and reusable work separated.
 
-    translated_files = 0  # Count files that consumed new DeepL translation work and completed in this run.
-    finalized_files = 0  # Count interrupted complete outputs finalized without new DeepL translation work.
-    failed_files = 0  # Count failed planned files.
-    translated_characters = 0  # Count only successfully translated characters from this execution.
 
-    if not translation_plan:  # Preserve existing no-op preflight behavior.
-        print(f"{BackgroundColors.YELLOW}{get_zero_plan_message(input_dir, preflight_summary)}{Style.RESET_ALL}")  # Print specific zero-plan summary.
-    else:  # Execute remaining translation or finalization work.
-        if use_configured_output and not output_dir.exists():  # Create configured output root only when planned work exists.
-            output_dir.mkdir(parents=True, exist_ok=True)  # Preserve lazy output directory creation.
+def prepare_translation_runtime(translation_plan: List[Dict[str, Any]], total_planned_characters: int, use_configured_output: bool, output_dir: Path) -> Tuple[List[Tuple[str, str]], Dict[str, deepl.DeepLClient], Dict[str, Any]] | None:
+    """
+    Prepares API clients and shared progress state for planned translation work.
 
-        account_items: List[Tuple[str, str]] = []  # Default to no API accounts when every planned file only needs finalization.
-        active_account_index = 0  # Initialize process-wide active account index.
-        translators: Dict[str, deepl.DeepLClient] = {}  # Initialize process-wide DeepL clients reused across files.
-        if total_planned_characters > 0:  # Load API credentials only when new DeepL quota is actually required.
-            if not get_api_keys():  # Preserve existing API-key validation before new translation requests.
-                print(f"{BackgroundColors.RED}DEEPL_API_KEYS not found or invalid in .env file. Please set it before running the program.{Style.RESET_ALL}")  # Output configuration error.
-                return  # Leave persisted partial outputs untouched for the next run.
-            account_items = list(DEEPL_API_KEYS.items())  # Preserve configured account order across files.
+    :param translation_plan: Planned translation and recovered finalization entries.
+    :param total_planned_characters: Number of characters requiring new DeepL requests.
+    :param use_configured_output: Whether the configured output directory layout applies.
+    :param output_dir: Resolved configured output directory.
+    :return: Runtime API and progress state, or None when required API credentials are unavailable.
+    """
 
-        progress_state = {"interactive": is_interactive_output(), "overall_total_characters": total_planned_characters, "overall_translated_characters": 0, "overall_start_time": time.monotonic(), "total_files": planned_files, "completed_files": 0, "progress_visible": False, "last_snapshot_time": 0.0}  # Track only current-execution character progress while retaining planned file completion.
+    if use_configured_output and not output_dir.exists():  # Create configured output root only when planned work exists.
+        output_dir.mkdir(parents=True, exist_ok=True)  # Preserve lazy output directory creation.
 
-        for file_number, planned_file in enumerate(translation_plan, start=1):  # Process every planned translation or recovered finalization deterministically.
-            current_srt_path = planned_file["source_path"]  # Read logical source path used by existing output rules.
-            source_storage_path = planned_file["source_storage_path"]  # Read physical preserved source representation used for resume validation.
-            output_file = planned_file["output_file"]  # Read persistent translated output path.
-            srt_lines = planned_file["lines"]  # Read exact preprocessed source representation.
-            translatable_character_count = planned_file["characters"]  # Read only remaining current-run DeepL character workload.
-            filename = current_srt_path.name  # Build display filename.
+    account_items: List[Tuple[str, str]] = []  # Default to no API accounts when every planned file only needs finalization.
+    translators: Dict[str, deepl.DeepLClient] = {}  # Initialize process-wide DeepL clients reused across files.
 
-            if planned_file["removed_entries"] or planned_file["mixed_cleaned_entries"]:  # Persist source preprocessing only after preflight selected this source.
-                write_srt_lines_atomic(source_storage_path, srt_lines)  # Preserve cleanup in the actual source storage without overwriting in-place partial output.
-                print(f"{BackgroundColors.YELLOW}SDH cleanup: {BackgroundColors.CYAN}{filename}{BackgroundColors.YELLOW} removed {BackgroundColors.CYAN}{planned_file['removed_entries']}{BackgroundColors.YELLOW} entries, cleaned {BackgroundColors.CYAN}{planned_file['mixed_cleaned_entries']}{BackgroundColors.YELLOW} mixed entries.{Style.RESET_ALL}")  # Log concise source cleanup summary.
-            if planned_file["cleanup_fallback"]:  # Preserve existing cleanup fallback visibility.
-                print(f"{BackgroundColors.YELLOW}Cleanup mode: Original subtitle content{Style.RESET_ALL}")  # Identify fallback source representation once.
+    if total_planned_characters > 0:  # Load API credentials only when new DeepL quota is actually required.
+        if not get_api_keys():  # Preserve existing API-key validation before new translation requests.
+            print(f"{BackgroundColors.RED}DEEPL_API_KEYS not found or invalid in .env file. Please set it before running the program.{Style.RESET_ALL}")  # Output configuration error.
+            return None  # Leave persisted partial outputs untouched for the next run.
+        account_items = list(DEEPL_API_KEYS.items())  # Preserve configured account order across files.
 
-            if not planned_file["detection_conclusive"]:  # Preserve existing DeepL source-language autodetection behavior.
-                print(f"{BackgroundColors.YELLOW}Source language detection was inconclusive for {BackgroundColors.CYAN}{filename}{BackgroundColors.YELLOW}. DeepL will determine the source language during translation.{Style.RESET_ALL}")  # Log inconclusive offline detection.
+    progress_state = {"interactive": is_interactive_output(), "overall_total_characters": total_planned_characters, "overall_translated_characters": 0, "overall_start_time": time.monotonic(), "total_files": len(translation_plan), "completed_files": 0, "progress_visible": False, "last_snapshot_time": 0.0}  # Track only current-execution character progress while retaining planned file completion.
+    return account_items, translators, progress_state  # Return initialized runtime state for deterministic plan execution.
 
-            output_file.parent.mkdir(parents=True, exist_ok=True)  # Ensure output directory exists before resume metadata or SRT persistence.
-            progress_state.update({"file_total_characters": translatable_character_count, "file_translated_characters": 0, "file_start_time": time.monotonic(), "progress_visible": False, "last_snapshot_time": 0.0})  # Reset file progress to current-run remaining work only.
-            print(f"{BackgroundColors.GREEN}File {BackgroundColors.CYAN}{file_number}/{planned_files}{BackgroundColors.GREEN}: {BackgroundColors.CYAN}{filename}{Style.RESET_ALL}")  # Print compact file header once.
-            print(f"{BackgroundColors.GREEN}Characters remaining: {BackgroundColors.CYAN}{translatable_character_count:,}{Style.RESET_ALL}")  # Print new DeepL workload without counting persisted prior-run characters.
-            if planned_file.get("resumed_characters", 0):  # Report persistent translation work reused from earlier execution.
-                print(f"{BackgroundColors.GREEN}Characters reused: {BackgroundColors.CYAN}{planned_file['resumed_characters']:,}{Style.RESET_ALL}")  # Keep resumed characters separate from current-run translated totals.
 
-            try:  # Prepare or reconcile persistent translation state before any new API request.
-                resume_state, output_blocks = prepare_translation_resume_session(srt_lines, current_srt_path, source_storage_path, output_file, planned_file["resume_info"])  # Recover journaled DeepL output or initialize source-bound resume metadata.
-            except RuntimeError as e:  # Preserve all existing source and partial output when resume reconciliation fails.
-                failed_files += 1  # Count failed planned file.
-                print_progress_event(progress_state, f"{BackgroundColors.RED}{e}{Style.RESET_ALL}")  # Log resume preparation failure without destructive fallback.
-                break  # Stop because the current output progression is intentionally preserved for review.
+def prepare_planned_translation_file(planned_file: Dict[str, Any], file_number: int, planned_files: int, progress_state: Dict[str, Any]) -> Tuple[Path, Path, Path, List[str], int]:
+    """
+    Prepares one planned subtitle file and prints its concise execution information.
 
-            if planned_file["finalize_only"]:  # Finalize a complete persisted translation without consuming new DeepL quota.
-                try:  # Complete normal save and cleanup semantics from persistent translated output.
-                    if planned_file["resume_info"].get("final_output_ready"):  # Recognize cleanup already atomically persisted before the previous interruption.
-                        remove_translation_resume_artifacts(output_file, resume_state)  # Remove only completed resume artifacts without rewriting final output.
-                    else:  # Finish normal final validation and cleanup when interruption occurred before finalization completed.
-                        if not is_translated_output_complete(srt_lines, output_file):  # Require complete source index and timing correspondence before finalization.
-                            raise RuntimeError(f"Recovered translated output is structurally incomplete for finalization: {output_file}")  # Refuse finalization of ambiguous output.
-                        translated_lines = serialize_srt_blocks_preserving_indices(output_blocks)  # Rebuild complete persisted translation from validated blocks.
-                        save_srt(translated_lines, output_file)  # Preserve existing final saved-output message and atomic final write.
-                        if DESCRIPTIVE_SUBTITLES_REMOVAL:  # Preserve existing translated-output SDH cleanup behavior.
-                            if cleanup_saved_translation(output_file, resume_state):  # Run cleanup with crash-safe final-output journaling.
-                                preflight_summary["cleanup_warnings"] += 1  # Count skipped translated cleanup separately from translation failure.
-                        else:  # Journal unchanged final output when translated cleanup is disabled.
-                            mark_translation_final_output(output_file, resume_state, translated_lines)  # Record final output identity before resume metadata removal.
-                        remove_translation_resume_artifacts(output_file, resume_state)  # Remove persistent resume artifacts only after final output is safely complete.
-                except Exception as e:  # Preserve complete translated output and resume metadata when finalization fails.
-                    failed_files += 1  # Count failed finalization work.
-                    print_progress_event(progress_state, f"{BackgroundColors.RED}Finalization failed for {BackgroundColors.CYAN}{output_file}{BackgroundColors.RED}: {e}{Style.RESET_ALL}")  # Log finalization error without retranslating content.
-                    break  # Leave valid resume metadata for deterministic next-run recovery.
+    :param planned_file: Planned subtitle translation or finalization entry.
+    :param file_number: One-based position of the planned file.
+    :param planned_files: Total number of planned files.
+    :param progress_state: Shared translation progress state.
+    :return: Logical source path, physical source path, output path, source lines, and remaining character count.
+    """
 
-                progress_state["completed_files"] += 1  # Count recovered finalized file in overall file progress.
-                finalized_files += 1  # Count no-quota recovered finalization separately from translated files.
-                render_translation_progress(progress_state, force=True)  # Refresh overall file completion after recovered finalization.
-                continue  # Proceed to the next planned file without a DeepL request.
+    current_srt_path = planned_file["source_path"]  # Read logical source path used by existing output rules.
+    source_storage_path = planned_file["source_storage_path"]  # Read physical preserved source representation used for resume validation.
+    output_file = planned_file["output_file"]  # Read persistent translated output path.
+    srt_lines = planned_file["lines"]  # Read exact preprocessed source representation.
+    translatable_character_count = planned_file["characters"]  # Read only remaining current-run DeepL character workload.
+    filename = current_srt_path.name  # Build display filename.
 
-            render_translation_progress(progress_state, force=True)  # Render 0% of current-run remaining characters before translation starts.
+    if planned_file["removed_entries"] or planned_file["mixed_cleaned_entries"]:  # Persist source preprocessing only after preflight selected this source.
+        write_srt_lines_atomic(source_storage_path, srt_lines)  # Preserve cleanup in the actual source storage without overwriting in-place partial output.
+        print(f"{BackgroundColors.YELLOW}SDH cleanup: {BackgroundColors.CYAN}{filename}{BackgroundColors.YELLOW} removed {BackgroundColors.CYAN}{planned_file['removed_entries']}{BackgroundColors.YELLOW} entries, cleaned {BackgroundColors.CYAN}{planned_file['mixed_cleaned_entries']}{BackgroundColors.YELLOW} mixed entries.{Style.RESET_ALL}")  # Log concise source cleanup summary.
 
-            try:  # Translate only blocks beyond the reconciled persisted prefix.
-                translated_lines, active_account_index, resume_state = translate_srt_lines(current_srt_path, srt_lines, output_file, translatable_character_count, account_items, active_account_index, translators, resume_state, output_blocks, progress_state)  # Translate and atomically persist each remaining existing translation unit.
-            except RuntimeError as e:  # Preserve partial progress for quota, rate-limit, network, API, or persistence failure.
-                failed_files += 1  # Count failed planned file.
-                translated_characters = progress_state["overall_translated_characters"]  # Preserve only current-run successfully persisted translated characters.
-                print_progress_event(progress_state, f"{BackgroundColors.RED}{e}{Style.RESET_ALL}")  # Log fatal request or persistence failure cleanly.
-                break  # Preserve existing stop-on-fatal translation behavior while leaving partial output resumable.
+    if planned_file["cleanup_fallback"]:  # Preserve existing cleanup fallback visibility.
+        print(f"{BackgroundColors.YELLOW}Cleanup mode: Original subtitle content{Style.RESET_ALL}")  # Identify fallback source representation once.
 
-            if translated_lines and not has_valid_srt_structure(translated_lines):  # Reject impossible complete translated serialization before finalization.
-                failed_files += 1  # Count invalid translated serialization as failed work.
-                print_progress_event(progress_state, f"{BackgroundColors.RED}Translated SRT structure is invalid and remains resumable for review: {BackgroundColors.CYAN}{output_file}{Style.RESET_ALL}")  # Preserve persisted state instead of deleting it.
-                continue  # Leave resume artifacts intact for conservative recovery.
-            if not is_translated_output_complete(srt_lines, output_file):  # Require exact source index and timing correspondence at full completion.
-                failed_files += 1  # Count structurally incomplete final output as failed work.
-                print_progress_event(progress_state, f"{BackgroundColors.RED}Translated SRT does not completely match the source progression and remains resumable: {BackgroundColors.CYAN}{output_file}{Style.RESET_ALL}")  # Preserve persistent translated prefix and metadata.
-                continue  # Avoid final cleanup or metadata deletion for incomplete output.
+    if not planned_file["detection_conclusive"]:  # Preserve existing DeepL source-language autodetection behavior.
+        print(f"{BackgroundColors.YELLOW}Source language detection was inconclusive for {BackgroundColors.CYAN}{filename}{BackgroundColors.YELLOW}. DeepL will determine the source language during translation.{Style.RESET_ALL}")  # Log inconclusive offline detection.
 
-            progress_state["completed_files"] += 1  # Count fully translated file.
-            translated_files += 1  # Count file completed with new DeepL translation work this run.
-            translated_characters = progress_state["overall_translated_characters"]  # Store only current-run successful translated character progress.
-            render_translation_progress(progress_state, force=True)  # Finalize successful file progress.
-            save_srt(translated_lines, output_file)  # Preserve existing final atomic save and success message after per-block persistence.
-            if DESCRIPTIVE_SUBTITLES_REMOVAL:  # Preserve existing translated-output cleanup behavior.
-                if cleanup_saved_translation(output_file, resume_state):  # Run cleanup with final-output crash journaling.
-                    preflight_summary["cleanup_warnings"] += 1  # Count skipped translated cleanup separately from translation failure.
-            else:  # Journal unchanged final output when translated cleanup is disabled.
-                mark_translation_final_output(output_file, resume_state, translated_lines)  # Record final output identity before completed resume metadata removal.
-            remove_translation_resume_artifacts(output_file, resume_state)  # Remove persistent state only after complete final validation and cleanup.
+    output_file.parent.mkdir(parents=True, exist_ok=True)  # Ensure output directory exists before resume metadata or SRT persistence.
+    progress_state.update({"file_total_characters": translatable_character_count, "file_translated_characters": 0, "file_start_time": time.monotonic(), "progress_visible": False, "last_snapshot_time": 0.0})  # Reset file progress to current-run remaining work only.
+    print(f"{BackgroundColors.GREEN}File {BackgroundColors.CYAN}{file_number}/{planned_files}{BackgroundColors.GREEN}: {BackgroundColors.CYAN}{filename}{Style.RESET_ALL}")  # Print compact file header once.
+    print(f"{BackgroundColors.GREEN}Characters remaining: {BackgroundColors.CYAN}{translatable_character_count:,}{Style.RESET_ALL}")  # Print new DeepL workload without counting persisted prior-run characters.
 
-    finish_time = datetime.datetime.now()  # Record program finish time.
+    if planned_file.get("resumed_characters", 0):  # Report persistent translation work reused from earlier execution.
+        print(f"{BackgroundColors.GREEN}Characters reused: {BackgroundColors.CYAN}{planned_file['resumed_characters']:,}{Style.RESET_ALL}")  # Keep resumed characters separate from current-run translated totals.
+
+    return current_srt_path, source_storage_path, output_file, srt_lines, translatable_character_count  # Return prepared file state for resume or translation processing.
+
+
+def finalize_resumed_translation(srt_lines: List[str], output_file: Path, output_blocks: List[Tuple[str, str, List[str]]], resume_state: Dict[str, Any], resume_info: Dict[str, Any], preflight_summary: Dict[str, int]) -> None:
+    """
+    Finalizes a complete persisted translation recovered after interruption.
+
+    :param srt_lines: Exact preprocessed source SRT lines.
+    :param output_file: Persistent translated output path.
+    :param output_blocks: Validated persisted translated output blocks.
+    :param resume_state: Active persistent resume metadata.
+    :param resume_info: Validated resume information for the planned file.
+    :param preflight_summary: Preflight counters updated with cleanup warnings.
+    :return: None.
+    """
+
+    if resume_info.get("final_output_ready"):  # Recognize cleanup already atomically persisted before the previous interruption.
+        remove_translation_resume_artifacts(output_file, resume_state)  # Remove only completed resume artifacts without rewriting final output.
+        return  # Finish recovered finalization without another persistent output write.
+
+    if not is_translated_output_complete(srt_lines, output_file):  # Require complete source index and timing correspondence before finalization.
+        raise RuntimeError(f"Recovered translated output is structurally incomplete for finalization: {output_file}")  # Refuse finalization of ambiguous output.
+
+    translated_lines = serialize_srt_blocks_preserving_indices(output_blocks)  # Rebuild complete persisted translation from validated blocks.
+    save_srt(translated_lines, output_file)  # Preserve existing final saved-output message and atomic final write.
+
+    if DESCRIPTIVE_SUBTITLES_REMOVAL:  # Preserve existing translated-output SDH cleanup behavior.
+        if cleanup_saved_translation(output_file, resume_state):  # Run cleanup with crash-safe final-output journaling.
+            preflight_summary["cleanup_warnings"] += 1  # Count skipped translated cleanup separately from translation failure.
+    else:  # Journal unchanged final output when translated cleanup is disabled.
+        mark_translation_final_output(output_file, resume_state, translated_lines)  # Record final output identity before resume metadata removal.
+
+    remove_translation_resume_artifacts(output_file, resume_state)  # Remove persistent resume artifacts only after final output is safely complete.
+
+
+def validate_completed_translation_output(srt_lines: List[str], translated_lines: List[str], output_file: Path, progress_state: Dict[str, Any]) -> bool:
+    """
+    Validates a newly completed translated output before final persistence and cleanup.
+
+    :param srt_lines: Exact preprocessed source SRT lines.
+    :param translated_lines: Complete translated SRT lines returned by the translation flow.
+    :param output_file: Persistent translated output path.
+    :param progress_state: Shared translation progress state.
+    :return: True when final output structure matches the source progression, otherwise False.
+    """
+
+    if translated_lines and not has_valid_srt_structure(translated_lines):  # Reject impossible complete translated serialization before finalization.
+        print_progress_event(progress_state, f"{BackgroundColors.RED}Translated SRT structure is invalid and remains resumable for review: {BackgroundColors.CYAN}{output_file}{Style.RESET_ALL}")  # Preserve persisted state instead of deleting it.
+        return False  # Leave resume artifacts intact for conservative recovery.
+
+    if not is_translated_output_complete(srt_lines, output_file):  # Require exact source index and timing correspondence at full completion.
+        print_progress_event(progress_state, f"{BackgroundColors.RED}Translated SRT does not completely match the source progression and remains resumable: {BackgroundColors.CYAN}{output_file}{Style.RESET_ALL}")  # Preserve persistent translated prefix and metadata.
+        return False  # Avoid final cleanup or metadata deletion for incomplete output.
+
+    return True  # Allow normal final persistence after structural validation succeeds.
+
+
+def persist_completed_translation_output(translated_lines: List[str], output_file: Path, resume_state: Dict[str, Any], preflight_summary: Dict[str, int]) -> None:
+    """
+    Persists and finalizes a newly completed translated subtitle output.
+
+    :param translated_lines: Complete translated SRT lines.
+    :param output_file: Persistent translated output path.
+    :param resume_state: Active persistent resume metadata.
+    :param preflight_summary: Preflight counters updated with cleanup warnings.
+    :return: None.
+    """
+
+    save_srt(translated_lines, output_file)  # Preserve existing final atomic save and success message after per-block persistence.
+
+    if DESCRIPTIVE_SUBTITLES_REMOVAL:  # Preserve existing translated-output cleanup behavior.
+        if cleanup_saved_translation(output_file, resume_state):  # Run cleanup with final-output crash journaling.
+            preflight_summary["cleanup_warnings"] += 1  # Count skipped translated cleanup separately from translation failure.
+    else:  # Journal unchanged final output when translated cleanup is disabled.
+        mark_translation_final_output(output_file, resume_state, translated_lines)  # Record final output identity before completed resume metadata removal.
+
+    remove_translation_resume_artifacts(output_file, resume_state)  # Remove persistent state only after complete final validation and cleanup.
+
+
+def process_planned_translation_file(planned_file: Dict[str, Any], file_number: int, planned_files: int, account_items: List[Tuple[str, str]], active_account_index: int, translators: Dict[str, deepl.DeepLClient], progress_state: Dict[str, Any], preflight_summary: Dict[str, int]) -> Tuple[str, int]:
+    """
+    Processes one planned translation or recovered finalization entry.
+
+    :param planned_file: Planned subtitle translation or finalization entry.
+    :param file_number: One-based position of the planned file.
+    :param planned_files: Total number of planned files.
+    :param account_items: Ordered DeepL account names and API keys.
+    :param active_account_index: Process-wide active DeepL account index.
+    :param translators: DeepL clients reused across files.
+    :param progress_state: Shared translation progress state.
+    :param preflight_summary: Preflight counters updated during final cleanup.
+    :return: Processing status and updated active DeepL account index.
+    """
+
+    current_srt_path, source_storage_path, output_file, srt_lines, translatable_character_count = prepare_planned_translation_file(planned_file, file_number, planned_files, progress_state)  # Prepare source persistence and concise file logging.
+    resume_state, output_blocks = prepare_translation_resume_session(srt_lines, current_srt_path, source_storage_path, output_file, planned_file["resume_info"])  # Recover journaled DeepL output or initialize source-bound resume metadata.
+
+    if planned_file["finalize_only"]:  # Finalize a complete persisted translation without consuming new DeepL quota.
+        try:  # Complete normal save and cleanup semantics from persistent translated output.
+            finalize_resumed_translation(srt_lines, output_file, output_blocks, resume_state, planned_file["resume_info"], preflight_summary)  # Finalize validated persisted output without new translation requests.
+        except Exception as e:  # Preserve complete translated output and resume metadata when finalization fails.
+            raise RuntimeError(f"Finalization failed for {BackgroundColors.CYAN}{output_file}{BackgroundColors.RED}: {e}") from None  # Preserve deterministic next-run recovery after finalization failure.
+
+        progress_state["completed_files"] += 1  # Count recovered finalized file in overall file progress.
+        render_translation_progress(progress_state, force=True)  # Refresh overall file completion after recovered finalization.
+        return "finalized", active_account_index  # Proceed without changing the active DeepL account.
+
+    render_translation_progress(progress_state, force=True)  # Render 0% of current-run remaining characters before translation starts.
+    translated_lines, active_account_index, resume_state = translate_srt_lines(current_srt_path, srt_lines, output_file, translatable_character_count, account_items, active_account_index, translators, resume_state, output_blocks, progress_state)  # Translate and atomically persist each remaining existing translation unit.
+
+    if not validate_completed_translation_output(srt_lines, translated_lines, output_file, progress_state):  # Preserve resumable state when complete output validation fails.
+        return "failed_continue", active_account_index  # Continue later planned files without deleting persistent progress.
+
+    progress_state["completed_files"] += 1  # Count fully translated file.
+    render_translation_progress(progress_state, force=True)  # Finalize successful file progress.
+    persist_completed_translation_output(translated_lines, output_file, resume_state, preflight_summary)  # Preserve final save, cleanup, and resume-artifact removal order.
+    return "translated", active_account_index  # Report successful current-run translation completion.
+
+
+def execute_translation_plan(translation_plan: List[Dict[str, Any]], total_planned_characters: int, use_configured_output: bool, output_dir: Path, preflight_summary: Dict[str, int]) -> Dict[str, int] | None:
+    """
+    Executes planned translation and recovered finalization work.
+
+    :param translation_plan: Planned translation and recovered finalization entries.
+    :param total_planned_characters: Number of characters requiring new DeepL requests.
+    :param use_configured_output: Whether the configured output directory layout applies.
+    :param output_dir: Resolved configured output directory.
+    :param preflight_summary: Preflight counters updated during final cleanup.
+    :return: Execution counters, or None when required API credentials are unavailable.
+    """
+
+    runtime_state = prepare_translation_runtime(translation_plan, total_planned_characters, use_configured_output, output_dir)  # Prepare API and progress state only when planned work exists.
+    if runtime_state is None:  # Stop when new translation work requires unavailable API credentials.
+        return None  # Preserve the existing early-return behavior from main.
+
+    account_items, translators, progress_state = runtime_state  # Unpack initialized runtime state.
+    active_account_index = 0  # Initialize process-wide active account index.
+    execution_summary = {"translated_files": 0, "finalized_files": 0, "failed_files": 0, "translated_characters": 0}  # Track current-execution results separately from reused progress.
+    planned_files = len(translation_plan)  # Count planned translation and recovered finalization files.
+
+    for file_number, planned_file in enumerate(translation_plan, start=1):  # Process every planned translation or recovered finalization deterministically.
+        try:  # Preserve fatal stop behavior for resume, quota, API, network, persistence, and recovered finalization failures.
+            status, active_account_index = process_planned_translation_file(planned_file, file_number, planned_files, account_items, active_account_index, translators, progress_state, preflight_summary)  # Process one plan entry through resume, translation, validation, and finalization.
+        except RuntimeError as e:  # Preserve partial progress after fatal planned-file failure.
+            execution_summary["failed_files"] += 1  # Count failed planned file.
+            execution_summary["translated_characters"] = progress_state["overall_translated_characters"]  # Preserve only current-run successfully persisted translated characters.
+            print_progress_event(progress_state, f"{BackgroundColors.RED}{e}{Style.RESET_ALL}")  # Log fatal request, persistence, resume, or finalization failure cleanly.
+            break  # Preserve existing stop-on-fatal behavior while leaving resumable data intact.
+
+        if status == "failed_continue":  # Preserve non-fatal invalid-completion behavior for later planned files.
+            execution_summary["failed_files"] += 1  # Count invalid completed serialization as failed work.
+            continue  # Leave resumable artifacts intact and proceed to the next planned file.
+
+        if status == "finalized":  # Count recovered no-quota finalization separately.
+            execution_summary["finalized_files"] += 1  # Count interrupted complete output finalized in this execution.
+            continue  # No current-run translated character total changes are required.
+
+        execution_summary["translated_files"] += 1  # Count file completed with new DeepL translation work this run.
+        execution_summary["translated_characters"] = progress_state["overall_translated_characters"]  # Store only current-run successful translated character progress.
+
+    return execution_summary  # Return deterministic execution counters for final reporting.
+
+
+def print_translation_completion_summary(preflight_summary: Dict[str, int], planned_files: int, translated_files: int, finalized_files: int, failed_files: int, reused_characters: int, translated_characters: int, total_planned_characters: int, other_skipped_files: int) -> None:
+    """
+    Prints the final translation execution summary.
+
+    :param preflight_summary: Preflight classification and cleanup counters.
+    :param planned_files: Number of planned translation or finalization files.
+    :param translated_files: Number of files completed with new DeepL work in this execution.
+    :param finalized_files: Number of persisted complete outputs finalized without new DeepL work.
+    :param failed_files: Number of planned files that failed.
+    :param reused_characters: Number of safely persisted translated characters reused from prior executions.
+    :param translated_characters: Number of characters successfully translated in this execution.
+    :param total_planned_characters: Number of characters planned for new DeepL requests.
+    :param other_skipped_files: Number of empty or internal files skipped for non-language reasons.
+    :return: None.
+    """
+
     print(  # Output concise summary with reused and newly translated characters separated.
         f"\n{BackgroundColors.GREEN}Translation completed.{Style.RESET_ALL}\n\n"  # Add summary heading.
         f"{BackgroundColors.GREEN}Files discovered: {BackgroundColors.CYAN}{preflight_summary['discovered']}{Style.RESET_ALL}\n"  # Add discovered file count.
@@ -2187,11 +2300,69 @@ def main() -> None:
         f"{BackgroundColors.GREEN}Files failed: {BackgroundColors.CYAN}{failed_files}{Style.RESET_ALL}\n"  # Add failed planned file count.
         f"{BackgroundColors.GREEN}Characters translated this run: {BackgroundColors.CYAN}{translated_characters:,}/{total_planned_characters:,}{Style.RESET_ALL}"  # Add current-run translated character total.
     )  # Finish concise translation summary output.
+
+
+def print_execution_time_summary(start_time: datetime.datetime, finish_time: datetime.datetime) -> None:
+    """
+    Prints execution start, finish, and elapsed time information.
+
+    :param start_time: Program start datetime.
+    :param finish_time: Program finish datetime.
+    :return: None.
+    """
+
     print(  # Output start, finish, and execution times.
         f"{BackgroundColors.GREEN}Start time: {BackgroundColors.CYAN}{start_time.strftime('%d/%m/%Y - %H:%M:%S')}\n"  # Add execution start time.
         f"{BackgroundColors.GREEN}Finish time: {BackgroundColors.CYAN}{finish_time.strftime('%d/%m/%Y - %H:%M:%S')}\n"  # Add execution finish time.
         f"{BackgroundColors.GREEN}Execution time: {BackgroundColors.CYAN}{calculate_execution_time(start_time, finish_time)}{Style.RESET_ALL}"  # Add total execution duration.
     )  # Finish execution timing output.
+
+
+def main() -> None:
+    """
+    Runs recursive subtitle preflight, translation, resume, persistence, and finalization.
+
+    :return: None.
+    """
+
+    print(f"{BackgroundColors.CLEAR_TERMINAL}{BackgroundColors.BOLD}{BackgroundColors.GREEN}Welcome to the {BackgroundColors.CYAN}Subtitle (SRT) translation using DeepL API{BackgroundColors.GREEN} program!{Style.RESET_ALL}\n")  # Output the welcome message.
+    start_time = datetime.datetime.now()  # Record program start time.
+
+    ensure_env_file()  # Preserve existing environment-file initialization.
+
+    input_dir = resolve_from_script_dir(INPUT_DIRECTORY)  # Resolve configured input from script location.
+    output_dir = resolve_from_script_dir(OUTPUT_DIR)  # Resolve configured output from script location.
+    use_configured_output = is_path_inside(input_dir, SCRIPT_DIR)  # Preserve configured output layout for internal inputs.
+
+    if not input_dir.exists() or not input_dir.is_dir():  # Reject missing or invalid input directory.
+        print(f"{BackgroundColors.RED}Input directory not found or is not a directory: {BackgroundColors.CYAN}{input_dir}{Style.RESET_ALL}")  # Output the existing input error message.
+        return  # Exit before discovery.
+
+    srt_files = discover_srt_files(input_dir)  # Snapshot SRT file paths recursively before translation.
+    if not srt_files:  # Stop when recursive discovery found no SRT files.
+        print(f"No SRT files were found in the input directory or any of its subdirectories: {input_dir}")  # Output existing empty-discovery message.
+        return  # Exit without API initialization.
+
+    translation_plan, preflight_summary = build_translation_plan(srt_files, input_dir, output_dir, use_configured_output)  # Build source-validated remaining translation and finalization work.
+    planned_files = len(translation_plan)  # Count pending translation or finalization files.
+    total_planned_characters = preflight_summary["total_characters"]  # Count only characters requiring new DeepL requests in this execution.
+    reused_characters = sum(int(planned_file.get("resumed_characters", 0)) for planned_file in translation_plan)  # Count safely reused prior-run translated characters separately.
+    other_skipped_files = preflight_summary["empty_skipped"] + preflight_summary["other_skipped"]  # Count non-language skipped files.
+    print_translation_plan_summary(planned_files, total_planned_characters, reused_characters, preflight_summary)  # Print plan metrics outside the orchestration function.
+
+    execution_summary = {"translated_files": 0, "finalized_files": 0, "failed_files": 0, "translated_characters": 0}  # Default execution counters for a zero-work plan.
+
+    if not translation_plan:  # Preserve existing no-op preflight behavior.
+        print(f"{BackgroundColors.YELLOW}{get_zero_plan_message(input_dir, preflight_summary)}{Style.RESET_ALL}")  # Print specific zero-plan summary.
+    else:  # Execute remaining translation or finalization work.
+        plan_execution_summary = execute_translation_plan(translation_plan, total_planned_characters, use_configured_output, output_dir, preflight_summary)  # Run translation and recovered finalization outside main.
+        if plan_execution_summary is None:  # Preserve existing early exit when required API credentials are unavailable.
+            return  # Leave persisted partial outputs untouched for the next run.
+        execution_summary = plan_execution_summary  # Store completed plan execution counters for final reporting.
+
+    finish_time = datetime.datetime.now()  # Record program finish time.
+    print_translation_completion_summary(preflight_summary, planned_files, execution_summary["translated_files"], execution_summary["finalized_files"], execution_summary["failed_files"], reused_characters, execution_summary["translated_characters"], total_planned_characters, other_skipped_files)  # Print final translation counters outside main.
+    print_execution_time_summary(start_time, finish_time)  # Print execution timing outside main.
     print(f"\n{BackgroundColors.BOLD}{BackgroundColors.GREEN}Program finished.{Style.RESET_ALL}")  # Output end-of-program message.
 
     atexit.register(play_sound) if RUN_FUNCTIONS["Play Sound"] else None  # Register completion sound using existing configuration behavior.
