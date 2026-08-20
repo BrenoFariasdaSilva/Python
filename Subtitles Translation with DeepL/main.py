@@ -1333,7 +1333,7 @@ def render_translation_progress(progress_state: Dict[str, Any] | None, force: bo
     overall_eta = format_eta(overall_done, overall_total, progress_state["overall_start_time"])  # Overall ETA
     api_key_name = str(progress_state.get("active_api_key_name", "N/A"))  # Read the currently selected DeepL account name without exposing its API key.
     file_line = f"{BackgroundColors.GREEN}File - API Key: {BackgroundColors.CYAN}{api_key_name}{BackgroundColors.GREEN} [{build_progress_bar(file_done, file_total)}] {file_percent:5.1f}% | {BackgroundColors.CYAN}{file_done:,}{BackgroundColors.GREEN}/{BackgroundColors.CYAN}{file_total:,}{BackgroundColors.GREEN} chars | {BackgroundColors.CYAN}ETA {file_eta}{Style.RESET_ALL}"  # Build the green file progress line with only the active API key name in cyan.
-    overall_line = f"{BackgroundColors.GREEN}Overall - API Key: {BackgroundColors.CYAN}{api_key_name}{BackgroundColors.GREEN} [{build_progress_bar(overall_done, overall_total)}] {overall_percent:5.1f}% | {BackgroundColors.CYAN}{overall_done:,}{BackgroundColors.GREEN}/{BackgroundColors.CYAN}{overall_total:,}{BackgroundColors.GREEN} chars | Files {progress_state['completed_files']}/{progress_state['total_files']} | ETA {BackgroundColors.CYAN}{overall_eta}{Style.RESET_ALL}"  # Build the green overall progress line with only the active API key name in cyan.
+    overall_line = f"{BackgroundColors.GREEN}Overall - API Key: {BackgroundColors.CYAN}{api_key_name}{BackgroundColors.GREEN} [{build_progress_bar(overall_done, overall_total)}] {overall_percent:5.1f}% | {BackgroundColors.CYAN}{overall_done:,}{BackgroundColors.GREEN}/{BackgroundColors.CYAN}{overall_total:,}{BackgroundColors.GREEN} chars | Files {progress_state['current_file_number']}/{progress_state['total_files']} | ETA {BackgroundColors.CYAN}{overall_eta}{Style.RESET_ALL}"  # Build the green overall progress line using the active planned-file ordinal instead of completed-file count.
 
     stream = sys.__stdout__  # Read the original terminal stream once so Pylance can narrow the optional type safely
 
@@ -2121,7 +2121,7 @@ def prepare_translation_runtime(translation_plan: List[Dict[str, Any]], total_pl
 
     api_state = {"used_accounts": set(), "quota_exhausted_accounts": set()}  # Track account usage and quota retirement across the entire execution.
     initial_api_key_name = account_items[0][0] if account_items else "N/A"  # Select the first configured account name for initial progress display without exposing its API key.
-    progress_state = {"interactive": is_interactive_output(), "overall_total_characters": total_planned_characters, "overall_translated_characters": 0, "overall_start_time": time.monotonic(), "total_files": len(translation_plan), "completed_files": 0, "progress_visible": False, "last_snapshot_time": 0.0, "active_api_key_name": initial_api_key_name}  # Track current-execution progress and the active configured DeepL account name.
+    progress_state = {"interactive": is_interactive_output(), "overall_total_characters": total_planned_characters, "overall_translated_characters": 0, "overall_start_time": time.monotonic(), "total_files": len(translation_plan), "completed_files": 0, "current_file_number": 0, "progress_visible": False, "last_snapshot_time": 0.0, "active_api_key_name": initial_api_key_name}  # Track current-execution progress, the active planned-file ordinal, and the configured DeepL account name.
     return account_items, translators, api_state, progress_state  # Return initialized API, account, and progress state for deterministic plan execution.
 
 
@@ -2154,7 +2154,7 @@ def prepare_planned_translation_file(planned_file: Dict[str, Any], file_number: 
         print(f"{BackgroundColors.YELLOW}Source language detection was inconclusive for {BackgroundColors.CYAN}{filename}{BackgroundColors.YELLOW}. DeepL will determine the source language during translation.{Style.RESET_ALL}")  # Log inconclusive offline detection.
 
     output_file.parent.mkdir(parents=True, exist_ok=True)  # Ensure output directory exists before resume metadata or SRT persistence.
-    progress_state.update({"file_total_characters": translatable_character_count, "file_translated_characters": 0, "file_start_time": time.monotonic(), "progress_visible": False, "last_snapshot_time": 0.0})  # Reset file progress to current-run remaining work only.
+    progress_state.update({"file_total_characters": translatable_character_count, "file_translated_characters": 0, "file_start_time": time.monotonic(), "current_file_number": file_number, "progress_visible": False, "last_snapshot_time": 0.0})  # Reset file progress and expose the one-based active planned-file ordinal before any progress render.
     print(f"{BackgroundColors.GREEN}File {BackgroundColors.CYAN}{file_number}/{planned_files}{BackgroundColors.GREEN}: {BackgroundColors.CYAN}{filename}{Style.RESET_ALL}")  # Print compact file header once.
     print(f"{BackgroundColors.GREEN}Characters remaining: {BackgroundColors.CYAN}{translatable_character_count:,}{Style.RESET_ALL}")  # Print new DeepL workload without counting persisted prior-run characters.
 
