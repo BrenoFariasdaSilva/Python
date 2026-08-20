@@ -69,7 +69,7 @@ from lingua import LanguageDetectorBuilder  # For offline language detection bef
 from Logger import Logger  # For logging output to both terminal and file
 from pathlib import Path  # For handling file paths
 from shutil import copyfile  # For copying files
-from typing import Any, Dict, List, Tuple  # For typed account, progress, and subtitle structures
+from typing import Any, Callable, Dict, List, Tuple  # For typed account, retry, progress, and subtitle structures
 
 
 # Macros:
@@ -101,6 +101,7 @@ TARGET_LANGUAGE_MIN_SHARE = 0.80  # Require target language to dominate mixed-la
 SUBTITLE_FORMATTING_TAG_PATTERN = re.compile(r"</?(?:i|b|u|font)(?:\s+[^<>]*)?>", re.IGNORECASE)  # Recognized SRT formatting tags
 LANGUAGE_DETECTOR = None  # Lazily initialized offline language detector
 TRANSLATION_RESUME_STATE_VERSION = 1  # Version for persistent resumable translation metadata
+DEEPL_TRANSIENT_RETRY_DELAYS_SECONDS = (300, 600)  # Wait five minutes, then ten minutes after the SDK exhausts its own transient retries.
 
 # Logger Setup:
 logger = Logger(str(SCRIPT_DIR / "Logs" / f"{Path(__file__).stem}.log"), clean=True)  # Create a Logger instance
@@ -1718,25 +1719,70 @@ def get_zero_plan_message(input_dir: Path, preflight_summary: Dict[str, int]) ->
     return "No files require translation. Source files were skipped during preflight classification."  # Fallback for target-language, empty, or invalid-only sources
 
 
-def get_remaining_characters(translator):
+def get_remaining_characters(translator: deepl.DeepLClient) -> int | None:
     """
-    Checks remaining characters available in DeepL free API plan.
+    Returns remaining characters available for one DeepL account.
 
-    :param translator: DeepL translator client
-    :return: Number of remaining characters or None if unlimited/unknown
+    :param translator: DeepL translator client.
+    :return: Number of remaining characters or None if unlimited or unknown.
     """
 
-    verbose_output(
-        f"{BackgroundColors.GREEN}Checking remaining characters in DeepL API...{Style.RESET_ALL}"
-    )  # Output the verbose message
+    verbose_output(f"{BackgroundColors.GREEN}Reading remaining characters from DeepL API...{Style.RESET_ALL}")  # Output the verbose usage-request message.
+    usage = translator.get_usage()  # Request the current DeepL account usage through the SDK.
 
-    usage = translator.get_usage()  # Get usage information from DeepL API
+    if usage.character.valid:  # Use character quota information only when the SDK marks it valid.
+        remaining = usage.character.limit - usage.character.count  # Calculate remaining account characters.
+        return remaining  # Return the exact remaining character allowance.
 
-    if usage.character.valid:  # If character usage information is valid
-        remaining = usage.character.limit - usage.character.count  # Calculate remaining characters
-        return remaining  # Return remaining characters
+    return None  # Return None when the account has unlimited or unavailable character quota information.
 
-    return None  # Return None if unlimited/unknown
+
+def is_retryable_deepl_exception(exception: deepl.DeepLException) -> bool:
+    """
+    Determines whether a DeepL exception represents a transient request failure.
+
+    :param exception: DeepL exception raised after the SDK exhausted its internal retries.
+    :return: True when the operation may safely be retried after stabilization, otherwise False.
+    """
+
+    if isinstance(exception, deepl.TooManyRequestsException):  # Treat DeepL high-load and HTTP 429 responses as transient.
+        return True  # Retry high-load responses after the configured stabilization delay.
+
+    if isinstance(exception, deepl.ConnectionException):  # Treat DeepL connection failures as transient.
+        return True  # Retry network failures after the configured stabilization delay.
+
+    return bool(getattr(exception, "should_retry", False))  # Respect the SDK retryability flag for service-unavailable and similar failures.
+
+
+def run_deepl_request_with_retries(request_callable: Callable[[], Any], operation_name: str, account_name: str, progress_state: Dict[str, Any] | None = None) -> Any:
+    """
+    Runs one DeepL API operation with long stabilization retries for transient failures.
+
+    :param request_callable: Callable that performs exactly one DeepL SDK operation.
+    :param operation_name: Concise operation label used in retry logging.
+    :param account_name: DeepL account name used in retry logging.
+    :param progress_state: Optional shared progress state for clean event logging.
+    :return: Result returned by the successful DeepL SDK operation.
+    """
+
+    retry_number = 0  # Track only long stabilization retries performed after the SDK gives up.
+
+    while True:  # Repeat the same operation only for verified transient DeepL failures.
+        try:  # Execute one DeepL operation through the SDK.
+            return request_callable()  # Return immediately when the operation succeeds.
+        except deepl.QuotaExceededException:  # Never wait and retry a billing-period quota failure on the same key.
+            raise  # Let the caller retire this account and select a new unused key.
+        except deepl.DeepLException as e:  # Classify all SDK API and connection failures using verified DeepL exception metadata.
+            if not is_retryable_deepl_exception(e):  # Reject authorization, bad-request, and other non-transient API failures immediately.
+                raise  # Preserve the original DeepL exception for the caller's fatal error message.
+
+            if retry_number >= len(DEEPL_TRANSIENT_RETRY_DELAYS_SECONDS):  # Stop after all configured stabilization waits were consumed.
+                raise  # Preserve the final SDK exception instead of looping forever.
+
+            retry_delay_seconds = DEEPL_TRANSIENT_RETRY_DELAYS_SECONDS[retry_number]  # Select five-minute then ten-minute stabilization delays.
+            retry_number += 1  # Count this long retry before sleeping so logs show the upcoming attempt number.
+            print_progress_event(progress_state, f"{BackgroundColors.YELLOW}DeepL {operation_name} failed for account {BackgroundColors.CYAN}{account_name}{BackgroundColors.YELLOW} with {BackgroundColors.CYAN}{type(e).__name__}{BackgroundColors.YELLOW}: {e}. Waiting {BackgroundColors.CYAN}{format_duration(retry_delay_seconds)}{BackgroundColors.YELLOW} before retry {BackgroundColors.CYAN}{retry_number}/{len(DEEPL_TRANSIENT_RETRY_DELAYS_SECONDS)}{BackgroundColors.YELLOW}.{Style.RESET_ALL}")  # Log the transient failure and exact stabilization delay.
+            time.sleep(retry_delay_seconds)  # Wait for DeepL service or network stabilization before replaying the same operation.
 
 
 def create_deepl_client(account_name: str, api_key: str) -> deepl.DeepLClient:
@@ -1748,105 +1794,101 @@ def create_deepl_client(account_name: str, api_key: str) -> deepl.DeepLClient:
     :return: DeepL client instance.
     """
 
-    verbose_output(true_string=f"{BackgroundColors.GREEN}Using DeepL account: {BackgroundColors.CYAN}{account_name}{Style.RESET_ALL}")  # Log account name only
-    return deepl.DeepLClient(auth_key=api_key)  # Create client without exposing the API key
+    verbose_output(true_string=f"{BackgroundColors.GREEN}Using DeepL account: {BackgroundColors.CYAN}{account_name}{Style.RESET_ALL}")  # Log account name only.
+    return deepl.DeepLClient(auth_key=api_key)  # Create the client while retaining the SDK's built-in transient retry behavior.
 
 
-def translate_text_block(text_block: str, account_items: List[Tuple[str, str]], active_account_index: int, translators: Dict[str, deepl.DeepLClient], progress_state: Dict[str, Any] | None = None) -> Tuple[List[str], int]:
+def select_next_unused_deepl_account(account_items: List[Tuple[str, str]], active_account_index: int, api_state: Dict[str, Any], progress_state: Dict[str, Any] | None = None) -> int:
     """
-    Translates a block of text using the DeepL API, respecting remaining characters limit.
+    Selects the next DeepL account that has not been used during this execution.
 
-    :param text_block: String containing multiple lines to translate
+    :param account_items: Ordered list of DeepL account names and API keys.
+    :param active_account_index: Index of the quota-exhausted account.
+    :param api_state: Process-wide DeepL account usage state.
+    :param progress_state: Optional shared progress state for clean event logging.
+    :return: Index of the next unused DeepL account.
+    """
+
+    used_accounts = api_state["used_accounts"]  # Read process-wide account usage history.
+    current_account_name = account_items[active_account_index][0]  # Read the exhausted account name for transition logging.
+
+    for offset in range(1, len(account_items) + 1):  # Search every configured account once in deterministic circular order.
+        candidate_index = (active_account_index + offset) % len(account_items)  # Resolve the next configured account position.
+        candidate_account_name = account_items[candidate_index][0]  # Read the candidate account name without exposing its key.
+        if candidate_account_name in used_accounts:  # Reject every account already touched during this execution.
+            continue  # Continue until a genuinely unused key is found.
+
+        print_progress_event(progress_state, f"{BackgroundColors.YELLOW}Switching DeepL account from {BackgroundColors.CYAN}{current_account_name}{BackgroundColors.YELLOW} to unused account {BackgroundColors.CYAN}{candidate_account_name}{BackgroundColors.YELLOW} after quota exhaustion.{Style.RESET_ALL}")  # Log quota-driven account rotation.
+        return candidate_index  # Return the next unused account without issuing an API request yet.
+
+    used_account_names = ", ".join(account_name for account_name, _ in account_items if account_name in used_accounts)  # Build a safe account-name-only exhaustion summary.
+    raise RuntimeError(f"No unused DeepL API account remains after quota exhaustion. Accounts already used this run: {used_account_names}")  # Stop instead of retrying an exhausted or previously used key.
+
+
+def translate_text_block(text_block: str, account_items: List[Tuple[str, str]], active_account_index: int, translators: Dict[str, deepl.DeepLClient], api_state: Dict[str, Any], progress_state: Dict[str, Any] | None = None) -> Tuple[List[str], int]:
+    """
+    Translates one subtitle text block with quota rotation and transient API retries.
+
+    :param text_block: String containing subtitle lines to translate.
     :param account_items: Ordered list of DeepL account names and API keys.
     :param active_account_index: Index for the currently active account.
     :param translators: DeepL clients already created for this execution.
+    :param api_state: Process-wide DeepL account usage and quota state.
     :param progress_state: Optional shared progress state for clean event logging.
     :return: Tuple containing translated lines and active account index.
     """
 
-    verbose_output(f"{BackgroundColors.GREEN}Translating text block...{Style.RESET_ALL}")  # Output the verbose message
+    verbose_output(f"{BackgroundColors.GREEN}Translating text block...{Style.RESET_ALL}")  # Output the verbose translation message.
 
-    attempt_counts = {account_name: 0 for account_name, _ in account_items}  # Track quota attempts for this pending block only
-    total_quota_attempts = 0  # Count quota attempts for this pending block
-    maximum_quota_attempts = len(account_items) * 2  # Require two quota attempts per account before stopping
-    second_cycle_logged = False  # Log second circular pass once per pending block
+    if not account_items:  # Require API credentials whenever a block needs new translation.
+        raise RuntimeError("No DeepL API accounts are available for pending translation work.")  # Reject impossible runtime state before indexing the account list.
 
-    while total_quota_attempts < maximum_quota_attempts:  # Retry same block circularly until translated or safely exhausted
-        account_name, api_key = account_items[active_account_index]  # Select current active account
-        if account_name not in translators:  # Reuse existing client per account
-            translators[account_name] = create_deepl_client(account_name, api_key)  # Create client for selected account
-        translator = translators[account_name]  # Select cached client for usage and translation
+    while True:  # Keep the same pending block until it translates or no eligible account remains.
+        account_name, api_key = account_items[active_account_index]  # Select the current process-wide active account.
+        api_state["used_accounts"].add(account_name)  # Mark this key as used before its first API operation in this execution.
 
-        quota_failed = False  # Track one quota attempt without double-counting
-        try:  # Read account usage without treating API failures as translation success.
-            remaining_chars = get_remaining_characters(translator)  # Read remaining characters before submitting the pending translation unit.
-        except deepl.QuotaExceededException:  # Preserve existing quota-only account rotation behavior.
-            quota_failed = True  # Count this verified quota failure once.
-            print_progress_event(progress_state, f"{BackgroundColors.YELLOW}DeepL account {BackgroundColors.CYAN}{account_name}{BackgroundColors.YELLOW} quota exhausted. Trying next account.{Style.RESET_ALL}")  # Log quota-only rotation.
-            remaining_chars = 0  # Keep variable defined after quota failure.
-        except deepl.DeepLException as e:  # Treat usage rate-limit, server, and network failures as unsuccessful work.
-            raise RuntimeError(f"DeepL usage request failed with {type(e).__name__}: {e}") from e  # Preserve API failure semantics without consuming or completing the pending translation unit.
-        except Exception as e:  # Treat unexpected usage-query failures as unsuccessful work.
-            raise RuntimeError(f"DeepL usage request failed with {type(e).__name__}: {e}") from e  # Preserve the original failure without entering quota rotation incorrectly.
+        if account_name not in translators:  # Reuse one client per account across files and retries.
+            translators[account_name] = create_deepl_client(account_name, api_key)  # Create the selected account client lazily.
+        translator = translators[account_name]  # Select the cached client for usage and translation requests.
 
-        if not quota_failed and remaining_chars is not None and len(text_block) > remaining_chars:  # Detect insufficient allowance before translation
-            quota_failed = True  # Count this verified quota failure once
-            print_progress_event(progress_state, f"{BackgroundColors.YELLOW}DeepL account {BackgroundColors.CYAN}{account_name}{BackgroundColors.YELLOW} has insufficient quota for block size {BackgroundColors.CYAN}{len(text_block)}{BackgroundColors.YELLOW}. Trying next account.{Style.RESET_ALL}")  # Log quota-only account skip
+        try:  # Read quota through the same crash-resilient API retry layer.
+            remaining_chars = run_deepl_request_with_retries(lambda: get_remaining_characters(translator), "usage request", account_name, progress_state)  # Retry transient usage failures on the same account after stabilization.
+        except deepl.QuotaExceededException:  # Retire a key whose quota is explicitly exhausted.
+            api_state["quota_exhausted_accounts"].add(account_name)  # Record quota exhaustion for process-wide diagnostics.
+            print_progress_event(progress_state, f"{BackgroundColors.YELLOW}DeepL account {BackgroundColors.CYAN}{account_name}{BackgroundColors.YELLOW} quota is exhausted.{Style.RESET_ALL}")  # Log verified quota exhaustion.
+            active_account_index = select_next_unused_deepl_account(account_items, active_account_index, api_state, progress_state)  # Move only to a key never used earlier in this execution.
+            continue  # Retry the exact same untranslated block with the newly selected account.
+        except deepl.DeepLException as e:  # Convert exhausted transient retries or permanent SDK failures into the existing file-level failure path.
+            raise RuntimeError(f"DeepL usage request failed with {type(e).__name__}: {e}") from e  # Preserve the API failure without falsely completing the block.
+        except Exception as e:  # Treat unexpected usage-query failures as fatal unsuccessful work.
+            raise RuntimeError(f"DeepL usage request failed with {type(e).__name__}: {e}") from e  # Preserve the original failure without entering quota rotation.
 
-        if quota_failed:
-            attempt_counts[account_name] += 1  # Count this account's quota attempt for the pending block
-            total_quota_attempts += 1  # Count one verified quota attempt
-            if all(attempt_count >= 1 for attempt_count in attempt_counts.values()) and not second_cycle_logged and total_quota_attempts < maximum_quota_attempts:
-                print_progress_event(progress_state, f"{BackgroundColors.YELLOW}All DeepL accounts were attempted once for the current block. Starting the second circular attempt.{Style.RESET_ALL}")  # Log second cycle
-                second_cycle_logged = True  # Avoid duplicate second-cycle log
-            if total_quota_attempts >= maximum_quota_attempts:
-                break  # Stop after two quota attempts per account
+        if remaining_chars is not None and len(text_block) > remaining_chars:  # Detect insufficient allowance before submitting the translation.
+            api_state["quota_exhausted_accounts"].add(account_name)  # Retire this account because it cannot satisfy the pending existing translation unit.
+            print_progress_event(progress_state, f"{BackgroundColors.YELLOW}DeepL account {BackgroundColors.CYAN}{account_name}{BackgroundColors.YELLOW} has only {BackgroundColors.CYAN}{remaining_chars:,}{BackgroundColors.YELLOW} characters remaining for pending block size {BackgroundColors.CYAN}{len(text_block):,}{BackgroundColors.YELLOW}.{Style.RESET_ALL}")  # Log quota insufficiency without consuming translation quota.
+            active_account_index = select_next_unused_deepl_account(account_items, active_account_index, api_state, progress_state)  # Select the next never-used account.
+            continue  # Retry the exact same untranslated block with the new key.
 
-            previous_account_name = account_name  # Store account before circular advancement
-            active_account_index = (active_account_index + 1) % len(account_items)  # Advance circularly to next account
-            next_account_name = account_items[active_account_index][0]  # Read next account name for logging
-            if len(account_items) == 1:
-                print_progress_event(progress_state, f"{BackgroundColors.YELLOW}Retrying DeepL account {BackgroundColors.CYAN}{next_account_name}{BackgroundColors.YELLOW} for the second quota attempt.{Style.RESET_ALL}")  # Log single-account retry
-            elif previous_account_name != next_account_name:
-                print_progress_event(progress_state, f"{BackgroundColors.YELLOW}Switching DeepL account from {BackgroundColors.CYAN}{previous_account_name}{BackgroundColors.YELLOW} to {BackgroundColors.CYAN}{next_account_name}{Style.RESET_ALL}")  # Log circular account switch
-            continue  # Retry exact same untranslated block with next account
+        try:  # Submit the translation through long stabilization retries after the SDK's own retry policy.
+            result = run_deepl_request_with_retries(lambda: translator.translate_text(text_block, target_lang=TARGET_LANG), "translation request", account_name, progress_state)  # Retry verified transient translation failures without changing accounts.
+        except deepl.QuotaExceededException:  # Rotate only when DeepL explicitly reports quota exhaustion during translation.
+            api_state["quota_exhausted_accounts"].add(account_name)  # Record the exhausted key so it is never reused this run.
+            print_progress_event(progress_state, f"{BackgroundColors.YELLOW}DeepL account {BackgroundColors.CYAN}{account_name}{BackgroundColors.YELLOW} quota was exhausted during translation.{Style.RESET_ALL}")  # Log quota-driven request failure.
+            active_account_index = select_next_unused_deepl_account(account_items, active_account_index, api_state, progress_state)  # Move to the next never-used configured key.
+            continue  # Retry the same untranslated subtitle block without advancing progress.
+        except deepl.DeepLException as e:  # Convert exhausted transient retries or permanent SDK failures into the existing file-level failure path.
+            raise RuntimeError(f"DeepL translation failed with {type(e).__name__}: {e}") from e  # Preserve the final API failure without persisting untranslated content.
+        except Exception as e:  # Treat unexpected request or response failures as fatal unsuccessful work.
+            raise RuntimeError(f"Translation failed with {type(e).__name__}: {e}") from e  # Preserve the original error without returning source text as translation.
 
-        try:  # Perform translation and require a genuine DeepL result.
-            result = translator.translate_text(text_block, target_lang=TARGET_LANG)  # Let DeepL auto-detect the source language.
-        except deepl.QuotaExceededException:
-            attempt_counts[account_name] += 1  # Count this verified quota failure once
-            total_quota_attempts += 1  # Count one verified quota attempt
-            print_progress_event(progress_state, f"{BackgroundColors.YELLOW}DeepL account {BackgroundColors.CYAN}{account_name}{BackgroundColors.YELLOW} quota exhausted. Trying next account.{Style.RESET_ALL}")  # Log quota-only rotation
-            if all(attempt_count >= 1 for attempt_count in attempt_counts.values()) and not second_cycle_logged and total_quota_attempts < maximum_quota_attempts:
-                print_progress_event(progress_state, f"{BackgroundColors.YELLOW}All DeepL accounts were attempted once for the current block. Starting the second circular attempt.{Style.RESET_ALL}")  # Log second cycle
-                second_cycle_logged = True  # Avoid duplicate second-cycle log
-            if total_quota_attempts >= maximum_quota_attempts:
-                break  # Stop after two quota attempts per account
-
-            previous_account_name = account_name  # Store account before circular advancement
-            active_account_index = (active_account_index + 1) % len(account_items)  # Advance circularly to next account
-            next_account_name = account_items[active_account_index][0]  # Read next account name for logging
-            if len(account_items) == 1:
-                print_progress_event(progress_state, f"{BackgroundColors.YELLOW}Retrying DeepL account {BackgroundColors.CYAN}{next_account_name}{BackgroundColors.YELLOW} for the second quota attempt.{Style.RESET_ALL}")  # Log single-account retry
-            elif previous_account_name != next_account_name:
-                print_progress_event(progress_state, f"{BackgroundColors.YELLOW}Switching DeepL account from {BackgroundColors.CYAN}{previous_account_name}{BackgroundColors.YELLOW} to {BackgroundColors.CYAN}{next_account_name}{Style.RESET_ALL}")  # Log circular account switch
-            continue  # Continue with next account
-        except deepl.DeepLException as e:  # Treat every non-quota DeepL failure as unsuccessful translation work.
-            raise RuntimeError(f"DeepL translation failed with {type(e).__name__}: {e}") from e  # Preserve rate-limit, server, and network failure semantics without false completion.
-        except Exception as e:  # Treat unexpected request or response failures as unsuccessful translation work.
-            raise RuntimeError(f"Translation failed with {type(e).__name__}: {e}") from e  # Preserve the original error without returning untranslated fallback content.
-
-        if result is None or not hasattr(result, "text") or not isinstance(result.text, str) or not result.text.strip():  # Require a non-empty translation returned by DeepL.
-            raise RuntimeError("DeepL returned no valid translated text for the pending subtitle block.")  # Prevent invalid API responses from being persisted or counted as translated.
+        if result is None or not hasattr(result, "text") or not isinstance(result.text, str) or not result.text.strip():  # Require genuine non-empty DeepL translation text.
+            raise RuntimeError("DeepL returned no valid translated text for the pending subtitle block.")  # Prevent invalid API responses from being persisted or counted.
 
         translated_lines = result.text.split("\n")  # Preserve DeepL newline behavior for the existing subtitle translation unit.
         return translated_lines, active_account_index  # Return only genuine DeepL-returned translation content.
 
-    attempted_accounts = ", ".join(account_name for account_name, _ in account_items)  # Build safe account-name summary
-    raise RuntimeError(f"All configured DeepL accounts were attempted at least twice and none has sufficient quota for pending block size {len(text_block)}. Accounts attempted: {attempted_accounts}")
 
-
-def translate_srt_lines(srt_file: Path, lines: List[str], output_file: Path, translatable_character_count: int, account_items: List[Tuple[str, str]], active_account_index: int, translators: Dict[str, deepl.DeepLClient], resume_state: Dict[str, Any], output_blocks: List[Tuple[str, str, List[str]]], progress_state: Dict[str, Any] | None = None) -> Tuple[List[str], int, Dict[str, Any]]:
+def translate_srt_lines(srt_file: Path, lines: List[str], output_file: Path, translatable_character_count: int, account_items: List[Tuple[str, str]], active_account_index: int, translators: Dict[str, deepl.DeepLClient], api_state: Dict[str, Any], resume_state: Dict[str, Any], output_blocks: List[Tuple[str, str, List[str]]], progress_state: Dict[str, Any] | None = None) -> Tuple[List[str], int, Dict[str, Any]]:
     """
     Translates remaining SRT blocks and atomically persists every successful translation unit.
 
@@ -1857,6 +1899,7 @@ def translate_srt_lines(srt_file: Path, lines: List[str], output_file: Path, tra
     :param account_items: Ordered list of DeepL account names and API keys.
     :param active_account_index: Process-wide active DeepL account index.
     :param translators: DeepL clients reused across files.
+    :param api_state: Process-wide DeepL account usage and quota state.
     :param resume_state: Active persistent translation resume metadata.
     :param output_blocks: Safely persisted translated output prefix.
     :param progress_state: Optional shared progress state.
@@ -1879,7 +1922,7 @@ def translate_srt_lines(srt_file: Path, lines: List[str], output_file: Path, tra
 
         if text_block:  # Submit only translatable subtitle text to DeepL.
             try:  # Translate the next unpersisted subtitle block.
-                translated_lines, active_account_index = translate_text_block(text_block, account_items, active_account_index, translators, progress_state)  # Request one existing translation unit from DeepL.
+                translated_lines, active_account_index = translate_text_block(text_block, account_items, active_account_index, translators, api_state, progress_state)  # Request one existing translation unit from DeepL.
             except RuntimeError as e:  # Preserve all previously persisted translation work when the current request fails.
                 remaining_characters = max(0, translatable_character_count - translated_character_count)  # Count only still-untranslated characters from this execution plan.
                 raise RuntimeError(f"Error: {e}. File: {filename}. Remaining: {remaining_characters:,} characters.") from None  # Report exact remaining workload without counting resumed characters.
@@ -2037,7 +2080,7 @@ def print_translation_plan_summary(planned_files: int, total_planned_characters:
     print(f"{BackgroundColors.GREEN}Translation plan: {BackgroundColors.CYAN}{planned_files}{BackgroundColors.GREEN} files | {BackgroundColors.CYAN}{total_planned_characters:,}{BackgroundColors.GREEN} new characters | {BackgroundColors.CYAN}{reused_characters:,}{BackgroundColors.GREEN} reused characters | {BackgroundColors.CYAN}{preflight_summary['resumable_partial_outputs']}{BackgroundColors.GREEN} resumable partial outputs | {BackgroundColors.CYAN}{preflight_summary['finalization_only_outputs']}{BackgroundColors.GREEN} recovered finalizations | {BackgroundColors.CYAN}{preflight_summary['existing_skipped']}{BackgroundColors.GREEN} existing translations skipped | {BackgroundColors.CYAN}{preflight_summary['target_language_skipped']}{BackgroundColors.GREEN} target-language files skipped | {BackgroundColors.CYAN}{preflight_summary['invalid_language_outputs']}{BackgroundColors.GREEN} invalid-language outputs | {BackgroundColors.CYAN}{preflight_summary['cleanup_fallbacks']}{BackgroundColors.GREEN} cleanup fallbacks | {BackgroundColors.CYAN}{preflight_summary['invalid']}{BackgroundColors.GREEN} invalid files{Style.RESET_ALL}")  # Print preflight summary with current-run and reusable work separated.
 
 
-def prepare_translation_runtime(translation_plan: List[Dict[str, Any]], total_planned_characters: int, use_configured_output: bool, output_dir: Path) -> Tuple[List[Tuple[str, str]], Dict[str, deepl.DeepLClient], Dict[str, Any]] | None:
+def prepare_translation_runtime(translation_plan: List[Dict[str, Any]], total_planned_characters: int, use_configured_output: bool, output_dir: Path) -> Tuple[List[Tuple[str, str]], Dict[str, deepl.DeepLClient], Dict[str, Any], Dict[str, Any]] | None:
     """
     Prepares API clients and shared progress state for planned translation work.
 
@@ -2045,7 +2088,7 @@ def prepare_translation_runtime(translation_plan: List[Dict[str, Any]], total_pl
     :param total_planned_characters: Number of characters requiring new DeepL requests.
     :param use_configured_output: Whether the configured output directory layout applies.
     :param output_dir: Resolved configured output directory.
-    :return: Runtime API and progress state, or None when required API credentials are unavailable.
+    :return: Runtime API, account, and progress state, or None when required API credentials are unavailable.
     """
 
     if use_configured_output and not output_dir.exists():  # Create configured output root only when planned work exists.
@@ -2060,8 +2103,9 @@ def prepare_translation_runtime(translation_plan: List[Dict[str, Any]], total_pl
             return None  # Leave persisted partial outputs untouched for the next run.
         account_items = list(DEEPL_API_KEYS.items())  # Preserve configured account order across files.
 
+    api_state = {"used_accounts": set(), "quota_exhausted_accounts": set()}  # Track account usage and quota retirement across the entire execution.
     progress_state = {"interactive": is_interactive_output(), "overall_total_characters": total_planned_characters, "overall_translated_characters": 0, "overall_start_time": time.monotonic(), "total_files": len(translation_plan), "completed_files": 0, "progress_visible": False, "last_snapshot_time": 0.0}  # Track only current-execution character progress while retaining planned file completion.
-    return account_items, translators, progress_state  # Return initialized runtime state for deterministic plan execution.
+    return account_items, translators, api_state, progress_state  # Return initialized API, account, and progress state for deterministic plan execution.
 
 
 def prepare_planned_translation_file(planned_file: Dict[str, Any], file_number: int, planned_files: int, progress_state: Dict[str, Any]) -> Tuple[Path, Path, Path, List[str], int]:
@@ -2179,7 +2223,7 @@ def persist_completed_translation_output(translated_lines: List[str], output_fil
     remove_translation_resume_artifacts(output_file, resume_state)  # Remove persistent state only after complete final validation and cleanup.
 
 
-def process_planned_translation_file(planned_file: Dict[str, Any], file_number: int, planned_files: int, account_items: List[Tuple[str, str]], active_account_index: int, translators: Dict[str, deepl.DeepLClient], progress_state: Dict[str, Any], preflight_summary: Dict[str, int]) -> Tuple[str, int]:
+def process_planned_translation_file(planned_file: Dict[str, Any], file_number: int, planned_files: int, account_items: List[Tuple[str, str]], active_account_index: int, translators: Dict[str, deepl.DeepLClient], api_state: Dict[str, Any], progress_state: Dict[str, Any], preflight_summary: Dict[str, int]) -> Tuple[str, int]:
     """
     Processes one planned translation or recovered finalization entry.
 
@@ -2189,6 +2233,7 @@ def process_planned_translation_file(planned_file: Dict[str, Any], file_number: 
     :param account_items: Ordered DeepL account names and API keys.
     :param active_account_index: Process-wide active DeepL account index.
     :param translators: DeepL clients reused across files.
+    :param api_state: Process-wide DeepL account usage and quota state.
     :param progress_state: Shared translation progress state.
     :param preflight_summary: Preflight counters updated during final cleanup.
     :return: Processing status and updated active DeepL account index.
@@ -2208,7 +2253,7 @@ def process_planned_translation_file(planned_file: Dict[str, Any], file_number: 
         return "finalized", active_account_index  # Proceed without changing the active DeepL account.
 
     render_translation_progress(progress_state, force=True)  # Render 0% of current-run remaining characters before translation starts.
-    translated_lines, active_account_index, resume_state = translate_srt_lines(current_srt_path, srt_lines, output_file, translatable_character_count, account_items, active_account_index, translators, resume_state, output_blocks, progress_state)  # Translate and atomically persist each remaining existing translation unit.
+    translated_lines, active_account_index, resume_state = translate_srt_lines(current_srt_path, srt_lines, output_file, translatable_character_count, account_items, active_account_index, translators, api_state, resume_state, output_blocks, progress_state)  # Translate and atomically persist each remaining existing translation unit.
 
     if not validate_completed_translation_output(srt_lines, translated_lines, output_file, progress_state):  # Preserve resumable state when complete output validation fails.
         return "failed_continue", active_account_index  # Continue later planned files without deleting persistent progress.
@@ -2235,14 +2280,14 @@ def execute_translation_plan(translation_plan: List[Dict[str, Any]], total_plann
     if runtime_state is None:  # Stop when new translation work requires unavailable API credentials.
         return None  # Preserve the existing early-return behavior from main.
 
-    account_items, translators, progress_state = runtime_state  # Unpack initialized runtime state.
+    account_items, translators, api_state, progress_state = runtime_state  # Unpack initialized API, account, and progress state.
     active_account_index = 0  # Initialize process-wide active account index.
     execution_summary = {"translated_files": 0, "finalized_files": 0, "failed_files": 0, "translated_characters": 0}  # Track current-execution results separately from reused progress.
     planned_files = len(translation_plan)  # Count planned translation and recovered finalization files.
 
     for file_number, planned_file in enumerate(translation_plan, start=1):  # Process every planned translation or recovered finalization deterministically.
         try:  # Preserve fatal stop behavior for resume, quota, API, network, persistence, and recovered finalization failures.
-            status, active_account_index = process_planned_translation_file(planned_file, file_number, planned_files, account_items, active_account_index, translators, progress_state, preflight_summary)  # Process one plan entry through resume, translation, validation, and finalization.
+            status, active_account_index = process_planned_translation_file(planned_file, file_number, planned_files, account_items, active_account_index, translators, api_state, progress_state, preflight_summary)  # Process one plan entry through resume, translation, validation, and finalization.
         except RuntimeError as e:  # Preserve partial progress after fatal planned-file failure.
             execution_summary["failed_files"] += 1  # Count failed planned file.
             execution_summary["translated_characters"] = progress_state["overall_translated_characters"]  # Preserve only current-run successfully persisted translated characters.
