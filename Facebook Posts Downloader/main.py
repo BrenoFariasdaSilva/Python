@@ -15,7 +15,10 @@ Description :
 
     Key features include:
         - Uses a dedicated persistent Playwright browser profile that preserves login.
+        - Tries the persistent profile headlessly first and opens a visible browser only when authentication is required.
+        - Automatically closes the interactive browser after authentication and relaunches the same profile headlessly.
         - Tracks Facebook page replacements/new tabs across CAPTCHA, 2FA, and checkpoints.
+        - Reopens interactive authentication if Facebook interrupts headless scraping with a later verification challenge.
         - Scrolls the Facebook profile until no additional posts are discovered.
         - Extracts post text, title, date, permalink, identifier, images, and videos.
         - Streams media using authentication copied in memory from the browser context.
@@ -34,12 +37,11 @@ Usage:
         $ make run
        or:
         $ python main.py
-    3. On the first execution, complete the entire Facebook authentication flow in
-       the opened automation browser, including CAPTCHA, 2FA, checkpoints, and prompts.
-       The script waits until the authenticated session is stable before continuing.
-       That login is retained in ./.browser_profile/.
-    4. The script navigates to PROFILE_URL only after authentication is confirmed and
-       stores downloaded posts in ./Outputs/.
+    3. The program first tries ./.browser_profile/ headlessly. If authentication is
+       missing or Facebook requires verification, a visible Chrome window opens so CAPTCHA,
+       2FA, checkpoints, and confirmation prompts can be completed manually.
+    4. After authentication is stable, the visible browser is closed and the same persistent
+       profile is relaunched headlessly before PROFILE_URL is scraped into ./Outputs/.
 
 Outputs:
     - ./Outputs/{YYYY-MM-DD}-{Title}/post.json
@@ -67,11 +69,15 @@ Assumptions & Notes:
     - Facebook does not expose a stable public DOM contract for profile timelines;
       selectors therefore use several fallbacks and may require future maintenance.
     - The script uses its own persistent .browser_profile/ directory for Playwright automation.
+    - HEADLESS_AFTER_AUTHENTICATION keeps normal scraping invisible after any required manual login.
+    - A visible browser is opened only when the persistent headless session cannot be positively authenticated.
     - Authentication is considered complete only after Facebook session cookies are present,
       normal authenticated Facebook UI is rendered, no login/challenge route is active, and
       that state remains stable for several seconds on the same current browser page.
     - CAPTCHA, 2FA, recovery, checkpoint, and other interactive authentication steps are
-      never bypassed; the browser remains open so the user can finish them manually.
+      never bypassed; a visible browser is opened only long enough for the user to finish them manually.
+    - If Facebook requests another verification during headless scraping, completed posts remain
+      on disk, the headless context closes, interactive authentication reopens, and scraping resumes.
     - Authentication query parameters are removed from logs so verification context is not exposed.
     - The automation profile never writes Facebook cookies to JSON or logs.
     - Facebook posts do not have a dedicated "title" field. The title used for the output
@@ -130,6 +136,16 @@ class BrowserSession:
     page: Page  # Page used to navigate the Facebook profile
 
 
+class FacebookAuthenticationRequiredError(RuntimeError):
+    """
+    Raised when Facebook requires manual authentication that cannot be completed headlessly.
+
+    :param message: Human-readable reason the current browser session cannot continue.
+    """
+
+    pass  # The exception type itself carries the authentication-required meaning
+
+
 # Execution Constants:
 VERBOSE = False  # Set to True to output verbose messages
 
@@ -138,6 +154,7 @@ PROFILE_URL = "https://www.facebook.com/BrenoFariasDaSilva"  # Facebook profile 
 PROFILE_DISPLAY_NAME = "Breno Farias"  # Display name used to remove author-only lines from title extraction
 FACEBOOK_BASE_URL = "https://www.facebook.com/"  # Base URL used to resolve relative Facebook links
 BROWSER_CHANNEL = "chrome"  # Prefer the locally installed stable Google Chrome browser
+HEADLESS_AFTER_AUTHENTICATION = True  # Keep scraping invisible after any required manual Facebook authentication
 AUTOMATION_PROFILE_DIR = PROJECT_DIR / ".browser_profile"  # Dedicated persistent profile used by Playwright
 OUTPUT_DIR = PROJECT_DIR / "Outputs"  # Root directory containing one subdirectory per downloaded post
 
@@ -147,6 +164,8 @@ LOGIN_WAIT_SECONDS = 0  # Maximum authentication wait in seconds; 0 waits indefi
 AUTHENTICATION_POLL_SECONDS = 1.0  # Delay between authentication-state checks
 AUTHENTICATION_STABLE_SECONDS = 8.0  # Continuous authenticated time required before accepting login as complete
 AUTHENTICATION_STATUS_LOG_INTERVAL_SECONDS = 15.0  # Minimum delay between repeated authentication waiting messages
+HEADLESS_AUTHENTICATION_CHECK_TIMEOUT_SECONDS = 15.0  # Maximum time to verify a persisted Facebook session without user interaction
+BROWSER_RELAUNCH_DELAY_SECONDS = 1.5  # Delay after closing a persistent context before reopening the same browser profile
 PROFILE_READY_TIMEOUT_SECONDS = 60  # Maximum time to wait for the authenticated profile page to render usable content
 SCROLL_PAUSE_SECONDS = 2.0  # Delay after each profile scroll to allow lazy-loaded posts to appear
 NO_NEW_POST_SCROLL_LIMIT = 12  # Consecutive scrolls without new posts before the scraper stops
@@ -1374,12 +1393,55 @@ def wait_for_facebook_login(page: Page, context: BrowserContext) -> Page:
     )  # Fail only when the user explicitly configures a finite timeout
 
 
-def wait_for_profile_ready(page: Page, context: BrowserContext) -> Page:
+def wait_for_existing_facebook_authentication(
+    page: Page,
+    context: BrowserContext,
+    timeout_seconds: float = HEADLESS_AUTHENTICATION_CHECK_TIMEOUT_SECONDS,
+) -> Page | None:
+    """
+    Check whether the persistent browser profile already contains a usable Facebook login.
+
+    This function never waits for manual interaction. It is intended for the initial headless
+    probe and for validating the same persistent profile after an interactive authentication
+    browser has been closed and relaunched headlessly.
+
+    :param page: Initial Facebook page to inspect.
+    :param context: Persistent browser context containing saved authentication state.
+    :param timeout_seconds: Maximum number of seconds to wait for existing authenticated UI to render.
+    :return: Current authenticated Facebook page, or None when manual authentication is required.
+    """
+
+    deadline = time.monotonic() + max(0.0, timeout_seconds)  # Bound the non-interactive authentication probe
+
+    while time.monotonic() <= deadline:  # Wait only for already-saved session state to finish rendering
+        try:  # Facebook can replace pages while restoring a persisted browser session
+            page = select_current_facebook_page(context, page)  # Follow the current Facebook page
+        except Exception:  # A transient page-selection failure means the saved session is not ready yet
+            time.sleep(AUTHENTICATION_POLL_SECONDS)  # Wait briefly before another probe
+            continue  # Retry until the non-interactive deadline
+
+        try:  # Positively verify cookies, URL path, challenge UI, and authenticated Facebook shell
+            if is_facebook_authenticated(page, context):  # Existing authentication is already usable
+                return page  # Return the concrete authenticated page without opening a visible browser
+        except Exception:  # Treat transient Facebook rerenders as an unresolved existing session
+            pass  # Continue polling until timeout
+
+        time.sleep(AUTHENTICATION_POLL_SECONDS)  # Allow persisted Facebook state to finish loading
+
+    return None  # Manual authentication is required
+
+
+def wait_for_profile_ready(
+    page: Page,
+    context: BrowserContext,
+    allow_interactive_authentication: bool = True,
+) -> Page:
     """
     Wait until the authenticated Facebook profile page has rendered usable main/timeline content.
 
     :param page: Browser page opened at PROFILE_URL.
     :param context: Persistent authenticated browser context.
+    :param allow_interactive_authentication: Whether the function may wait for manual authentication.
     :return: Current authenticated profile page that is ready for scraping.
     """
 
@@ -1390,6 +1452,11 @@ def wait_for_profile_ready(page: Page, context: BrowserContext) -> Page:
         page = select_current_facebook_page(context, page)  # Follow any page replacement after profile navigation
 
         if not is_facebook_authenticated(page, context):  # Authentication may be challenged again after navigating to the profile
+            if not allow_interactive_authentication:  # Headless mode cannot complete CAPTCHA/2FA/checkpoint interaction
+                raise FacebookAuthenticationRequiredError(
+                    "Facebook requires interactive authentication before the profile can be scraped."
+                )  # Hand control back to the lifecycle manager so it can open a visible browser
+
             print(
                 f"{BackgroundColors.YELLOW}Facebook requested additional authentication after profile navigation; "
                 f"waiting for completion.{Style.RESET_ALL}"
@@ -1450,33 +1517,37 @@ def find_existing_facebook_page(context: BrowserContext) -> Page | None:
     return facebook_pages[-1]  # Otherwise return the newest Facebook page for authentication
 
 
-def launch_browser_session(playwright: Playwright) -> BrowserSession:
+def launch_browser_session(playwright: Playwright, headless: bool) -> BrowserSession:
     """
-    Launch the dedicated persistent browser profile used for Facebook automation.
+    Launch the dedicated persistent browser profile in visible or headless mode.
 
     Chromium sandboxing is explicitly enabled so Chrome is not launched with Playwright's
-    default --no-sandbox configuration.
+    default --no-sandbox configuration. The same AUTOMATION_PROFILE_DIR is reused between
+    interactive authentication and headless scraping, but never by two contexts simultaneously.
 
     :param playwright: Active Playwright instance.
-    :return: BrowserSession containing the page and context used by the downloader.
+    :param headless: True to run invisibly, False to open an interactive browser window.
+    :return: BrowserSession containing the page, context, and browser visibility mode.
     """
 
     AUTOMATION_PROFILE_DIR.mkdir(parents=True, exist_ok=True)  # Ensure the persistent automation profile exists
+    mode_name = "headless" if headless else "interactive"  # Build the browser mode label used in logs
+    launch_args = [] if headless else ["--start-maximized"]  # Window-management arguments are useful only for visible Chrome
 
     print(
-        f"{BackgroundColors.GREEN}Launching persistent automation profile: "
+        f"{BackgroundColors.GREEN}Launching {mode_name} persistent automation profile: "
         f"{BackgroundColors.CYAN}{AUTOMATION_PROFILE_DIR.as_posix()}{Style.RESET_ALL}"
-    )  # Log the browser profile used by Playwright
+    )  # Log exactly how the persistent browser profile is being opened
 
     try:  # Prefer the locally installed stable Google Chrome browser
         context = playwright.chromium.launch_persistent_context(
             user_data_dir=str(AUTOMATION_PROFILE_DIR),
             channel=BROWSER_CHANNEL,
-            headless=False,
+            headless=headless,
             no_viewport=True,
             chromium_sandbox=True,
-            args=["--start-maximized"],
-        )  # Launch Chrome with the project's persistent profile and Chromium sandbox enabled
+            args=launch_args,
+        )  # Launch stable Chrome using the project's persistent profile
     except Exception as chrome_error:  # Fall back to Playwright Chromium when stable Chrome cannot be launched
         verbose_output(
             true_string=f"{BackgroundColors.YELLOW}Stable Chrome launch failed: {BackgroundColors.CYAN}{chrome_error}{Style.RESET_ALL}"
@@ -1484,22 +1555,31 @@ def launch_browser_session(playwright: Playwright) -> BrowserSession:
 
         context = playwright.chromium.launch_persistent_context(
             user_data_dir=str(AUTOMATION_PROFILE_DIR),
-            headless=False,
+            headless=headless,
             no_viewport=True,
             chromium_sandbox=True,
-            args=["--start-maximized"],
-        )  # Launch bundled Chromium using the same persistent profile and sandbox
+            args=launch_args,
+        )  # Launch bundled Chromium using the same persistent profile and visibility mode
 
     page = find_existing_facebook_page(context) or (context.pages[-1] if context.pages else context.new_page())  # Resolve the page to control
     return BrowserSession(context=context, page=page)  # Return the locally managed browser session
 
 
-def navigate_to_profile(page: Page, context: BrowserContext) -> Page:
+def navigate_to_profile(
+    page: Page,
+    context: BrowserContext,
+    allow_interactive_authentication: bool = True,
+) -> Page:
     """
-    Authenticate completely, navigate to the configured Facebook profile, and wait until it is usable.
+    Verify authentication, navigate to the configured Facebook profile, and wait until it is usable.
+
+    In visible mode the function can wait for CAPTCHA, 2FA, checkpoints, and confirmation prompts.
+    In headless mode it only accepts authentication already persisted in AUTOMATION_PROFILE_DIR and
+    raises FacebookAuthenticationRequiredError when manual interaction is required.
 
     :param page: Initial browser page used by the downloader.
     :param context: Persistent browser context containing Facebook authentication state.
+    :param allow_interactive_authentication: Whether manual browser authentication is available.
     :return: Current authenticated profile page that should be used by the scraper.
     """
 
@@ -1509,32 +1589,186 @@ def navigate_to_profile(page: Page, context: BrowserContext) -> Page:
     current_url = get_live_page_url(page)  # Resolve current live browser location
 
     if not is_facebook_url(current_url):  # Open Facebook first when the persistent browser starts on a blank/non-Facebook page
-        page.goto(FACEBOOK_BASE_URL, wait_until="domcontentloaded", timeout=PAGE_LOAD_TIMEOUT_MS)  # Enter Facebook without interrupting a later login flow
+        page.goto(FACEBOOK_BASE_URL, wait_until="domcontentloaded", timeout=PAGE_LOAD_TIMEOUT_MS)  # Enter Facebook before validating session state
 
-    page = wait_for_facebook_login(page, context)  # Follow the actual page through the complete authentication flow
+    if allow_interactive_authentication:  # Visible browser mode can wait for user-completed authentication challenges
+        page = wait_for_facebook_login(page, context)  # Follow the actual page through the complete authentication flow
+    else:  # Headless mode must never wait indefinitely for interaction that the user cannot see
+        existing_page = wait_for_existing_facebook_authentication(page, context)  # Probe the persisted login without user interaction
+        if existing_page is None:  # No usable authenticated state was restored headlessly
+            raise FacebookAuthenticationRequiredError(
+                "The persistent Facebook session requires manual authentication."
+            )  # Ask the lifecycle manager to reopen the profile visibly
+        page = existing_page  # Continue with the positively authenticated headless page
+
     page.set_default_timeout(10_000)  # Reapply action timeout in case Facebook created/replaced the page
     page.set_default_navigation_timeout(PAGE_LOAD_TIMEOUT_MS)  # Reapply navigation timeout to the selected page
 
     target_prefix = PROFILE_URL.casefold().rstrip("/")  # Normalize configured profile URL
     current_url = get_live_page_url(page).casefold().rstrip("/")  # Re-read the current live location after authentication
 
-    if not current_url.startswith(target_prefix):  # Navigate to the requested profile only after authentication is stable
+    if not current_url.startswith(target_prefix):  # Navigate to the requested profile only after authentication is valid
         page.goto(PROFILE_URL, wait_until="domcontentloaded", timeout=PAGE_LOAD_TIMEOUT_MS)  # Open the configured profile
 
     page = select_current_facebook_page(context, page)  # Recover the current page if Facebook replaced it during navigation
 
     if not is_facebook_authenticated(page, context):  # Facebook can request another challenge when the profile is opened
+        if not allow_interactive_authentication:  # Headless mode cannot resolve a newly requested verification step
+            raise FacebookAuthenticationRequiredError(
+                "Facebook requested additional verification after profile navigation."
+            )  # Reopen visible authentication instead of hanging headlessly
+
         page = wait_for_facebook_login(page, context)  # Wait through any additional account verification
         if not get_live_page_url(page).casefold().rstrip("/").startswith(target_prefix):  # Return to profile after challenge
             page.goto(PROFILE_URL, wait_until="domcontentloaded", timeout=PAGE_LOAD_TIMEOUT_MS)  # Re-open configured profile
 
-    page = wait_for_profile_ready(page, context)  # Require authenticated main/timeline content before scraping begins
+    page = wait_for_profile_ready(
+        page,
+        context,
+        allow_interactive_authentication=allow_interactive_authentication,
+    )  # Require authenticated main/timeline content before scraping begins
 
     print(
         f"{BackgroundColors.GREEN}Profile loaded and authenticated: {BackgroundColors.CYAN}{PROFILE_URL}{Style.RESET_ALL}"
     )  # Log successful authentication and profile readiness
 
     return page  # Return the exact Page object that is ready for timeline scraping
+
+
+def establish_authenticated_scraping_session(
+    playwright: Playwright,
+    force_interactive_authentication: bool = False,
+) -> BrowserSession:
+    """
+    Establish the browser session that will perform Facebook scraping.
+
+    When HEADLESS_AFTER_AUTHENTICATION is enabled, the persistent profile is checked headlessly
+    first. If that check fails, the headless context is closed before a visible context opens for
+    manual authentication. The visible context is then closed and the same profile is relaunched
+    headlessly. If Facebook immediately requests another verification after that relaunch, the
+    process repeats without losing already persisted authentication/profile state.
+
+    :param playwright: Active Playwright instance.
+    :param force_interactive_authentication: Skip the initial headless probe and open visible authentication immediately.
+    :return: Authenticated browser session ready to scrape PROFILE_URL.
+    """
+
+    if not HEADLESS_AFTER_AUTHENTICATION:  # Support an explicit fully-visible mode when desired
+        session = launch_browser_session(playwright, headless=False)  # Open the persistent profile visibly
+        session.page = navigate_to_profile(
+            session.page,
+            session.context,
+            allow_interactive_authentication=True,
+        )  # Complete any required authentication and open the target profile
+        return session  # Keep the visible browser for scraping because headless mode is disabled
+
+    if not force_interactive_authentication:  # Normal startup should first reuse a persisted login without showing a window
+        print(
+            f"{BackgroundColors.GREEN}Checking the persistent Facebook session in headless mode...{Style.RESET_ALL}"
+        )  # Explain the invisible authentication probe
+
+        headless_session = launch_browser_session(playwright, headless=True)  # Open the persistent profile invisibly
+
+        try:  # Attempt to reuse the existing login without disturbing the user
+            headless_session.page = navigate_to_profile(
+                headless_session.page,
+                headless_session.context,
+                allow_interactive_authentication=False,
+            )  # Require an already-authenticated profile without interactive waiting
+
+            print(
+                f"{BackgroundColors.GREEN}Existing authenticated headless session confirmed.{Style.RESET_ALL}"
+            )  # Log successful invisible startup
+            return headless_session  # Start scraping immediately with no visible browser window
+        except FacebookAuthenticationRequiredError:  # The saved session needs CAPTCHA/2FA/checkpoint interaction
+            print(
+                f"{BackgroundColors.YELLOW}The persistent session requires interactive Facebook authentication.{Style.RESET_ALL}"
+            )  # Explain why a browser window is about to appear
+            close_browser_session(headless_session)  # Release the profile lock before opening the visible browser
+            time.sleep(BROWSER_RELAUNCH_DELAY_SECONDS)  # Allow Chrome to flush/close persistent profile files
+        except Exception:  # Do not leave a failed headless context holding the persistent profile
+            close_browser_session(headless_session)  # Release browser resources before propagating the failure
+            raise  # Preserve the original unexpected error
+
+    while True:  # Repeat only if Facebook challenges the account again immediately after headless relaunch
+        print(
+            f"{BackgroundColors.GREEN}Opening interactive browser for Facebook authentication...{Style.RESET_ALL}"
+        )  # Tell the user a visible browser is intentionally required
+
+        interactive_session = launch_browser_session(playwright, headless=False)  # Open the same profile visibly
+
+        try:  # Keep the interactive browser open until the complete authentication flow is stable
+            interactive_session.page = navigate_to_profile(
+                interactive_session.page,
+                interactive_session.context,
+                allow_interactive_authentication=True,
+            )  # Let the user finish CAPTCHA, 2FA, checkpoints, or confirmation prompts
+        except Exception:  # Authentication/navigation failure must not leave the browser/profile locked
+            close_browser_session(interactive_session)  # Close the visible browser safely
+            raise  # Preserve the original error
+
+        print(
+            f"{BackgroundColors.GREEN}Closing interactive authentication browser...{Style.RESET_ALL}"
+        )  # Explain why the visible Chrome window is disappearing
+        close_browser_session(interactive_session)  # Flush authenticated state to AUTOMATION_PROFILE_DIR
+        time.sleep(BROWSER_RELAUNCH_DELAY_SECONDS)  # Ensure the persistent profile lock is fully released
+
+        print(
+            f"{BackgroundColors.GREEN}Relaunching authenticated browser in headless mode...{Style.RESET_ALL}"
+        )  # Explain the transition to invisible scraping
+        headless_session = launch_browser_session(playwright, headless=True)  # Reopen the exact same profile invisibly
+
+        try:  # Verify that authentication survived the headed-to-headless transition
+            headless_session.page = navigate_to_profile(
+                headless_session.page,
+                headless_session.context,
+                allow_interactive_authentication=False,
+            )  # Require the saved session to work without interaction
+
+            print(
+                f"{BackgroundColors.GREEN}Authenticated headless session confirmed. "
+                f"Starting Facebook posts download...{Style.RESET_ALL}"
+            )  # Confirm that the user can continue using the computer normally
+            return headless_session  # Hand the invisible authenticated browser to the scraper
+        except FacebookAuthenticationRequiredError:  # Facebook may challenge the account specifically after headless relaunch
+            print(
+                f"{BackgroundColors.YELLOW}Facebook requested another verification after the headless relaunch. "
+                f"Reopening interactive authentication.{Style.RESET_ALL}"
+            )  # Explain the automatic recovery path
+            close_browser_session(headless_session)  # Release the persistent profile before reopening it visibly
+            time.sleep(BROWSER_RELAUNCH_DELAY_SECONDS)  # Allow profile files to flush before the next attempt
+            continue  # Reopen a visible authentication browser
+        except Exception:  # Unexpected headless startup failure should not leave browser resources open
+            close_browser_session(headless_session)  # Release the persistent profile
+            raise  # Preserve the original failure
+
+
+def ensure_scraping_profile_ready(page: Page, context: BrowserContext) -> Page:
+    """
+    Ensure the current headless scraping page remains authenticated and points to PROFILE_URL.
+
+    :param page: Current scraping page.
+    :param context: Current authenticated browser context.
+    :return: Authenticated profile page.
+    """
+
+    page = select_current_facebook_page(context, page)  # Follow Facebook page replacement if one occurred
+
+    if not is_facebook_authenticated(page, context):  # Detect expired login, checkpoint, CAPTCHA, or 2FA interruption
+        raise FacebookAuthenticationRequiredError(
+            "Facebook authentication was interrupted during scraping."
+        )  # Let main close headless Chrome and reopen interactive authentication
+
+    target_prefix = PROFILE_URL.casefold().rstrip("/")  # Normalize configured profile URL
+    if not get_live_page_url(page).casefold().rstrip("/").startswith(target_prefix):  # Recover from unexpected navigation
+        page.goto(PROFILE_URL, wait_until="domcontentloaded", timeout=PAGE_LOAD_TIMEOUT_MS)  # Return to configured profile
+        page = wait_for_profile_ready(
+            page,
+            context,
+            allow_interactive_authentication=False,
+        )  # Require headless profile readiness without waiting for invisible user input
+
+    return page  # Return the usable scraping page
 
 
 def load_existing_post_keys() -> set[str]:
@@ -1570,6 +1804,23 @@ def load_existing_post_keys() -> set[str]:
             )  # Log the damaged file
 
     return known_keys  # Return the discovered keys
+
+
+def count_completed_post_outputs() -> int:
+    """
+    Count completed post output directories by their successfully written post.json metadata file.
+
+    :param: None
+    :return: Number of completed post outputs currently stored under OUTPUT_DIR.
+    """
+
+    if not OUTPUT_DIR.exists():  # No output root means no post has been completed yet
+        return 0  # Return an empty count
+
+    return sum(
+        1 for metadata_file in OUTPUT_DIR.glob(f"*/{POST_METADATA_FILENAME}") if metadata_file.is_file()
+    )  # Count one completed output per post metadata file
+
 
 
 def build_post_keys(post_id: str, post_url: str) -> set[str]:
@@ -2183,18 +2434,21 @@ def scroll_profile_and_download(page: Page, context: BrowserContext) -> dict:
     """
     Scroll the configured Facebook profile and download every newly discovered post.
 
+    Authentication is revalidated throughout the run. If Facebook interrupts headless scraping
+    with a CAPTCHA, 2FA, checkpoint, or expired session, FacebookAuthenticationRequiredError is
+    raised. Completed posts remain on disk and a later browser session resumes from post.json files.
+
     :param page: Facebook profile page.
     :param context: Authenticated browser context.
     :return: Execution statistics.
     """
 
-    if not is_facebook_authenticated(page, context):  # Refuse to scrape if Facebook authentication is no longer valid
-        raise RuntimeError("Facebook authentication is not valid at the start of timeline processing.")  # Prevent misleading zero-post runs
+    page = ensure_scraping_profile_ready(page, context)  # Refuse to start against an invalid or challenged Facebook session
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)  # Ensure the output root exists
     known_keys = load_existing_post_keys()  # Load cross-run deduplication state
 
-    saved_posts = 0  # Count posts saved during this execution
+    saved_posts = 0  # Count posts saved during this browser session
     encountered_posts = set()  # Track current-run post elements/keys
     no_new_scrolls = 0  # Track consecutive scrolls without new content
     previous_scroll_height = 0  # Track document height for end-of-feed detection
@@ -2205,6 +2459,7 @@ def scroll_profile_and_download(page: Page, context: BrowserContext) -> dict:
     )  # Log resume state
 
     for scroll_iteration in range(1, MAX_SCROLL_ITERATIONS + 1):  # Scroll until the timeline reaches a stable end
+        page = ensure_scraping_profile_ready(page, context)  # Detect authentication interruptions before touching timeline DOM
         articles = get_article_locator(page)  # Resolve currently mounted timeline posts
         current_count = articles.count()  # Count loaded/mounted posts
         new_this_iteration = 0  # Track new posts found before this scroll
@@ -2231,15 +2486,24 @@ def scroll_profile_and_download(page: Page, context: BrowserContext) -> dict:
                     encountered_posts.add(processed_key)  # Store final identity
 
                 if saved:  # Count newly persisted posts
-                    saved_posts += 1  # Increment total saved posts
+                    saved_posts += 1  # Increment total saved posts for this browser session
                     new_this_iteration += 1  # Increment iteration count
+            except FacebookAuthenticationRequiredError:  # Never swallow a request for manual Facebook verification
+                raise  # Let the browser lifecycle manager reopen visible authentication
             except Exception as error:  # One malformed post must not terminate the entire timeline export
+                try:  # Distinguish a normal post parsing error from a Facebook authentication interruption
+                    page = ensure_scraping_profile_ready(page, context)  # Revalidate authentication after the post failure
+                except FacebookAuthenticationRequiredError:
+                    raise  # Recover interactively instead of logging hundreds of misleading post failures
+
                 print(
                     f"{BackgroundColors.YELLOW}Post extraction failed at mounted index "
                     f"{BackgroundColors.CYAN}{index}{BackgroundColors.YELLOW}: "
                     f"{BackgroundColors.CYAN}{error}{Style.RESET_ALL}"
                 )  # Log the post-level error
                 continue  # Continue to the next post
+
+        page = ensure_scraping_profile_ready(page, context)  # Detect a challenge that appeared during the article-processing pass
 
         if new_this_iteration > 0:  # Reset stability counter when new posts were saved
             no_new_scrolls = 0  # New timeline content is still being discovered
@@ -2248,7 +2512,12 @@ def scroll_profile_and_download(page: Page, context: BrowserContext) -> dict:
 
         try:  # Read current page height before scrolling
             current_scroll_height = int(page.evaluate("document.documentElement.scrollHeight"))  # Capture loaded document height
-        except Exception:  # Use zero if Facebook is navigating unexpectedly
+        except Exception as error:  # Determine whether the page failed because Facebook interrupted authentication
+            page = ensure_scraping_profile_ready(page, context)  # Raise if the failure is authentication-related
+            verbose_output(
+                true_string=f"{BackgroundColors.YELLOW}Could not read current timeline height: "
+                f"{BackgroundColors.CYAN}{error}{Style.RESET_ALL}"
+            )  # Log non-authentication DOM failure only in verbose mode
             current_scroll_height = 0  # Reset height observation
 
         print(
@@ -2263,17 +2532,20 @@ def scroll_profile_and_download(page: Page, context: BrowserContext) -> dict:
             break  # Stop scrolling
 
         previous_scroll_height = max(previous_scroll_height, current_scroll_height)  # Preserve maximum observed document height
+        page = ensure_scraping_profile_ready(page, context)  # Revalidate authentication immediately before the next lazy-load scroll
 
         try:  # Scroll close to the bottom to trigger Facebook lazy loading
             page.evaluate("window.scrollTo(0, document.documentElement.scrollHeight)")  # Move to the current timeline bottom
             page.wait_for_timeout(int(SCROLL_PAUSE_SECONDS * 1000))  # Wait for the next post batch
         except PlaywrightTimeoutError:  # A timeout should not immediately abort a long export
+            page = ensure_scraping_profile_ready(page, context)  # Raise if Facebook replaced the timeline with an auth challenge
             time.sleep(SCROLL_PAUSE_SECONDS)  # Pause before another extraction attempt
         except Exception as error:  # Surface unexpected scroll failures
+            page = ensure_scraping_profile_ready(page, context)  # Raise instead when the underlying failure is authentication-related
             print(
                 f"{BackgroundColors.YELLOW}Timeline scroll failed: "
                 f"{BackgroundColors.CYAN}{error}{Style.RESET_ALL}"
-            )  # Log the failure
+            )  # Log a genuine non-authentication scroll failure
             time.sleep(SCROLL_PAUSE_SECONDS)  # Allow the page to recover
 
     return {
@@ -2315,21 +2587,50 @@ def main():
 
     start_time = datetime.datetime.now()  # Get the start time of the program
     session = None  # Initialize browser session for safe cleanup
+    initial_completed_posts = count_completed_post_outputs()  # Snapshot completed outputs before any new scraping work starts
+    final_statistics = None  # Store statistics from the browser session that reaches the end of the timeline
+    force_interactive_authentication = False  # Normal startup first tries the saved profile headlessly
 
     try:  # Execute the complete Facebook export workflow
         with sync_playwright() as playwright:  # Start Playwright runtime
-            session = launch_browser_session(playwright)  # Launch the persistent automation browser
-            session.page = navigate_to_profile(session.page, session.context)  # Complete authentication and retain the current Facebook page
-            statistics = scroll_profile_and_download(session.page, session.context)  # Download discovered posts
+            while True:  # Re-establish authentication automatically if Facebook challenges a long-running headless scrape
+                session = establish_authenticated_scraping_session(
+                    playwright,
+                    force_interactive_authentication=force_interactive_authentication,
+                )  # Obtain a profile page that is ready for visible or headless scraping
+
+                try:  # Run until the timeline completes or Facebook requires another interactive verification
+                    statistics = scroll_profile_and_download(session.page, session.context)  # Download discovered posts
+                    final_statistics = statistics  # Retain final known/encountered counts for summary output
+                    break  # The timeline completed without another authentication interruption
+                except FacebookAuthenticationRequiredError:
+                    print(
+                        f"{BackgroundColors.YELLOW}Facebook requested authentication during headless scraping. "
+                        f"{BackgroundColors.GREEN}Completed posts are already saved; reopening interactive authentication.{Style.RESET_ALL}"
+                    )  # Explain the automatic resume behavior
+
+                    close_browser_session(session)  # Release the persistent profile before reopening it visibly
+                    session = None  # Prevent duplicate cleanup
+                    time.sleep(BROWSER_RELAUNCH_DELAY_SECONDS)  # Allow the persistent profile lock to be released
+                    force_interactive_authentication = True  # Skip the next headless probe and go directly to visible verification
+                    continue  # Authenticate visibly, return headless, and resume from existing post.json files
+
+            if final_statistics is None:  # Defensive guard: the loop should only exit after receiving final statistics
+                raise RuntimeError("Facebook scraping ended without final execution statistics.")  # Surface impossible lifecycle state
+
+            saved_posts_this_run = max(
+                0,
+                count_completed_post_outputs() - initial_completed_posts,
+            )  # Count outputs created across every headless/interactive recovery cycle in this execution
 
             print(
                 f"\n{BackgroundColors.GREEN}Saved posts this run: "
-                f"{BackgroundColors.CYAN}{statistics['saved_posts']}\n"
+                f"{BackgroundColors.CYAN}{saved_posts_this_run}\n"
                 f"{BackgroundColors.GREEN}Known post keys after run: "
-                f"{BackgroundColors.CYAN}{statistics['known_post_keys']}{Style.RESET_ALL}"
-            )  # Output export statistics
+                f"{BackgroundColors.CYAN}{final_statistics['known_post_keys']}{Style.RESET_ALL}"
+            )  # Output aggregate export statistics across authentication/relaunch cycles
 
-            close_browser_session(session)  # Close the persistent automation browser
+            close_browser_session(session)  # Close the final persistent automation browser
             session = None  # Prevent duplicate cleanup after successful close
     finally:  # Ensure locally launched browser resources are closed after errors
         if session is not None:  # Verify a session still needs cleanup
