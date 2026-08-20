@@ -15,6 +15,9 @@ Icon? # match Icon<CR>
 # Ignore the Logs directory
 **/Logs/*
 
+# Ignore Browser Profiles / Authentication / Cache Data
+**/.browser_profile/
+
 # Ignore the Compressed Files
 **/.zip
 **/.rar
