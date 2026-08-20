@@ -14,11 +14,10 @@ Description :
     to a downloadable media URL from the loaded Facebook post.
 
     Key features include:
-        - Reuses an existing CDP-enabled Chrome session when one is available.
-        - Falls back to a dedicated persistent automation profile that preserves login.
+        - Uses a dedicated persistent Playwright browser profile that preserves login.
         - Scrolls the Facebook profile until no additional posts are discovered.
         - Extracts post text, title, date, permalink, identifier, images, and videos.
-        - Downloads media with the authenticated Playwright request context.
+        - Streams media using authentication copied in memory from the browser context.
         - Writes each post immediately so interrupted executions can be resumed safely.
         - Avoids duplicate post processing across executions.
         - Sanitizes output names for Windows, Linux, and macOS filesystems.
@@ -34,8 +33,8 @@ Usage:
         $ make run
        or:
         $ python main.py
-    3. On the first fallback-browser execution, log in to Facebook in the opened
-       automation browser. That login is retained in ./.browser_profile/.
+    3. On the first execution, log in to Facebook in the opened automation browser.
+       That login is retained in ./.browser_profile/.
     4. The script navigates to PROFILE_URL and stores downloaded posts in ./Outputs/.
 
 Outputs:
@@ -43,7 +42,7 @@ Outputs:
     - ./Outputs/{YYYY-MM-DD}-{Title}/photo_001.<ext>
     - ./Outputs/{YYYY-MM-DD}-{Title}/video_001.<ext>
     - ./Logs/main.log
-    - ./.browser_profile/ persistent browser data when CDP is unavailable
+    - ./.browser_profile/ persistent browser data used by Playwright
 
 TODOs:
     - Add an optional command-line interface for overriding constants.
@@ -63,12 +62,8 @@ Assumptions & Notes:
     - This script is intended for content the authenticated user is authorized to access.
     - Facebook does not expose a stable public DOM contract for profile timelines;
       selectors therefore use several fallbacks and may require future maintenance.
-    - The script does not select a normal Chrome profile by its display name. It first
-      attempts CDP_ENDPOINT and otherwise uses its own persistent .browser_profile/.
-    - Chrome 136+ does not permit command-line remote debugging against Chrome's default
-      user-data directory. A normal already-open Chrome profile therefore cannot be
-      attached through CDP_ENDPOINT unless remote debugging was made available separately.
-    - The fallback automation profile never writes Facebook cookies to JSON or logs.
+    - The script uses its own persistent .browser_profile/ directory for Playwright automation.
+    - The automation profile never writes Facebook cookies to JSON or logs.
     - Facebook posts do not have a dedicated "title" field. The title used for the output
       directory is derived from the first meaningful line of the post text.
     - If no post date can be resolved safely, the post is not written with an invented
@@ -94,7 +89,7 @@ from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlunparse  # 
 import dateparser  # For parsing Facebook date labels in multiple languages
 from colorama import Style  # For coloring the terminal
 from Logger import Logger  # For logging output to both terminal and file
-from playwright.sync_api import Browser, BrowserContext, Page, Playwright, Response, TimeoutError as PlaywrightTimeoutError, sync_playwright  # For browser automation
+from playwright.sync_api import BrowserContext, Page, Playwright, Response, TimeoutError as PlaywrightTimeoutError, sync_playwright  # For browser automation
 
 
 # Project Paths:
@@ -117,16 +112,12 @@ class BrowserSession:
     """
     Stores the browser resources used by the downloader.
 
-    :param browser: Browser object when connected through CDP, otherwise None.
-    :param context: Browser context used by the downloader.
+    :param context: Persistent browser context containing the authenticated session.
     :param page: Facebook page controlled by the downloader.
-    :param attached_over_cdp: True when attached to an externally managed browser.
     """
 
-    browser: Browser | None  # Browser object returned by a CDP attachment
-    context: BrowserContext  # Browser context containing the authenticated session
+    context: BrowserContext  # Persistent browser context containing the authenticated session
     page: Page  # Page used to navigate the Facebook profile
-    attached_over_cdp: bool  # Whether the browser lifecycle is managed externally
 
 
 # Execution Constants:
@@ -136,14 +127,12 @@ VERBOSE = False  # Set to True to output verbose messages
 PROFILE_URL = "https://www.facebook.com/BrenoFariasDaSilva"  # Facebook profile containing the posts to download
 PROFILE_DISPLAY_NAME = "Breno Farias"  # Display name used to remove author-only lines from title extraction
 FACEBOOK_BASE_URL = "https://www.facebook.com/"  # Base URL used to resolve relative Facebook links
-CDP_ENDPOINT = "http://127.0.0.1:9222"  # Optional Chrome DevTools Protocol endpoint
 BROWSER_CHANNEL = "chrome"  # Prefer the locally installed stable Google Chrome browser
-AUTOMATION_PROFILE_DIR = PROJECT_DIR / ".browser_profile"  # Dedicated browser profile used when CDP is unavailable
+AUTOMATION_PROFILE_DIR = PROJECT_DIR / ".browser_profile"  # Dedicated persistent profile used by Playwright
 OUTPUT_DIR = PROJECT_DIR / "Outputs"  # Root directory containing one subdirectory per downloaded post
 
 # Browser Timing Constants:
 PAGE_LOAD_TIMEOUT_MS = 60_000  # Maximum time allowed for normal page navigation
-CDP_CONNECT_TIMEOUT_MS = 5_000  # Maximum time allowed when probing the optional CDP endpoint
 LOGIN_WAIT_SECONDS = 600  # Maximum time allowed for first-run interactive Facebook login
 SCROLL_PAUSE_SECONDS = 2.0  # Delay after each profile scroll to allow lazy-loaded posts to appear
 NO_NEW_POST_SCROLL_LIMIT = 12  # Consecutive scrolls without new posts before the scraper stops
@@ -155,7 +144,6 @@ VIDEO_NETWORK_CAPTURE_MS = 2_000  # Time spent collecting video requests after a
 POST_METADATA_FILENAME = "post.json"  # Metadata file written inside every post directory
 MAX_TITLE_LENGTH = 96  # Maximum filesystem title length used after the date prefix
 MAX_CONTENT_TITLE_LENGTH = 160  # Maximum amount of post text considered while deriving a title
-MEDIA_DOWNLOAD_TIMEOUT_MS = 120_000  # Maximum time allowed for each direct media download
 MAX_MEDIA_FILE_SIZE_BYTES = 4 * 1024 * 1024 * 1024  # Four GiB safety ceiling per media file
 
 # Logger Setup:
@@ -1057,7 +1045,7 @@ def find_existing_facebook_page(context: BrowserContext) -> Page | None:
     """
     Find an existing Facebook page inside a connected browser context.
 
-    :param context: Browser context returned by a CDP connection.
+    :param context: Persistent browser context used by the downloader.
     :return: Existing Facebook page or None.
     """
 
@@ -1080,58 +1068,33 @@ def find_existing_facebook_page(context: BrowserContext) -> Page | None:
     return None  # No reusable Facebook page was found
 
 
-def connect_to_browser(playwright: Playwright) -> BrowserSession:
+def launch_browser_session(playwright: Playwright) -> BrowserSession:
     """
-    Connect to an existing CDP-enabled Chrome session or launch a persistent automation profile.
+    Launch the dedicated persistent browser profile used for Facebook automation.
 
     :param playwright: Active Playwright instance.
     :return: BrowserSession containing the page and context used by the downloader.
     """
 
-    try:  # First attempt to attach to an explicitly CDP-enabled existing Chromium browser
-        print(
-            f"{BackgroundColors.GREEN}Trying existing Chrome CDP session: "
-            f"{BackgroundColors.CYAN}{CDP_ENDPOINT}{Style.RESET_ALL}"
-        )  # Log the preferred connection mode
-
-        browser = playwright.chromium.connect_over_cdp(
-            CDP_ENDPOINT,
-            timeout=CDP_CONNECT_TIMEOUT_MS,
-            is_local=True,
-            no_defaults=True,
-        )  # Attach without changing normal daily-browser defaults
-
-        if not browser.contexts:  # Verify the remote browser exposes a context
-            raise RuntimeError("Connected browser does not expose a usable browser context.")  # Reject invalid CDP connection
-
-        context = browser.contexts[0]  # Reuse the existing default browser context
-        page = find_existing_facebook_page(context) or context.new_page()  # Reuse the Facebook tab when available
-        print(f"{BackgroundColors.GREEN}Connected to the existing CDP-enabled Chrome session.{Style.RESET_ALL}")  # Log success
-        return BrowserSession(browser=browser, context=context, page=page, attached_over_cdp=True)  # Return attached session
-    except Exception as error:  # CDP is optional and commonly unavailable in normal Chrome sessions
-        verbose_output(
-            true_string=f"{BackgroundColors.YELLOW}Existing CDP session unavailable: {BackgroundColors.CYAN}{error}{Style.RESET_ALL}"
-        )  # Log details only in verbose mode
-
-    AUTOMATION_PROFILE_DIR.mkdir(parents=True, exist_ok=True)  # Ensure the dedicated automation profile exists
+    AUTOMATION_PROFILE_DIR.mkdir(parents=True, exist_ok=True)  # Ensure the persistent automation profile exists
 
     print(
         f"{BackgroundColors.GREEN}Launching persistent automation profile: "
         f"{BackgroundColors.CYAN}{AUTOMATION_PROFILE_DIR.as_posix()}{Style.RESET_ALL}"
-    )  # Explain the fallback browser mode
+    )  # Log the browser profile used by Playwright
 
-    try:  # Prefer the user's installed stable Chrome
+    try:  # Prefer the locally installed stable Google Chrome browser
         context = playwright.chromium.launch_persistent_context(
             user_data_dir=str(AUTOMATION_PROFILE_DIR),
             channel=BROWSER_CHANNEL,
             headless=False,
             no_viewport=True,
             args=["--start-maximized"],
-        )  # Launch an isolated persistent Chrome profile
+        )  # Launch Chrome with the project's dedicated persistent profile
     except Exception as chrome_error:  # Fall back to Playwright Chromium when stable Chrome cannot be launched
         verbose_output(
             true_string=f"{BackgroundColors.YELLOW}Stable Chrome launch failed: {BackgroundColors.CYAN}{chrome_error}{Style.RESET_ALL}"
-        )  # Log the stable Chrome failure
+        )  # Log the stable Chrome failure only in verbose mode
 
         context = playwright.chromium.launch_persistent_context(
             user_data_dir=str(AUTOMATION_PROFILE_DIR),
@@ -1140,8 +1103,8 @@ def connect_to_browser(playwright: Playwright) -> BrowserSession:
             args=["--start-maximized"],
         )  # Launch bundled Chromium using the same persistent profile
 
-    page = find_existing_facebook_page(context) or (context.pages[0] if context.pages else context.new_page())  # Resolve a page to control
-    return BrowserSession(browser=None, context=context, page=page, attached_over_cdp=False)  # Return locally managed session
+    page = find_existing_facebook_page(context) or (context.pages[0] if context.pages else context.new_page())  # Resolve the page to control
+    return BrowserSession(context=context, page=page)  # Return the locally managed browser session
 
 
 def navigate_to_profile(page: Page) -> None:
@@ -1648,7 +1611,6 @@ def write_post_metadata(post_dir: Path, metadata: dict) -> None:
     os.replace(temporary_path, metadata_path)  # Atomically replace the final metadata file
 
 
-
 def resolve_post_date_from_permalink(context: BrowserContext, post_url: str) -> tuple[datetime.datetime | None, str]:
     """
     Resolve a post date from its dedicated permalink page when the timeline card does not expose enough date information.
@@ -1922,20 +1884,14 @@ def scroll_profile_and_download(page: Page, context: BrowserContext) -> dict:
 
 def close_browser_session(session: BrowserSession) -> None:
     """
-    Release browser resources without closing an externally managed CDP browser.
+    Close the persistent browser context owned by the downloader.
 
-    :param session: BrowserSession returned by connect_to_browser.
+    :param session: BrowserSession returned by launch_browser_session.
     :return: None
     """
 
-    if session.attached_over_cdp:  # Do not call Browser.close() on the user's externally managed Chrome
-        verbose_output(
-            true_string=f"{BackgroundColors.GREEN}Leaving externally managed CDP browser open.{Style.RESET_ALL}"
-        )  # Log safe disconnect behavior
-        return  # Playwright shutdown will release the transport connection
-
-    try:  # Close only the persistent context launched by this script
-        session.context.close()  # Flush and close the automation browser profile
+    try:  # Close the persistent context launched by this script
+        session.context.close()  # Flush profile state and close the automation browser
     except Exception as error:  # Browser may already have been closed manually
         verbose_output(
             true_string=f"{BackgroundColors.YELLOW}Browser context close warning: {BackgroundColors.CYAN}{error}{Style.RESET_ALL}"
@@ -1961,7 +1917,7 @@ def main():
 
     try:  # Execute the complete Facebook export workflow
         with sync_playwright() as playwright:  # Start Playwright runtime
-            session = connect_to_browser(playwright)  # Connect to or launch the browser
+            session = launch_browser_session(playwright)  # Launch the persistent automation browser
             navigate_to_profile(session.page)  # Navigate to the configured Facebook profile
             statistics = scroll_profile_and_download(session.page, session.context)  # Download discovered posts
 
@@ -1972,11 +1928,11 @@ def main():
                 f"{BackgroundColors.CYAN}{statistics['known_post_keys']}{Style.RESET_ALL}"
             )  # Output export statistics
 
-            close_browser_session(session)  # Close only browser resources owned by the script
+            close_browser_session(session)  # Close the persistent automation browser
             session = None  # Prevent duplicate cleanup after successful close
     finally:  # Ensure locally launched browser resources are closed after errors
         if session is not None:  # Verify a session still needs cleanup
-            close_browser_session(session)  # Close locally managed browser resources safely
+            close_browser_session(session)  # Close the persistent automation browser safely
 
     finish_time = datetime.datetime.now()  # Get the finish time of the program
 
