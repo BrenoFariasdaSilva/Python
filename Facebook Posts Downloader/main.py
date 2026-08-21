@@ -9,7 +9,7 @@ Description :
     authenticated Chromium-based browser session controlled through Playwright.
 
     Each discovered post is stored inside the ./Outputs/ directory using the
-    "{YYYY-MM-DD}-{Title}" directory naming convention. The post directory
+    "{Index}. {YYYY-MM-DD}-{Title}" directory naming convention, indexed oldest-to-newest. The post directory
     contains a post.json metadata file and every image/video that can be resolved
     to a downloadable media URL from the loaded Facebook post.
 
@@ -44,9 +44,9 @@ Usage:
        profile is relaunched headlessly before PROFILE_URL is scraped into ./Outputs/.
 
 Outputs:
-    - ./Outputs/{YYYY-MM-DD}-{Title}/post.json
-    - ./Outputs/{YYYY-MM-DD}-{Title}/photo_001.<ext>
-    - ./Outputs/{YYYY-MM-DD}-{Title}/video_001.<ext>
+    - ./Outputs/{Index}. {YYYY-MM-DD}-{Title}/post.json
+    - ./Outputs/{Index}. {YYYY-MM-DD}-{Title}/photo_001.<ext>
+    - ./Outputs/{Index}. {YYYY-MM-DD}-{Title}/video_001.<ext>
     - ./Logs/main.log
     - ./.browser_profile/ persistent browser data used by Playwright
 
@@ -179,6 +179,8 @@ VIDEO_RANGE_CHUNK_BYTES = 16 * 1024 * 1024  # Chunk size used when reconstructin
 
 # Output Constants:
 POST_METADATA_FILENAME = "post.json"  # Metadata file written inside every post directory
+POST_DIRECTORY_INDEX_MIN_WIDTH = 2  # Minimum zero-padded width used by oldest-to-newest post directory indexes
+POST_DIRECTORY_INDEX_PATTERN = re.compile(r"^\d+\.\s+")  # Existing post-directory index prefix removed before canonical reindexing
 SCRAPE_SCHEMA_VERSION = 3  # Metadata schema version; older broken/profile-feed outputs are intentionally reprocessed
 REPROCESS_LEGACY_METADATA = True  # Ignore pre-schema metadata so previously misidentified posts/media are scanned again
 MAX_TITLE_LENGTH = 96  # Maximum filesystem title length used after the date prefix
@@ -1861,6 +1863,217 @@ def ensure_scraping_profile_ready(page: Page, context: BrowserContext) -> Page:
     return page  # Return usable scraping page
 
 
+def strip_post_directory_index(directory_name: str) -> str:
+    """
+    Remove an existing numeric post-directory index prefix.
+
+    :param directory_name: Current post directory name.
+    :return: Directory name without a leading "NN. " index prefix.
+    """
+
+    return POST_DIRECTORY_INDEX_PATTERN.sub("", str(directory_name or ""), count=1).strip()  # Remove only the canonical leading index
+
+
+def resolve_post_output_sort_timestamp(metadata: dict) -> float:
+    """
+    Resolve a sortable timestamp from persisted post metadata.
+
+    :param metadata: Parsed post.json metadata.
+    :return: Unix timestamp used to order post directories oldest to newest, or positive infinity when unavailable.
+    """
+
+    raw_datetime = str(metadata.get("datetime") or "").strip()  # Prefer full timezone-aware post datetime
+    if raw_datetime:  # Attempt full datetime parsing first
+        try:  # Parse metadata written by datetime.isoformat()
+            parsed_datetime = datetime.datetime.fromisoformat(raw_datetime.replace("Z", "+00:00"))  # Normalize optional UTC suffix
+            if parsed_datetime.tzinfo is None:  # Ensure timestamp conversion is deterministic for naive legacy metadata
+                parsed_datetime = parsed_datetime.replace(tzinfo=datetime.datetime.now().astimezone().tzinfo)  # Attach current local timezone
+            return parsed_datetime.timestamp()  # Return sortable Unix timestamp
+        except (TypeError, ValueError, OverflowError, OSError):  # Fall back to date-only metadata
+            pass  # Continue to date parsing
+
+    raw_date = str(metadata.get("date") or "").strip()  # Read persisted YYYY-MM-DD date
+    if raw_date:  # Attempt date-only parsing
+        try:  # Parse ISO date and place it at local midnight
+            parsed_date = datetime.date.fromisoformat(raw_date)  # Parse persisted post date
+            parsed_datetime = datetime.datetime.combine(
+                parsed_date,
+                datetime.time.min,
+                tzinfo=datetime.datetime.now().astimezone().tzinfo,
+            )  # Build timezone-aware local midnight
+            return parsed_datetime.timestamp()  # Return sortable Unix timestamp
+        except (TypeError, ValueError, OverflowError, OSError):  # Invalid metadata is sorted after valid posts
+            pass  # Continue to fallback
+
+    return float("inf")  # Keep malformed/undated directories after every correctly dated post
+
+
+def build_post_output_base_name(post_dir: Path, metadata: dict) -> str:
+    """
+    Build the canonical unindexed "YYYY-MM-DD-Title" post directory name.
+
+    :param post_dir: Existing post output directory.
+    :param metadata: Parsed post.json metadata.
+    :return: Canonical directory base name without a numeric index.
+    """
+
+    raw_date = str(metadata.get("date") or "").strip()  # Read persisted post date
+    raw_title = str(metadata.get("title") or "").strip()  # Read persisted post title
+
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", raw_date) and raw_title:  # Prefer metadata-backed canonical naming
+        safe_title = sanitize_filename_component(raw_title, fallback="Post")  # Normalize title for filesystem use
+        return f"{raw_date}-{safe_title}"  # Rebuild canonical date-title base name
+
+    fallback_name = strip_post_directory_index(post_dir.name)  # Preserve existing unindexed name when metadata is incomplete
+    return fallback_name or sanitize_filename_component(str(metadata.get("post_id") or "Post"), fallback="Post")  # Return safe fallback
+
+
+def find_existing_post_output_directory(post_id: str) -> Path | None:
+    """
+    Find an existing indexed or unindexed output directory for a specific Facebook post.
+
+    :param post_id: Stable Facebook post identifier.
+    :return: Existing post directory when found, otherwise None.
+    """
+
+    normalized_post_id = str(post_id or "").strip()  # Normalize requested post identifier
+    if not normalized_post_id or not OUTPUT_DIR.exists():  # Avoid filesystem scanning when lookup cannot succeed
+        return None  # No reusable post directory is available
+
+    for metadata_path in OUTPUT_DIR.glob(f"*/{POST_METADATA_FILENAME}"):  # Inspect both indexed and unindexed post directories
+        try:  # Isolate malformed metadata files
+            with metadata_path.open("r", encoding="utf-8") as file:  # Open persisted post metadata
+                metadata = json.load(file)  # Parse JSON document
+            if str(metadata.get("post_id") or "").strip() == normalized_post_id:  # Match the stable Facebook post identifier
+                return metadata_path.parent  # Reuse the existing post directory regardless of its current index
+        except Exception:  # Damaged metadata must not prevent creating/recovering other posts
+            continue  # Continue scanning remaining outputs
+
+    return None  # No existing directory belongs to this post
+
+
+def reindex_post_output_directories() -> int:
+    """
+    Rename post output directories using oldest-to-newest zero-padded numeric indexes.
+
+    Index width is at least two digits and automatically expands for 100+ or 1000+ posts. Renaming
+    is performed in two phases through unique temporary names so index shifts cannot overwrite or
+    collide with another post directory. Each post.json output_directory value is updated afterward.
+
+    :param: None
+    :return: Number of post directories successfully indexed.
+    """
+
+    if not OUTPUT_DIR.exists():  # No output directory means there is nothing to index
+        return 0  # Return an empty result
+
+    records = []  # Collect valid post directories and metadata before any rename
+
+    for metadata_path in OUTPUT_DIR.glob(f"*/{POST_METADATA_FILENAME}"):  # Inspect every persisted post directory
+        try:  # Isolate malformed/incomplete metadata files
+            with metadata_path.open("r", encoding="utf-8") as file:  # Open metadata document
+                metadata = json.load(file)  # Parse post metadata
+            post_dir = metadata_path.parent  # Resolve directory that owns this metadata
+            records.append(
+                {
+                    "path": post_dir,
+                    "metadata": metadata,
+                    "sort_timestamp": resolve_post_output_sort_timestamp(metadata),
+                    "base_name": build_post_output_base_name(post_dir, metadata),
+                    "post_id": str(metadata.get("post_id") or "").strip(),
+                }
+            )  # Preserve all values required for deterministic ordering and naming
+        except Exception as error:  # Leave unreadable directories untouched and visible
+            print(
+                f"{BackgroundColors.YELLOW}Skipping post directory reindex because metadata could not be read: "
+                f"{BackgroundColors.CYAN}{metadata_path.as_posix()}"
+                f"{BackgroundColors.YELLOW} ({error}){Style.RESET_ALL}"
+            )  # Log reindex skip
+
+    if not records:  # Verify at least one valid post directory was found
+        return 0  # Nothing can be indexed
+
+    records.sort(
+        key=lambda item: (
+            float(item["sort_timestamp"]),
+            str(item["post_id"]),
+            str(item["base_name"]).casefold(),
+        )
+    )  # Sort oldest to newest with stable deterministic tie breakers
+
+    index_width = max(POST_DIRECTORY_INDEX_MIN_WIDTH, len(str(len(records))))  # Expand zero padding for large post counts
+    used_base_names = set()  # Track collision-safe unindexed names across all posts
+
+    for position, record in enumerate(records, start=1):  # Assign final oldest-to-newest indexes
+        base_name = str(record["base_name"])  # Read canonical unindexed date-title name
+        canonical_base_name = base_name  # Prefer the plain date-title name
+
+        if canonical_base_name.casefold() in used_base_names:  # Resolve same-date/same-title collisions deterministically
+            suffix_source = str(record["post_id"] or "Duplicate")  # Prefer stable post identifier as collision suffix
+            suffix = sanitize_filename_component(suffix_source, fallback="Duplicate", max_length=24)  # Sanitize discriminator
+            canonical_base_name = sanitize_filename_component(
+                f"{base_name} {suffix}",
+                fallback=f"Post {suffix}",
+                max_length=max(MAX_TITLE_LENGTH + 11, len(base_name) + len(suffix) + 1),
+            )  # Preserve date/title context while distinguishing the duplicate
+
+            duplicate_counter = 2  # Initialize fallback counter for extremely rare repeated identifiers
+            while canonical_base_name.casefold() in used_base_names:  # Guarantee unique final base name
+                canonical_base_name = sanitize_filename_component(
+                    f"{base_name} {suffix} {duplicate_counter}",
+                    fallback=f"Post {suffix} {duplicate_counter}",
+                    max_length=max(MAX_TITLE_LENGTH + 16, len(base_name) + len(suffix) + 8),
+                )  # Add deterministic numeric fallback
+                duplicate_counter += 1  # Advance collision counter
+
+        used_base_names.add(canonical_base_name.casefold())  # Reserve the selected base name
+        record["desired_name"] = f"{position:0{index_width}d}. {canonical_base_name}"  # Build final indexed directory name
+        record["index"] = position  # Preserve assigned position for metadata updates
+
+    temporarily_renamed = []  # Track directories moved to collision-proof temporary names
+
+    for position, record in enumerate(records, start=1):  # First phase moves changed directories away from final names
+        current_path = Path(record["path"])  # Read current post directory path
+        desired_name = str(record["desired_name"])  # Read final indexed directory name
+
+        if current_path.name == desired_name:  # Directory already has the correct index and canonical name
+            record["temporary_path"] = current_path  # Preserve path for metadata refresh
+            continue  # No filesystem rename is required
+
+        digest = hashlib.sha256(f"{current_path.name}|{record['post_id']}|{position}".encode("utf-8", errors="replace")).hexdigest()[:12]  # Build deterministic temp token
+        temporary_path = OUTPUT_DIR / f".__post_reindex_{position}_{digest}"  # Build temporary sibling directory name
+        collision_counter = 2  # Initialize safety counter if a prior interrupted run left the same temp path
+        while temporary_path.exists():  # Guarantee the temporary path does not overwrite existing data
+            temporary_path = OUTPUT_DIR / f".__post_reindex_{position}_{digest}_{collision_counter}"  # Add collision suffix
+            collision_counter += 1  # Advance temporary-name counter
+
+        current_path.rename(temporary_path)  # Move directory away from all final indexed names
+        record["temporary_path"] = temporary_path  # Preserve temporary path for phase two
+        temporarily_renamed.append(record)  # Track changed directory
+
+    for record in records:  # Second phase assigns final unique indexed names
+        temporary_path = Path(record.get("temporary_path") or record["path"])  # Resolve current directory location
+        desired_path = OUTPUT_DIR / str(record["desired_name"])  # Build final indexed destination
+
+        if temporary_path != desired_path:  # Rename only when the directory is not already final
+            if desired_path.exists():  # A non-participating collision would risk overwriting data
+                raise FileExistsError(f"Cannot index post directory because destination already exists: {desired_path.as_posix()}")  # Fail safely
+            temporary_path.rename(desired_path)  # Assign final oldest-to-newest index
+
+        metadata = dict(record["metadata"])  # Copy parsed metadata before updating persisted location
+        metadata["output_directory"] = desired_path.relative_to(PROJECT_DIR).as_posix()  # Keep JSON path synchronized with rename
+        write_post_metadata(desired_path, metadata)  # Atomically persist corrected metadata path
+
+    print(
+        f"{BackgroundColors.GREEN}Indexed post directories oldest-to-newest: "
+        f"{BackgroundColors.CYAN}{len(records)}"
+        f"{BackgroundColors.GREEN} directories, width "
+        f"{BackgroundColors.CYAN}{index_width}{Style.RESET_ALL}"
+    )  # Log completed reindex summary
+
+    return len(records)  # Return number of indexed post directories
+
+
 def load_existing_post_keys() -> set[str]:
     """
     Load identifiers only from complete metadata written by the current scrape schema.
@@ -2513,13 +2726,17 @@ def download_media(context: BrowserContext, page: Page, candidate: dict, output_
 
 def choose_post_output_directory(post_date: datetime.datetime, title: str, post_id: str) -> Path:
     """
-    Choose a unique output directory while preserving the "{YYYY-MM-DD}-{Title}" format.
+    Choose or reuse a unique post output directory before final oldest-to-newest indexing.
 
     :param post_date: Parsed Facebook post date.
     :param title: Sanitized post title.
     :param post_id: Stable post identifier used only to distinguish collisions.
     :return: Directory path reserved for the post.
     """
+
+    existing_post_dir = find_existing_post_output_directory(post_id)  # Reuse the post directory even after numeric indexing
+    if existing_post_dir is not None:  # Verify a previously persisted directory belongs to this post
+        return existing_post_dir  # Avoid duplicate outputs when indexed directories already exist
 
     date_prefix = post_date.strftime("%Y-%m-%d")  # Format the date exactly as requested
     base_title = sanitize_filename_component(title, fallback=f"Post {post_id}" if post_id else "Post")  # Normalize title
@@ -2775,6 +2992,7 @@ def scroll_profile_and_download(page: Page, context: BrowserContext) -> dict:
 
     page = ensure_scraping_profile_ready(page, context)  # Refuse to start against challenged session
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)  # Ensure output root exists
+    reindex_post_output_directories()  # Normalize any existing outputs before resume/deduplication
     known_keys = load_existing_post_keys()  # Load only complete current-schema posts
 
     try:  # Always start newest-first regardless of persisted browser history
@@ -2887,6 +3105,8 @@ def scroll_profile_and_download(page: Page, context: BrowserContext) -> dict:
                 f"{BackgroundColors.CYAN}{error}{Style.RESET_ALL}"
             )  # Log non-authentication scroll failure
             time.sleep(SCROLL_PAUSE_SECONDS)  # Allow page to recover
+
+    reindex_post_output_directories()  # Apply final oldest-to-newest indexes after newly downloaded posts are known
 
     return {
         'saved_posts': processed_posts,
