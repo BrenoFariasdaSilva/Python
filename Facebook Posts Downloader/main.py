@@ -8,7 +8,7 @@ Description :
     Downloads posts published on a configured Facebook profile by using an
     authenticated Chromium-based browser session controlled through Playwright.
 
-    Each discovered post is stored inside the ./Outputs/ directory using the
+    Each discovered post is stored inside ./Outputs/{ProfileUsername}/ using the
     "{Index}. {YYYY-MM-DD}-{Title}" directory naming convention, indexed oldest-to-newest. The post directory
     contains a post.json metadata file and every image/video that can be resolved
     to a downloadable media URL from the loaded Facebook post.
@@ -41,12 +41,12 @@ Usage:
        missing or Facebook requires verification, a visible Chrome window opens so CAPTCHA,
        2FA, checkpoints, and confirmation prompts can be completed manually.
     4. After authentication is stable, the visible browser is closed and the same persistent
-       profile is relaunched headlessly before PROFILE_URL is scraped into ./Outputs/.
+       profile is relaunched headlessly before PROFILE_URL is scraped into ./Outputs/{ProfileUsername}/.
 
 Outputs:
-    - ./Outputs/{Index}. {YYYY-MM-DD}-{Title}/post.json
-    - ./Outputs/{Index}. {YYYY-MM-DD}-{Title}/photo_001.<ext>
-    - ./Outputs/{Index}. {YYYY-MM-DD}-{Title}/video_001.<ext>
+    - ./Outputs/{ProfileUsername}/{Index}. {YYYY-MM-DD}-{Title}/post.json
+    - ./Outputs/{ProfileUsername}/{Index}. {YYYY-MM-DD}-{Title}/photo_001.<ext>
+    - ./Outputs/{ProfileUsername}/{Index}. {YYYY-MM-DD}-{Title}/video_001.<ext>
     - ./Logs/main.log
     - ./.browser_profile/ persistent browser data used by Playwright
 
@@ -159,8 +159,12 @@ FACEBOOK_BASE_URL = "https://www.facebook.com/"  # Base URL used to resolve rela
 BROWSER_CHANNEL = "chrome"  # Prefer the locally installed stable Google Chrome browser
 HEADLESS_AFTER_AUTHENTICATION = True  # Keep scraping invisible after any required manual Facebook authentication
 AUTOMATION_PROFILE_DIR = PROJECT_DIR / ".browser_profile"  # Dedicated persistent profile used by Playwright
-OUTPUT_DIR = PROJECT_DIR / "Outputs"  # Root directory containing one subdirectory per downloaded post
-LEGACY_OUTPUT_DIR = PROJECT_DIR / "Outputs Legacy"  # Safe quarantine for outputs produced by obsolete/broken scrape schemas
+PROFILE_USERNAME = (urlparse(PROFILE_URL).path.strip("/").split("/", 1)[0]).strip()  # Extract the profile username from PROFILE_URL after the Facebook base URL
+if not PROFILE_USERNAME:  # Refuse ambiguous output placement when PROFILE_URL has no profile path
+    raise ValueError(f"PROFILE_URL does not contain a Facebook profile username: {PROFILE_URL}")  # Fail before writing data into an incorrect output folder
+OUTPUT_ROOT_DIR = PROJECT_DIR / "Outputs"  # Shared output root containing one intermediate directory per configured Facebook profile
+OUTPUT_DIR = OUTPUT_ROOT_DIR / PROFILE_USERNAME  # Profile-specific output directory containing this profile's indexed post subdirectories
+LEGACY_OUTPUT_DIR = PROJECT_DIR / "Outputs Legacy" / PROFILE_USERNAME  # Profile-specific quarantine for outputs produced by obsolete/broken scrape schemas
 
 # Browser Timing Constants:
 PAGE_LOAD_TIMEOUT_MS = 60_000  # Maximum time allowed for normal page navigation
@@ -2168,6 +2172,78 @@ def build_post_output_base_name(post_dir: Path, metadata: dict) -> str:
     return fallback_name or sanitize_filename_component(str(metadata.get("post_id") or "Post"), fallback="Post")  # Return safe fallback
 
 
+def migrate_flat_post_outputs_to_profile_directory() -> int:
+    """
+    Move existing flat ./Outputs/{PostDirectory}/ results into ./Outputs/{ProfileUsername}/.
+
+    Only direct child directories of OUTPUT_ROOT_DIR that contain post.json are migrated. Existing
+    profile subdirectories and unrelated folders are left untouched. The move is collision-safe and
+    metadata output_directory values are updated immediately after each successful migration.
+
+    :param: None
+    :return: Number of existing post directories migrated into the profile-specific output directory.
+    """
+
+    if not OUTPUT_ROOT_DIR.exists():  # Nothing can require migration before the shared output root exists
+        return 0  # Return an empty migration count
+
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)  # Ensure the profile-specific intermediate directory exists
+    migrated_count = 0  # Count successfully migrated flat post directories
+
+    for candidate in list(OUTPUT_ROOT_DIR.iterdir()):  # Snapshot direct children before moving any of them
+        if candidate == OUTPUT_DIR:  # Never inspect or move the destination profile directory itself
+            continue  # Continue to the next direct child
+        if not candidate.is_dir():  # Only directories can represent persisted post outputs
+            continue  # Ignore files under the shared output root
+
+        metadata_path = candidate / POST_METADATA_FILENAME  # A direct child is a flat post output only when post.json exists
+        if not metadata_path.is_file():  # Preserve other profile folders, backups, and unrelated directories
+            continue  # Skip non-post directories
+
+        destination = OUTPUT_DIR / candidate.name  # Preserve the existing indexed/unindexed post directory name
+        if destination.exists():  # Never merge or overwrite two persisted post directories implicitly
+            raise FileExistsError(
+                f"Cannot migrate flat post output because destination already exists: {destination.as_posix()}"
+            )  # Fail safely so no media or metadata can be lost
+
+        candidate.rename(destination)  # Move the complete post directory, including media files, into the profile subdirectory
+
+        original_metadata: dict | None = None  # Preserve the pre-migration metadata so rollback can restore it exactly
+        try:  # Keep persisted output_directory synchronized with the new filesystem location
+            migrated_metadata_path = destination / POST_METADATA_FILENAME  # Resolve metadata at its new location
+            with migrated_metadata_path.open("r", encoding="utf-8") as file:  # Read the existing metadata document
+                loaded_metadata = json.load(file)  # Parse metadata before updating its path fields
+            if not isinstance(loaded_metadata, dict):  # post.json must contain an object before it can be migrated safely
+                raise TypeError(f"Post metadata must be a JSON object: {migrated_metadata_path.as_posix()}")  # Reject unsupported metadata shapes
+            original_metadata = dict(loaded_metadata)  # Snapshot exact original fields for rollback
+            metadata = dict(loaded_metadata)  # Build an independent mutable copy for the profile-scoped path update
+            metadata["profile_url"] = PROFILE_URL  # Preserve the profile associated with this output tree
+            metadata["profile_username"] = PROFILE_USERNAME  # Persist the intermediate output directory identifier explicitly
+            metadata["output_directory"] = destination.relative_to(PROJECT_DIR).as_posix()  # Store the new profile-scoped relative path
+            write_post_metadata(destination, metadata)  # Atomically rewrite metadata at the migrated location
+        except Exception as error:  # A metadata refresh failure must not silently leave inconsistent persisted state
+            try:  # Attempt to restore the original directory location and metadata before surfacing the error
+                destination.rename(candidate)  # Roll back the filesystem migration
+                if original_metadata is not None:  # Restore original metadata if it had already been parsed successfully
+                    write_post_metadata(candidate, original_metadata)  # Restore the original output_directory and all other fields
+            except Exception as rollback_error:  # Surface both failures if rollback cannot restore the original output
+                raise RuntimeError(
+                    f"Failed to update migrated metadata for {destination.as_posix()} and rollback also failed: {rollback_error}"
+                ) from error
+            raise RuntimeError(f"Failed to update migrated metadata for {candidate.as_posix()}: {error}") from error
+
+        migrated_count += 1  # Count the successfully migrated post directory
+
+    if migrated_count > 0:  # Log only when an existing flat layout was actually converted
+        print(
+            f"{BackgroundColors.GREEN}Migrated flat post outputs into profile directory: "
+            f"{BackgroundColors.CYAN}{migrated_count}{BackgroundColors.GREEN} -> "
+            f"{BackgroundColors.CYAN}{OUTPUT_DIR.relative_to(PROJECT_DIR).as_posix()}{Style.RESET_ALL}"
+        )  # Report the completed layout migration
+
+    return migrated_count  # Return the number of post directories moved
+
+
 def find_existing_post_output_directory(post_id: str) -> Path | None:
     """
     Find an existing indexed or unindexed output directory for a specific Facebook post.
@@ -2301,6 +2377,8 @@ def reindex_post_output_directories() -> int:
             temporary_path.rename(desired_path)  # Assign final oldest-to-newest index
 
         metadata = dict(record["metadata"])  # Copy parsed metadata before updating persisted location
+        metadata["profile_url"] = PROFILE_URL  # Keep metadata explicitly associated with the configured profile
+        metadata["profile_username"] = PROFILE_USERNAME  # Persist the profile-specific intermediate directory identifier
         metadata["output_directory"] = desired_path.relative_to(PROJECT_DIR).as_posix()  # Keep JSON path synchronized with rename
         write_post_metadata(desired_path, metadata)  # Atomically persist corrected metadata path
 
@@ -2366,7 +2444,7 @@ def count_completed_post_outputs() -> int:
     Count completed post outputs written by the current scrape schema.
 
     :param: None
-    :return: Number of current-schema complete post outputs under OUTPUT_DIR.
+    :return: Number of current-schema complete post outputs under the profile-specific OUTPUT_DIR.
     """
 
     if not OUTPUT_DIR.exists():  # No output root means no current-schema post is complete
@@ -2632,14 +2710,15 @@ def resolve_photo_candidate_from_permalink(context: BrowserContext, photo_url: s
     :return: Downloadable photo candidate or None when the viewer cannot resolve an image.
     """
 
-    details_page: Page | None = None  # Initialize temporary page for guaranteed cleanup
+    details_page: Page | None = None  # Initialize optional cleanup reference for the temporary viewer page
     try:  # Open photo viewer without disturbing the scrolling timeline
-        details_page = context.new_page()  # Create authenticated temporary page
-        details_page.set_default_navigation_timeout(PAGE_LOAD_TIMEOUT_MS)  # Configure navigation timeout
-        details_page.goto(photo_url, wait_until='domcontentloaded', timeout=PAGE_LOAD_TIMEOUT_MS)  # Open photo permalink
-        details_page.wait_for_timeout(MEDIA_PERMALINK_SETTLE_MS)  # Allow media viewer to resolve currentSrc
+        active_page: Page = context.new_page()  # Create a definitely initialized authenticated temporary page
+        details_page = active_page  # Preserve the page separately for guaranteed cleanup in finally
+        active_page.set_default_navigation_timeout(PAGE_LOAD_TIMEOUT_MS)  # Configure navigation timeout
+        active_page.goto(photo_url, wait_until='domcontentloaded', timeout=PAGE_LOAD_TIMEOUT_MS)  # Open photo permalink
+        active_page.wait_for_timeout(MEDIA_PERMALINK_SETTLE_MS)  # Allow media viewer to resolve currentSrc
 
-        raw_images = details_page.evaluate(
+        raw_images = active_page.evaluate(
             """() => Array.from(document.querySelectorAll('img[src], img[srcset]')).map(image => ({
                 src: image.currentSrc || image.src || '',
                 width: image.naturalWidth || image.width || 0,
@@ -2753,21 +2832,22 @@ def resolve_video_candidates_from_permalink(context: BrowserContext, video_url: 
             return  # Ignore response
 
     try:  # Open the video/reel page and observe playback resources
-        details_page = context.new_page()  # Create authenticated temporary page
-        details_page.set_default_navigation_timeout(PAGE_LOAD_TIMEOUT_MS)  # Configure navigation timeout
-        details_page.on('response', handle_response)  # Capture media responses before navigation
-        details_page.goto(video_url, wait_until='domcontentloaded', timeout=PAGE_LOAD_TIMEOUT_MS)  # Open video/reel permalink
-        details_page.wait_for_timeout(MEDIA_PERMALINK_SETTLE_MS)  # Allow initial serialized/player data to render
+        active_page: Page = context.new_page()  # Create a definitely initialized authenticated temporary page
+        details_page = active_page  # Preserve the page separately for guaranteed cleanup in finally
+        active_page.set_default_navigation_timeout(PAGE_LOAD_TIMEOUT_MS)  # Configure navigation timeout
+        active_page.on('response', handle_response)  # Capture media responses before navigation
+        active_page.goto(video_url, wait_until='domcontentloaded', timeout=PAGE_LOAD_TIMEOUT_MS)  # Open video/reel permalink
+        active_page.wait_for_timeout(MEDIA_PERMALINK_SETTLE_MS)  # Allow initial serialized/player data to render
 
         try:  # Extract progressive/native MP4 URLs embedded in Facebook serialized page data
-            page_html = details_page.content()  # Read rendered markup
+            page_html = active_page.content()  # Read rendered markup
             for direct_url in extract_progressive_video_urls_from_html(page_html):  # Decode known progressive/native fields
                 add_candidate(direct_url, 'video_permalink_html', 'video/mp4')  # Prefer direct progressive MP4 candidates
         except Exception:  # HTML extraction is optional when network capture succeeds
             pass  # Continue to player activation
 
         try:  # Trigger muted playback to force lazy video resource resolution
-            videos = details_page.locator('video')  # Locate player elements
+            videos = active_page.locator('video')  # Locate player elements
             for index in range(min(videos.count(), 10)):  # Bound multiple videos
                 try:  # Ignore autoplay/player restrictions independently
                     videos.nth(index).evaluate(
@@ -2780,7 +2860,7 @@ def resolve_video_candidates_from_permalink(context: BrowserContext, video_url: 
                     )  # Trigger media network requests
                 except Exception:  # One blocked player should not prevent other candidates
                     continue  # Continue to next video
-            details_page.wait_for_timeout(VIDEO_NETWORK_CAPTURE_MS)  # Observe playback video responses
+            active_page.wait_for_timeout(VIDEO_NETWORK_CAPTURE_MS)  # Observe playback video responses
         except Exception:  # Player activation is best-effort
             pass  # Keep HTML/network candidates already captured
     except Exception as error:  # Video permalink failure is isolated per media item
@@ -3613,6 +3693,7 @@ def process_article(page: Page, context: BrowserContext, article, known_keys: se
         'post_id': post_id,
         'post_url': post_url,
         'profile_url': PROFILE_URL,
+        'profile_username': PROFILE_USERNAME,
         'date': post_date.date().isoformat(),
         'datetime': post_date.isoformat(),
         'date_raw': date_raw or None,
@@ -3663,7 +3744,7 @@ def scroll_profile_and_download(page: Page, context: BrowserContext) -> dict:
     """
 
     page = ensure_scraping_profile_ready(page, context)  # Refuse to start against challenged session
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)  # Ensure output root exists
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)  # Ensure the profile-specific output directory exists
     reindex_post_output_directories()  # Normalize existing indexed outputs before resume
     known_keys = load_existing_post_keys()  # Load only complete current-schema posts
 
@@ -3839,6 +3920,8 @@ def main():
 
     start_time = datetime.datetime.now()  # Get the start time of the program
     session = None  # Initialize browser session for safe cleanup
+    migrate_flat_post_outputs_to_profile_directory()  # Convert pre-profile flat outputs before resume/counting logic runs
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)  # Ensure ./Outputs/{ProfileUsername}/ exists even on a clean first run
     initial_completed_posts = count_completed_post_outputs()  # Snapshot completed outputs before any new scraping work starts
     final_statistics = None  # Store statistics from the browser session that reaches the end of the timeline
     force_interactive_authentication = False  # Normal startup first tries the saved profile headlessly
