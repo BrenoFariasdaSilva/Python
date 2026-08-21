@@ -126,6 +126,8 @@ OVERWRITE = False  # Preserve existing generated outputs when disabled.
 FALLBACK_ORIGINAL_AUDIO_ORDER: FallbackAudioOrder = None  # Preserve automatic PT-BR source-audio detection by default.
 MIN_FREE_SPACE_RESERVE_GB = 10  # Preserve at least this many GiB after the estimated output allocation.
 OUTPUT_SIZE_SAFETY_FACTOR = 1.10  # Reserve ten percent above matched target sizes for the injected PT-BR audio and container overhead.
+AUDIO_VALIDATION_SECONDS = 5  # Decode this many seconds from each required generated audio stream.
+AUDIO_VALIDATION_TIMEOUT_SECONDS = 60  # Bound generated audio validation so one bad stream cannot stall processing indefinitely.
 
 
 SUPPORTED_MEDIA_EXTENSIONS = frozenset(  # Define input video container extensions accepted for source and target media files.
@@ -469,6 +471,35 @@ def select_configured_audio_stream(media_path: Path, streams: list[Stream], conf
     raise RuntimeError(f"{setting_name}={configured_index} was not found in: {media_path}")  # Reject absent explicit indexes without falling back to automatic language selection.
 
 
+def validate_selected_audio_stream(media_path: Path, streams: list[Stream], selected_stream: Stream, input_label: str, language_name: str) -> int:
+    """
+    Validate a selected source audio stream and return its global FFprobe index.
+
+    :param media_path: Media path used in validation errors.
+    :param streams: FFprobe stream dictionaries from the selected input media file.
+    :param selected_stream: Selected audio stream dictionary.
+    :param input_label: Human-readable FFmpeg input label used in errors.
+    :param language_name: Human-readable audio language label used in errors.
+    :return: Validated global FFprobe stream index.
+    """
+
+    selected_index = stream_index(selected_stream, media_path)  # Resolve the selected stream as a global FFprobe index.
+    matching_streams = [stream for stream in streams if stream_index(stream, media_path) == selected_index]  # Locate the selected stream in the probed input stream list.
+
+    if not matching_streams:  # Reject selections that do not belong to the probed source input.
+        raise RuntimeError(f"Selected {language_name} audio stream index {selected_index} was not found in {input_label} input: {media_path}")  # Stop before FFmpeg can map a stale stream index.
+
+    selected_input_stream = matching_streams[0]  # Reuse the probed input stream that matches the selected global index.
+
+    if selected_input_stream.get("codec_type") != "audio":  # Reject non-audio selected streams before building FFmpeg maps.
+        raise RuntimeError(f"Selected {language_name} stream index {selected_index} is not audio in {input_label} input: {media_path}")  # Stop before a video, subtitle, data, or attachment stream can be mapped as audio.
+
+    if not isinstance(selected_input_stream.get("codec_name"), str) or not selected_input_stream.get("codec_name"):  # Require FFprobe to identify the selected audio codec.
+        raise RuntimeError(f"Selected {language_name} audio stream index {selected_index} has no codec name in {input_label} input: {media_path}")  # Stop before copying an unknown audio codec into the output.
+
+    return selected_index  # Return the validated global stream index used directly by FFmpeg -map.
+
+
 def probe_media(path: Path) -> MediaInfo:
     """
     Read FFprobe stream metadata for a media file.
@@ -566,6 +597,60 @@ def run_command(command: list[str]) -> None:
         diagnostic_suffix = f"\n\nFFmpeg output:\n{diagnostic_output}" if diagnostic_output else ""  # Include captured details only when present.
         raise RuntimeError(  # Preserve the failed command and FFmpeg diagnostics for the aggregated error report.
             f"FFmpeg failed with exit code {result.returncode}.\n"
+            f"Command: {format_command(command)}"
+            f"{diagnostic_suffix}"
+        )
+
+
+def validate_generated_audio_decode(output_mkv: Path, audio_stream_number: int, language_name: str) -> None:
+    """
+    Validate that one generated audio stream can be decoded by FFmpeg.
+
+    :param output_mkv: Generated MKV path containing the audio stream.
+    :param audio_stream_number: Zero-based output audio stream number.
+    :param language_name: Human-readable audio language label used in errors.
+    :return: None.
+    """
+
+    command = [  # Build a bounded FFmpeg decode probe for one output audio stream.
+        FFMPEG,  # Select the configured FFmpeg executable.
+        "-v",  # Configure FFmpeg logging verbosity.
+        "error",  # Emit only actual decode errors.
+        "-xerror",  # Convert decoder errors into process failure.
+        "-t",  # Limit validation work to the beginning of the stream.
+        str(AUDIO_VALIDATION_SECONDS),  # Decode only the configured bounded sample.
+        "-i",  # Declare the generated output input.
+        str(output_mkv),  # Supply the generated MKV path.
+        "-map",  # Select exactly one output audio stream.
+        f"0:a:{audio_stream_number}",  # Use audio-relative output numbering after muxing.
+        "-vn",  # Disable video decoding during audio validation.
+        "-sn",  # Disable subtitle decoding during audio validation.
+        "-dn",  # Disable data-stream decoding during audio validation.
+        "-f",  # Select a sink muxer.
+        "null",  # Discard decoded audio frames after validation.
+        "-",  # Write null output to stdout.
+    ]
+
+    try:  # Convert timeout and FFmpeg failure into one clear media-validation error.
+        result = subprocess.run(  # Execute the bounded decode validation without mutating any media file.
+            command,  # Supply the prepared FFmpeg command.
+            check=False,  # Inspect the exit status so diagnostics can be included in the raised error.
+            capture_output=True,  # Capture FFmpeg diagnostics without routine terminal noise.
+            text=True,  # Decode captured FFmpeg output as text.
+            encoding="utf-8",  # Decode FFmpeg output consistently.
+            errors="replace",  # Preserve malformed diagnostics deterministically.
+            timeout=AUDIO_VALIDATION_TIMEOUT_SECONDS,  # Bound validation time for unreadable or badly indexed streams.
+        )
+    except subprocess.TimeoutExpired as exception:  # Treat a stalled decode as a generated-output failure.
+        raise RuntimeError(  # Surface the exact stream that could not be read promptly.
+            f"Generated {language_name} audio stream did not decode within {AUDIO_VALIDATION_TIMEOUT_SECONDS} seconds: {output_mkv}"
+        ) from exception
+
+    if result.returncode != 0:  # Reject generated output when FFmpeg cannot decode the required audio sample.
+        diagnostic_output = (result.stderr or result.stdout or "").strip()  # Prefer FFmpeg stderr and fall back to stdout.
+        diagnostic_suffix = f"\n\nFFmpeg output:\n{diagnostic_output}" if diagnostic_output else ""  # Include captured details only when present.
+        raise RuntimeError(  # Surface the failed stream and decode command for diagnosis.
+            f"Generated {language_name} audio stream failed decode validation.\n"
             f"Command: {format_command(command)}"
             f"{diagnostic_suffix}"
         )
@@ -1084,6 +1169,8 @@ def build_ffmpeg_command(target_media: Path, original_media: Path, output_mkv: P
     configured_original_audio_index = configured_audio_stream_index(ORIGINAL_PTBR_AUDIO_STREAM_INDEX, "ORIGINAL_PTBR_AUDIO_STREAM_INDEX")  # Validate the optional explicit original-audio override before any automatic language selection can run.
     english_audio_track = select_configured_audio_stream(target_media, target_streams, configured_target_audio_index, "TARGET_ENGLISH_AUDIO_STREAM_INDEX") if configured_target_audio_index is not None else select_target_english_audio_track(target_media, target_streams)  # Use the explicit target audio stream when configured, otherwise preserve the existing automatic English selection.
     ptbr_audio_track = select_configured_audio_stream(original_media, original_streams, configured_original_audio_index, "ORIGINAL_PTBR_AUDIO_STREAM_INDEX") if configured_original_audio_index is not None else select_original_ptbr_audio_track(original_media, original_streams)  # Use the explicit original audio stream when configured, otherwise preserve the existing automatic PT-BR selection and fallback order.
+    english_audio_index = validate_selected_audio_stream(target_media, target_streams, english_audio_track, "target", "English")  # Validate the selected target audio stream before mapping input zero.
+    ptbr_audio_index = validate_selected_audio_stream(original_media, original_streams, ptbr_audio_track, "original", "PT-BR")  # Validate the selected original audio stream before mapping input one.
     subtitle_tracks = select_subtitle_tracks(target_streams)  # Preserve every non-forced internal subtitle stream from the higher-quality target release.
     command = [  # Initialize the FFmpeg mux command.
         FFMPEG,  # Select the configured FFmpeg executable.
@@ -1100,9 +1187,9 @@ def build_ffmpeg_command(target_media: Path, original_media: Path, output_mkv: P
         "-map",  # Add another stream mapping directive.
         "0:t?",  # Preserve every attachment stream from the higher-quality target media file when present.
         "-map",  # Add the selected higher-quality target English audio stream.
-        f"0:{stream_index(english_audio_track, target_media)}",  # Map the validated English audio stream from input zero.
+        f"0:{english_audio_index}",  # Map the validated English audio stream from input zero.
         "-map",  # Add the selected original PT-BR audio stream.
-        f"1:{stream_index(ptbr_audio_track, original_media)}",  # Map the validated PT-BR audio stream from input one.
+        f"1:{ptbr_audio_index}",  # Map the validated PT-BR audio stream from input one.
     ]
 
     for subtitle_track in subtitle_tracks:  # Map non-forced higher-quality target subtitle streams in source order.
@@ -1167,7 +1254,7 @@ def remove_partial_output(output_mkv: Path) -> None:
 
 def validate_generated_output(output_mkv: Path) -> None:
     """
-    Validate that FFmpeg created a non-empty output MKV file.
+    Validate that FFmpeg created a readable output MKV file.
 
     :param output_mkv: Generated MKV path to validate.
     :return: None.
@@ -1178,6 +1265,41 @@ def validate_generated_output(output_mkv: Path) -> None:
 
     if output_mkv.stat().st_size <= 0:  # Reject an empty generated media file.
         raise RuntimeError(f"FFmpeg created an empty output file: {output_mkv}")  # Report unusable zero-byte output.
+
+    output_info = probe_media(output_mkv)  # Re-open the generated MKV with FFprobe before accepting it.
+    output_streams = extract_streams(output_info, output_mkv)  # Validate and extract generated stream dictionaries.
+    video_streams = [stream for stream in output_streams if stream.get("codec_type") == "video" and stream_disposition(stream).get("attached_pic") != 1]  # Retain actual generated video streams while excluding attached artwork.
+    audio_streams = [stream for stream in output_streams if stream.get("codec_type") == "audio"]  # Retain every generated audio stream in output order.
+
+    if not video_streams:  # Reject generated output that lost the target video.
+        raise RuntimeError(f"Generated output has no video stream: {output_mkv}")  # Report missing required video before source cleanup can run.
+
+    if len(audio_streams) < 2:  # Require both generated language tracks, not merely one detected audio stream.
+        raise RuntimeError(f"Generated output has fewer than two audio streams: {output_mkv}")  # Report missing English or PT-BR audio before accepting the output.
+
+    english_audio = audio_streams[0]  # Select the first output audio stream that must contain target English audio.
+    ptbr_audio = audio_streams[1]  # Select the second output audio stream that must contain original PT-BR audio.
+
+    if english_audio.get("codec_type") != "audio":  # Guard against accidental non-audio stream classification drift.
+        raise RuntimeError(f"Generated English stream is not audio: {output_mkv}")  # Reject an impossible but unsafe generated stream layout.
+
+    if ptbr_audio.get("codec_type") != "audio":  # Guard against accidental non-audio stream classification drift.
+        raise RuntimeError(f"Generated PT-BR stream is not audio: {output_mkv}")  # Reject an impossible but unsafe generated stream layout.
+
+    if classify_language(english_audio) != "english":  # Require preserved English audio to remain first in output audio order.
+        raise RuntimeError(f"Generated first audio stream is not identifiable as English: {output_mkv}")  # Reject wrong or missing English metadata.
+
+    if classify_language(ptbr_audio) != "ptbr":  # Require injected PT-BR audio to remain second in output audio order.
+        raise RuntimeError(f"Generated second audio stream is not identifiable as PT-BR: {output_mkv}")  # Reject wrong or missing PT-BR metadata.
+
+    if stream_disposition(english_audio).get("default") != 1:  # Require English to remain the default output audio stream.
+        raise RuntimeError(f"Generated English audio stream is not default: {output_mkv}")  # Reject incorrect English disposition.
+
+    if stream_disposition(ptbr_audio).get("default") == 1:  # Require PT-BR to remain non-default.
+        raise RuntimeError(f"Generated PT-BR audio stream is unexpectedly default: {output_mkv}")  # Reject incorrect PT-BR disposition.
+
+    validate_generated_audio_decode(output_mkv, 0, "English")  # Decode a bounded English sample so a structurally present but unreadable stream fails.
+    validate_generated_audio_decode(output_mkv, 1, "PT-BR")  # Decode a bounded PT-BR sample so a structurally present but unreadable stream fails.
 
 
 def validate_generated_output_for_source_erasure(output_mkv: Path) -> None:
@@ -1242,7 +1364,7 @@ def erase_processed_source_files(target_media: Path, original_media: Path, outpu
     seen_paths: set[Path] = set()  # Track resolved source paths to avoid deleting the same physical path twice.
 
     for source_label, source_path in deletion_candidates:  # Validate every configured source path before deleting any of them.
-        source_resolved = source_path.resolve()  # Resolve the source path for output-protection and duplicate checks.
+        source_resolved = source_path.resolve()  # Resolve the source path for output protection and duplicate detection.
 
         if source_resolved == output_resolved:  # Reject any configuration that could erase the newly generated replacement itself.
             raise RuntimeError(f"Refusing to erase {source_label} media because it resolves to the generated output: {source_path}")  # Preserve the output and all sources on an unsafe path collision.
@@ -1256,7 +1378,7 @@ def erase_processed_source_files(target_media: Path, original_media: Path, outpu
         seen_paths.add(source_resolved)  # Reserve the validated physical source path against duplicate deletion.
         unique_candidates.append((source_label, source_path))  # Retain the validated source candidate for the actual deletion phase.
 
-    for source_label, source_path in unique_candidates:  # Delete validated source files only after every configured candidate passes pre-deletion checks.
+    for source_label, source_path in unique_candidates:  # Delete validated source files only after every configured candidate passes pre-deletion validation.
         source_path.unlink()  # Delete only the matched processed media file while preserving sidecars and parent directories.
 
         if source_path.exists():  # Verify the filesystem no longer exposes the deleted source path.
@@ -1324,10 +1446,10 @@ def estimated_generated_output_size(target_media: Path) -> int:
 
 def validate_media_pair_output_storage(target_media: Path, output_mkv: Path) -> None:
     """
-    Recheck output-drive capacity immediately before generating one media file.
+    Validate output-drive capacity immediately before generating one media file.
 
     :param target_media: Higher-quality target media file used to estimate the next generated output size.
-    :param output_mkv: Generated output path whose filesystem free space must be checked.
+    :param output_mkv: Generated output path whose filesystem free space must be validated.
     :return: None.
     """
 
@@ -1365,11 +1487,12 @@ def process_media_pair(target_media: Path, original_media: Path, output_director
     output_mkv = build_output_media_path(target_media, destination_directory)  # Build the generated Matroska path using the shared output-path convention.
 
     if output_mkv.exists() and not OVERWRITE:  # Preserve an existing generated output when overwrite is disabled.
+        validate_generated_output(output_mkv)  # Reject an existing generated output that is present but unreadable.
         tqdm.write(f"Skipping existing output: {output_mkv}")  # Report the skipped output without corrupting an active tqdm row.
 
         return  # Stop processing the current media pair.
 
-    validate_media_pair_output_storage(target_media, output_mkv)  # Recheck real free space immediately before this output so prior cleanup failures cannot invalidate the global estimate.
+    validate_media_pair_output_storage(target_media, output_mkv)  # Validate real free space immediately before this output so prior cleanup failures cannot invalidate the global estimate.
 
     if DRY_RUN:  # Preserve detailed pair diagnostics only when explicitly previewing the workflow.
         print("\n" + "=" * 100)  # Separate the current dry-run media pair from previous terminal output.
@@ -1588,7 +1711,7 @@ def matched_target_media_files() -> list[Path]:
     :return: Ordered list of target media files expected to generate or match outputs.
     """
 
-    return [target_media for target_media, _, _ in matched_media_pairs()]  # Preserve the compatibility helper while deriving its result from complete matched pairs.
+    return [target_media for target_media, _, _ in matched_media_pairs()]  # Preserve compatibility while deriving its result from complete matched pairs.
 
 
 
@@ -1649,7 +1772,7 @@ def validate_output_storage() -> None:
 
             if original_resolved != output_mkv.resolve() and original_resolved not in reclaimed_source_paths:  # Exclude unsafe output collisions and duplicate physical source paths.
                 current_original_bytes = original_media.stat().st_size  # Read the lower-quality source size that will be reclaimed after successful processing.
-                running_additional_bytes -= current_original_bytes  # Model original-source deletion after the generated replacement has passed all safety checks.
+                running_additional_bytes -= current_original_bytes  # Model original-source deletion after the generated replacement has passed all safety validation.
                 reclaimable_original_bytes += current_original_bytes  # Track original bytes genuinely returned to the output filesystem.
                 reclaimed_source_paths.add(original_resolved)  # Prevent double-crediting the same physical source file.
 
@@ -1664,8 +1787,8 @@ def validate_output_storage() -> None:
     print(f"{Fore.GREEN}  Estimated output total  : {Fore.CYAN}{estimated_output_bytes / gib:.2f} GiB{Fore.RESET}")  # Display total output bytes without incorrectly requiring all of them as additional free space.
     print(f"{Fore.GREEN}  ERASE_TARGET_FILES      : {Fore.CYAN}{ERASE_TARGET_FILES}{Fore.RESET}")  # Display whether successful target files are configured for deletion.
     print(f"{Fore.GREEN}  ERASE_ORIGINAL_FILES    : {Fore.CYAN}{ERASE_ORIGINAL_FILES}{Fore.RESET}")  # Display whether successful original files are configured for deletion.
-    print(f"{Fore.GREEN}  Target reclaim on output: {Fore.CYAN}{reclaimable_target_bytes / gib:.2f} GiB{Fore.RESET}")  # Display target deletion capacity that genuinely helps the output filesystem.
-    print(f"{Fore.GREEN}  Original reclaim output : {Fore.CYAN}{reclaimable_original_bytes / gib:.2f} GiB{Fore.RESET}")  # Display original deletion capacity that genuinely helps the output filesystem.
+    print(f"{Fore.GREEN}  Target reclaim on output: {Fore.CYAN}{reclaimable_target_bytes / gib:.2f} GiB{Fore.RESET}")  # Display target deletion capacity that benefits the output filesystem.
+    print(f"{Fore.GREEN}  Original reclaim output : {Fore.CYAN}{reclaimable_original_bytes / gib:.2f} GiB{Fore.RESET}")  # Display original deletion capacity that benefits the output filesystem.
     print(f"{Fore.GREEN}  Replaceable outputs     : {Fore.CYAN}{replaceable_output_bytes / gib:.2f} GiB{Fore.RESET}")  # Display existing output capacity reusable when OVERWRITE is enabled.
     print(f"{Fore.GREEN}  Peak additional storage : {Fore.CYAN}{max(0, peak_additional_bytes) / gib:.2f} GiB{Fore.RESET}")  # Display the maximum simulated extra allocation before per-pair cleanup.
     print(f"{Fore.GREEN}  Current output free     : {Fore.CYAN}{disk_usage.free / gib:.2f} GiB{Fore.RESET}")  # Display currently available destination-filesystem capacity.
