@@ -331,7 +331,7 @@ def file_matches_any(filename, patterns):
     """
 
     verbose_output(
-        f"{BackgroundColors.GREEN}Checking if file '{BackgroundColors.CYAN}{filename}{BackgroundColors.GREEN}' matches any of the patterns: {BackgroundColors.CYAN}{patterns}{Style.RESET_ALL}"
+        f"{BackgroundColors.GREEN}Verifying if file '{BackgroundColors.CYAN}{filename}{BackgroundColors.GREEN}' matches any of the patterns: {BackgroundColors.CYAN}{patterns}{Style.RESET_ALL}"
     )  # Output the verbose message
 
     if not patterns:  # If no patterns provided, match all
@@ -340,7 +340,7 @@ def file_matches_any(filename, patterns):
     filename_lc = filename.lower()  # Lowercase filename for case-insensitive matching
     base = os.path.basename(filename_lc)  # Get the basename
 
-    for pattern in patterns:  # Check each pattern
+    for pattern in patterns:  # Verify each pattern
         pattern = pattern.lower().strip()  # Lowercase and strip pattern
         if not pattern:  # Skip empty patterns
             continue  # Continue to next pattern
@@ -367,10 +367,10 @@ def should_track(filename):
 
     filename_lc = filename.lower()  # Lowercase filename for case-insensitive matching
 
-    if FILES_TO_IGNORE and file_matches_any(filename_lc, FILES_TO_IGNORE):  # Check ignore patterns
+    if FILES_TO_IGNORE and file_matches_any(filename_lc, FILES_TO_IGNORE):  # Verify ignore patterns
         return False  # Return False
 
-    if FILES_TO_TRACK:  # Check track patterns
+    if FILES_TO_TRACK:  # Verify track patterns
         return file_matches_any(filename_lc, FILES_TO_TRACK)  # Return True/False based on track patterns
 
     return True  # If no track patterns, track all files

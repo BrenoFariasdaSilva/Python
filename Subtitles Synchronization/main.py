@@ -2,7 +2,7 @@ import atexit  # For playing a sound when the program finishes
 import glob  # For getting files in a directory
 import os  # For running a command in the terminal
 import platform  # For getting the operating system name
-import shutil  # For checking if a command exists
+import shutil  # For verifying if a command exists
 import subprocess  # For running terminal commands
 import sys  # For running terminal commands
 from colorama import Style  # For coloring the terminal
@@ -153,12 +153,12 @@ def verify_ffsubsync_installed():
 
     verbose_output(f"{BackgroundColors.GREEN}Verifying ffsubsync installation...{Style.RESET_ALL}")
 
-    ffsubsync_path = shutil.which("ffsubsync")  # Check if ffsubsync is in PATH
+    ffsubsync_path = shutil.which("ffsubsync")  # Verify if ffsubsync is in PATH
     if ffsubsync_path is None:  # If ffsubsync is not found
         install_ffmpeg()  # Ensure ffmpeg is installed
         install_ffsubsync()  # Install ffsubsync
 
-        ffsubsync_path = shutil.which("ffsubsync")  # Check again if ffsubsync is in PATH
+        ffsubsync_path = shutil.which("ffsubsync")  # Verify again if ffsubsync is in PATH
         if ffsubsync_path is None:  # If still not found
             possible_path = os.path.expanduser(
                 r"~\AppData\Roaming\Python\Python312\Scripts\ffsubsync.exe"
@@ -349,7 +349,7 @@ def get_directories():
     matching_dirs = []  # Store directories that contain .srt files
 
     for root, dirs, files in os.walk(input_dir_abs):  # Walk through all subdirectories
-        if any(file.lower().endswith(".srt") for file in files):  # Check if current dir has at least one .srt file
+        if any(file.lower().endswith(".srt") for file in files):  # Verify if current dir has at least one .srt file
             matching_dirs.append(os.path.normpath(os.path.abspath(root)))  # Add the directory if it qualifies
 
     return matching_dirs  # Return the list of directories that contain .srt files
@@ -416,7 +416,7 @@ def find_ffsubsync():
     Returns the absolute path if found, otherwise None.
     """
 
-    path = shutil.which("ffsubsync")  # Check if ffsubsync is in PATH
+    path = shutil.which("ffsubsync")  # Verify if ffsubsync is in PATH
     if path:  # If found in PATH
         return path  # Return the path
 

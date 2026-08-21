@@ -219,14 +219,14 @@ def is_english(text):
     """
 
     verbose_output(
-        f"{BackgroundColors.GREEN}Checking if the string is in English: {BackgroundColors.CYAN}{text}{Style.RESET_ALL}"
+        f"{BackgroundColors.GREEN}Verifying if the string is in English: {BackgroundColors.CYAN}{text}{Style.RESET_ALL}"
     )  # Output the verbose message
 
     try:  # Try to detect the language of the text
         translated = GoogleTranslator(source="auto", target="en").translate(text)  # Translate the text to English
         return (
             text.lower() == translated.lower()
-        )  # Check if the original text is equal to the translated text (case insensitive)
+        )  # Verify if the original text is equal to the translated text (case insensitive)
     except Exception as e:  # If an error occurs during language detection
         print(
             f"{BackgroundColors.RED}⚠️ Failed to detect language for: {text}: {e}{Style.RESET_ALL}"

@@ -272,7 +272,7 @@ def organize_mp3_files(input_dir=INPUT_DIRECTORY):
     )  # Output the verbose message
 
     for file in os.listdir(input_dir):  # Iterate over all files in the ./Input directory
-        if file.endswith(".mp3"):  # Check if the file is an .mp3 file
+        if file.endswith(".mp3"):  # Verify if the file is an .mp3 file
             parts = file.rsplit(".mp3", 1)[0].split(" - ", 1)  # Split on the first " - "
             if len(parts) < 2:
                 continue  # Skip if not in expected format

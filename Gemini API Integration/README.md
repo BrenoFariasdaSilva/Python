@@ -182,7 +182,7 @@ make gemini_script
 
 #### Workflow
 
-1. **Check for Whitespaces in Project Path:**
+1. **Verify for Whitespaces in Project Path:**
    - The script initially verifies if there are any whitespaces in the project path. If detected, it halts the process.
 
 2. **Verify `.env` File:**
@@ -227,7 +227,7 @@ Once you have configured the constants, run the following command to execute the
 
 #### Workflow
 
-1. **Check for Whitespaces in Project Path:**
+1. **Verify for Whitespaces in Project Path:**
    - The script initially verifies if there are any whitespaces in the project path. If detected, it halts the process.
 
 2. **Verify `.env` File:**

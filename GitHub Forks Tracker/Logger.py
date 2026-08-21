@@ -80,7 +80,7 @@ class Logger:
 
         mode = "w" if clean else "a"  # Choose file mode based on 'clean' flag
         self.logfile = open(logfile_path, mode, encoding="utf-8")  # Open log file
-        self.is_tty = getattr(sys.__stdout__, "isatty", lambda: False)()  # Check if terminal supports colors
+        self.is_tty = getattr(sys.__stdout__, "isatty", lambda: False)()  # Verify if terminal supports colors
 
 
     def write(self, message):

@@ -293,7 +293,7 @@ def detect_missing_fields(bibtex_file):
     :return: None
     """
 
-    if not verify_filepath_exists(bibtex_file):  # Check if the provided file exists
+    if not verify_filepath_exists(bibtex_file):  # Verify if the provided file exists
         print(
             f"{BackgroundColors.RED}Error: File not found at path {BackgroundColors.CYAN}{bibtex_file}{Style.RESET_ALL}"
         )
@@ -307,7 +307,7 @@ def detect_missing_fields(bibtex_file):
 
     for entry in entries:  # Iterate through each BibTeX entry
         missing_fields = []  # List of missing fields for this entry
-        for field in FIELDS:  # Check each required field
+        for field in FIELDS:  # Verify each required field
             if field.lower() not in entry.lower():  # If the field is missing
                 missing_fields.append(field)
 

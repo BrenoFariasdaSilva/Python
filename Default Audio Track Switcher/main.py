@@ -54,7 +54,7 @@ import json  # For parsing JSON output from ffprobe
 import os  # For running a command in the terminal
 import platform  # For getting the operating system name
 import re  # For text normalization with regular expressions
-import shutil  # For checking if a command exists
+import shutil  # For verifying if a command exists
 import signal  # For temporarily ignoring SIGINT during tqdm construction
 import subprocess  # For running terminal commands
 import unicodedata  # For removing accents during normalization
@@ -825,7 +825,7 @@ def should_ignore_directory(dirpath):
     dirname = os.path.basename(dirpath)  # Get the directory name from the full path
     lower_name = dirname.lower()  # Normalize to lowercase for case-insensitive matching
     for keyword in IGNORE_DIRS:  # Iterate configured ignore keywords
-        if keyword.lower() in lower_name:  # Check for substring-based, case-insensitive match
+        if keyword.lower() in lower_name:  # Verify for substring-based, case-insensitive match
             verbose_output(
                 f"{BackgroundColors.YELLOW}Ignoring directory: {BackgroundColors.CYAN}{dirpath}{BackgroundColors.YELLOW} (matches IGNORE_DIRS keyword '{keyword}'){Style.RESET_ALL}"
             )  # Verbose message explaining why the directory is ignored
@@ -1044,7 +1044,7 @@ def classify_streams(video_path):
     for audio_stream in audio_streams:  # Classify each audio stream
         lang = str(audio_stream.get("language") or "").lower()  # Normalize language
         title = str(audio_stream.get("title") or "").lower()  # Normalize title
-        if lang in desired_set or title in desired_set:  # Check if either matches desired set
+        if lang in desired_set or title in desired_set:  # Verify if either matches desired set
             audio_stream["classification"] = "desired"  # Label the audio stream as desired
         else:  # Otherwise classify as undesired per strict mode
             audio_stream["classification"] = "undesired"  # Label the audio stream as undesired
@@ -1052,7 +1052,7 @@ def classify_streams(video_path):
     for subtitle_stream in subtitle_streams:  # Classify each subtitle stream
         lang = str(subtitle_stream.get("language") or "").lower()  # Normalize language
         title = str(subtitle_stream.get("title") or "").lower()  # Normalize title
-        if lang in desired_set or title in desired_set:  # Check if either matches desired set
+        if lang in desired_set or title in desired_set:  # Verify if either matches desired set
             subtitle_stream["classification"] = "desired"  # Label the subtitle stream as desired
         else:  # Otherwise classify as undesired per strict mode
             subtitle_stream["classification"] = "undesired"  # Label the subtitle stream as undesired
@@ -1092,7 +1092,7 @@ def build_candidate_aliases(preferred):
 
 def stream_matches_candidates(stream, candidates):
     """
-    Check whether a stream's metadata matches any candidate alias.
+    Verify whether a stream's metadata matches any candidate alias.
 
     :param stream: Stream metadata dict with keys 'language', 'title', 'tags'
     :param candidates: Iterable of candidate alias strings
@@ -1419,7 +1419,7 @@ def find_original_default_position(streams, pos_key):
 
     for s in streams:  # Iterate streams to find original default disposition
         try:  # Guard access to disposition structure
-            if int(s.get("disposition", {}).get("default", 0)) == 1:  # Check ffprobe default flag
+            if int(s.get("disposition", {}).get("default", 0)) == 1:  # Verify ffprobe default flag
                 return s.get(pos_key)  # Return the original physical position
         except Exception:  # Ignore malformed disposition values
             continue  # Continue scanning streams
@@ -1759,7 +1759,7 @@ def get_audio_track_info(video_path):
 
 def is_english_track_default(audio_tracks):
     """
-    Check if an English audio track is already set as default.
+    Verify if an English audio track is already set as default.
 
     :param audio_tracks: List of audio track strings
     :return: True if English track is default, False otherwise
@@ -1771,7 +1771,7 @@ def is_english_track_default(audio_tracks):
             language = (
                 track_info[2].lower().strip() if len(track_info[2].strip()) > 0 else "und"
             )  # Get language or "und"
-            is_default = track_info[1].strip() == "1"  # Check if track is default
+            is_default = track_info[1].strip() == "1"  # Verify if track is default
             if is_default and language in DESIRED_LANGUAGES.get("English", []):  # If default and language is English
                 return True  # English track is already default
 
@@ -1790,7 +1790,7 @@ def find_english_track_index(audio_tracks):
         track_info = track.split(",")  # Split the track info
         if len(track_info) >= 3:  # If track info has enough parts
             language = track_info[2].lower().strip()  # Get language
-            if language in ["english", "eng", "en"]:  # Check if language is English (case-insensitive)
+            if language in ["english", "eng", "en"]:  # Verify if language is English (case-insensitive)
                 verbose_output(
                     f"{BackgroundColors.GREEN}Automatically detected English audio track at index {i}{Style.RESET_ALL}"
                 )
@@ -1965,7 +1965,7 @@ def swap_audio_tracks(video_path):
     # Fallback behavior when not removing other audio tracks: preserve original logic
     audio_tracks = get_audio_track_info(video_path)  # Get audio track information using ffprobe
 
-    if len(audio_tracks) == 0:  # Check if any audio tracks were found
+    if len(audio_tracks) == 0:  # Verify if any audio tracks were found
         print(
             f"{BackgroundColors.YELLOW}No audio tracks found for: {BackgroundColors.CYAN}{video_path}{Style.RESET_ALL}"
         )

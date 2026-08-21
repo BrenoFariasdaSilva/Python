@@ -2,7 +2,7 @@ import atexit  # For playing a sound when the program finishes
 import importlib  # For importing a module
 import os  # For running a command in the terminal
 import platform  # For getting the operating system name
-import shutil  # For checking if a command exists in the system path
+import shutil  # For verifying if a command exists in the system path
 import subprocess  # Import subprocess for running commands
 import sys  # For getting the system path
 from pathlib import Path  # For handling filesystem paths
@@ -282,10 +282,10 @@ def check_and_install_package(package_name="subliminal"):
     """
 
     verbose_output(
-        f"{BackgroundColors.GREEN}Checking if the package {BackgroundColors.CYAN}{package_name}{BackgroundColors.GREEN} is installed...{Style.RESET_ALL}"
+        f"{BackgroundColors.GREEN}Verifying if the package {BackgroundColors.CYAN}{package_name}{BackgroundColors.GREEN} is installed...{Style.RESET_ALL}"
     )  # Output the verbose message
 
-    if is_package_installed(package_name):  # Check if the package is installed
+    if is_package_installed(package_name):  # Verify if the package is installed
         verbose_output(
             f"{BackgroundColors.CYAN}{package_name}{BackgroundColors.GREEN} is already installed.{Style.RESET_ALL}"
         )  # Output the verbose message
@@ -468,7 +468,7 @@ def main():
         )
         return  # Return if input directory is invalid
 
-    check_and_install_package()  # Check and install the subliminal package
+    check_and_install_package()  # Verify and install the subliminal package
 
     dirs = get_directories()  # Get all directories in the current directory, excluding the specified ones
 

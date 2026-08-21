@@ -247,7 +247,7 @@ def find_audio_files(directory):
         for file in files:  # Iterate over the files in the current directory
             if file.lower().endswith(
                 (".mp3", ".flac", ".ogg", ".aac", ".wav", ".m4a", ".wma")
-            ):  # Check if the file is an audio file
+            ):  # Verify if the file is an audio file
                 audio_files.append(os.path.join(root, file))  # Add the audio file to the list
 
     return audio_files  # Return the list of audio files
@@ -255,7 +255,7 @@ def find_audio_files(directory):
 
 def check_audio_integrity(audio_files):
     """
-    Check each audio file for corruption by verifying metadata, length, file size, bitrate, and attempting playback.
+    Verify each audio file for corruption by verifying metadata, length, file size, bitrate, and attempting playback.
 
     :param audio_files: A list of audio files to check.
     :return: A list of corrupted audio files.
@@ -267,15 +267,15 @@ def check_audio_integrity(audio_files):
         audio_files, desc=f"{BackgroundColors.GREEN}Searching for corrupted audio files{Style.RESET_ALL}", unit="file"
     ):  # Iterate over the audio files with a progress bar
         try:  # Try to check the integrity of the audio file
-            if os.path.getsize(file) == 0:  # Check if the file size is zero
+            if os.path.getsize(file) == 0:  # Verify if the file size is zero
                 raise ValueError(f"File size is zero: {file}")  # Raise an exception if the file size is zero
 
             audio = File(file)  # Use Mutagen's File method, which automatically detects the audio format
 
-            if audio.info.length <= 0:  # Check the length of the audio file
+            if audio.info.length <= 0:  # Verify the length of the audio file
                 raise ValueError(f"Invalid audio length: {file}")  # Raise an exception if the audio length is invalid
 
-            if audio.info.bitrate <= 0:  # Check bitrate (only available in certain formats, such as MP3, FLAC, etc.)
+            if audio.info.bitrate <= 0:  # Verify bitrate (only available in certain formats, such as MP3, FLAC, etc.)
                 raise ValueError(f"Invalid bitrate: {file}")  # Raise an exception if the bitrate is invalid
 
             try:  # Attempt to decode the file using ffmpeg
@@ -315,7 +315,7 @@ def main():
         )
         return  # Exit the program
 
-    corrupted_files = check_audio_integrity(audio_files)  # Check the integrity of the audio files
+    corrupted_files = check_audio_integrity(audio_files)  # Verify the integrity of the audio files
 
     if corrupted_files:  # If there are corrupted audio files
         print(f"\n{BackgroundColors.RED}Corrupted audio files detected:{Style.RESET_ALL}")

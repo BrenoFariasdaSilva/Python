@@ -128,7 +128,7 @@ def output_time(output_string, time):
 
 def verify_ck_metrics_folder(repository_name):
     """
-    Verifies if all the metrics are already calculated by opening the commit hashes file and checking if every commit hash in the file is a folder in the repository folder.
+    Verifies if all the metrics are already calculated by opening the commit hashes file and verifying if every commit hash in the file is a folder in the repository folder.
 
     :param repository_name: Name of the repository to be analyzed.
     :return: True if all the metrics are already calculated, False otherwise.
@@ -366,7 +366,7 @@ def checkout_branch(branch_name):
 
     if VERBOSE:  # If the VERBOSE constant is set to True
         print(
-            f"{BackgroundColors.GREEN}Checking out the {BackgroundColors.CYAN}{branch_name}{BackgroundColors.GREEN} branch...{Style.RESET_ALL}"
+            f"{BackgroundColors.GREEN}Verifying out the {BackgroundColors.CYAN}{branch_name}{BackgroundColors.GREEN} branch...{Style.RESET_ALL}"
         )
 
     # Create a thread to checkout the branch

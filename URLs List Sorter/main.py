@@ -40,7 +40,7 @@ def rewrite_file(clean_urls):
 def process_urls(clean_urls, url_substring_counts):
     for url in clean_urls:  # Iterate over the URLs
         parts = url.split("/")  # Split the URL by the slash character
-        if len(parts) > 2:  # Check if the URL has more than 2 parts
+        if len(parts) > 2:  # Verify if the URL has more than 2 parts
             substring = "/".join(parts[2:-1])  # Extract the substring between the second and the last slash
 
             # Increment the count of the extracted substring in the dictionary

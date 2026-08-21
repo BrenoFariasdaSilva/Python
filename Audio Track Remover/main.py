@@ -47,7 +47,7 @@ Assumptions & Notes:
 import atexit  # For playing a sound when the program finishes
 import os  # For running a command in the terminal
 import platform  # For getting the operating system name
-import shutil  # For checking if a program is installed
+import shutil  # For verifying if a program is installed
 import subprocess  # For running terminal commands
 from colorama import Style  # For coloring the terminal
 from tqdm import tqdm  # For progress bar
@@ -549,7 +549,7 @@ def process_videos_in_directory():
     video_files = []
     for root, _, files in os.walk(INPUT_DIRECTORY):  # Walk through the input directory
         for file in files:  # Loop through all files
-            if file.lower().endswith((".mkv", ".mp4", ".avi", ".mov")):  # Check for video file extensions
+            if file.lower().endswith((".mkv", ".mp4", ".avi", ".mov")):  # Verify for video file extensions
                 full_path = os.path.join(root, file)  # Get the full file path
                 video_files.append(full_path)  # Add to the list
 

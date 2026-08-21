@@ -273,7 +273,7 @@ def all_files_properly_renamed(file_list):
     :return: True if all files are properly renamed, False otherwise.
     """
 
-    return all(is_two_digit_sequence(file) for file in file_list)  # Check if all files are properly renamed
+    return all(is_two_digit_sequence(file) for file in file_list)  # Verify if all files are properly renamed
 
 
 def getFileNameWithoutExtension(file):
@@ -350,7 +350,7 @@ def is_related_movie_subtitle(movie_file, subtitle_file):
     """
 
     verbose_output(
-        f"{BackgroundColors.YELLOW}Checking if the movie and subtitle are related:{Style.RESET_ALL}"
+        f"{BackgroundColors.YELLOW}Verifying if the movie and subtitle are related:{Style.RESET_ALL}"
     )  # Output the verbose message
 
     movie_base_name = getFileNameWithoutExtension(movie_file)  # Get the movie's base name

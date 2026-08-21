@@ -25,7 +25,7 @@ def find_gitignore_files(directory):
     gitignore_files = []  # List to store the Gitignore files
 
     for root, _, files in os.walk(directory):  # Walk through the directory tree
-        if TARGET_FILE in files:  # Check if the Gitignore file is present in the current directory
+        if TARGET_FILE in files:  # Verify if the Gitignore file is present in the current directory
             gitignore_files.append(os.path.join(root, TARGET_FILE))  # Add the Gitignore file to the list
 
     return gitignore_files  # Return the list of Gitignore files
@@ -42,7 +42,7 @@ def update_gitignore(file_path, relative_path):
 
     for line in lines:  # Iterate through all the lines
         for search_string in SEARCH_STRINGS:  # Iterate through all the search strings
-            if search_string not in line:  # Check if the search string is not present in the Gitignore file
+            if search_string not in line:  # Verify if the search string is not present in the Gitignore file
                 with open(file_path, "a") as f:  # Open the Gitignore file in append mode
                     f.write(f"{search_string}\n")  # Add the search string to the Gitignore file
                 print(
@@ -59,7 +59,7 @@ def main():
         current_directory
     )  # Find all the Gitignore files in the current directory and its subdirectories
 
-    # Check if there are any Gitignore files
+    # Verify if there are any Gitignore files
     if not gitignore_files:
         print(
             f"{BackgroundColors.RED}No {BackgroundColors.CYAN}{TARGET_FILE} files found {BackgroundColors.RED}in the {BackgroundColors.CYAN}{current_directory}{BackgroundColors.RED} directory or its subdirectories.{Style.RESET_ALL}"

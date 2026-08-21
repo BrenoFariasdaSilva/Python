@@ -30,7 +30,7 @@ folders_list=("")
 
 # Create a "Compressed" directory if it does not exist
 if [[ "${current_dir}" == *"/PyDriller" ]]; then
-   if [[ ! -d "compressed/" ]]; then # Check if the directory does not exist
+   if [[ ! -d "compressed/" ]]; then # Verify if the directory does not exist
       echo "Creating the compressed directory in current path..."
       mkdir -p "compressed" # Create the directory
    fi

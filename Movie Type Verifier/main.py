@@ -599,7 +599,7 @@ def verify_movies():
     for movie_type in MOVIE_TYPES:
         type_dir = os.path.join(INPUT_DIRECTORY, movie_type)
         print(
-            f"\n{BackgroundColors.BOLD}{BackgroundColors.CYAN}Checking {movie_type} directory...{Style.RESET_ALL}"
+            f"\n{BackgroundColors.BOLD}{BackgroundColors.CYAN}Verifying {movie_type} directory...{Style.RESET_ALL}"
         )
 
         results = scan_movies_in_directory(type_dir, movie_type)

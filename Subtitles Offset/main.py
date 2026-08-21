@@ -221,7 +221,7 @@ def get_directories():
     matching_dirs = []  # Store directories that contain .srt files
 
     for root, dirs, files in os.walk(input_dir_abs):  # Walk through all subdirectories
-        if any(file.lower().endswith(".srt") for file in files):  # Check if current dir has at least one .srt file
+        if any(file.lower().endswith(".srt") for file in files):  # Verify if current dir has at least one .srt file
             matching_dirs.append(os.path.normpath(os.path.abspath(root)))  # Add the directory if it qualifies
 
     return matching_dirs  # Return the list of directories that contain .srt files

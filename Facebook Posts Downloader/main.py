@@ -1474,7 +1474,7 @@ def has_visible_authentication_challenge(page: Page) -> bool:
                 try:  # Protect against elements detaching during navigation
                     if locator.nth(index).is_visible():  # Verify the challenge control is actually visible
                         return True  # Authentication is still interactive/incomplete
-                except Exception:  # Ignore one transient element and continue checking
+                except Exception:  # Ignore one transient element and continue verifying
                     continue  # Continue to the next matching control
         except Exception:  # Ignore selector failures during Facebook navigation
             continue  # Continue to the next challenge selector
@@ -1692,7 +1692,7 @@ def wait_for_existing_facebook_authentication(
     timeout_seconds: float = HEADLESS_AUTHENTICATION_CHECK_TIMEOUT_SECONDS,
 ) -> Page | None:
     """
-    Check whether the persistent browser profile already contains a usable Facebook login.
+    Verify whether the persistent browser profile already contains a usable Facebook login.
 
     This function never waits for manual interaction. It is intended for the initial headless
     probe and for validating the same persistent profile after an interactive authentication
@@ -1774,7 +1774,7 @@ def wait_for_profile_ready(
         except Exception:  # Ignore transient client-side rerenders
             pass  # Continue polling until the page stabilizes
 
-        time.sleep(AUTHENTICATION_POLL_SECONDS)  # Wait before checking the rendered profile again
+        time.sleep(AUTHENTICATION_POLL_SECONDS)  # Wait before verifying the rendered profile again
 
     raise TimeoutError(
         f"Facebook authentication is valid, but the profile did not render usable content within "
@@ -2002,7 +2002,7 @@ def establish_authenticated_scraping_session(
 
     if not force_interactive_authentication:  # Normal startup should first reuse a persisted login without showing a window
         print(
-            f"{BackgroundColors.GREEN}Checking the persistent Facebook session in headless mode...{Style.RESET_ALL}"
+            f"{BackgroundColors.GREEN}Verifying the persistent Facebook session in headless mode...{Style.RESET_ALL}"
         )  # Explain the invisible authentication probe
 
         headless_session = launch_browser_session(playwright, headless=True)  # Open the persistent profile invisibly
@@ -3915,7 +3915,7 @@ def main():
     print(
         f"{BackgroundColors.CLEAR_TERMINAL}{BackgroundColors.BOLD}{BackgroundColors.GREEN}Welcome to the "
         f"{BackgroundColors.CYAN}Facebook Posts Downloader{BackgroundColors.GREEN} program!{Style.RESET_ALL}",
-        end="\n\n",
+        end="\n",
     )  # Output the welcome message
 
     start_time = datetime.datetime.now()  # Get the start time of the program

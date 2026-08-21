@@ -57,7 +57,7 @@ def main():
 
     path = os.getcwd()  # Get the current working directory
 
-    # Check if path is a directory
+    # Verify if path is a directory
     if os.path.isdir(path):
         search_executable_files(path)  # List all the files in the directory
 

@@ -35,7 +35,7 @@ import re  # For sanitizing filenames
 import sys  # For system-specific parameters and functions
 import typing  # For type hints
 from colorama import Style  # For coloring the terminal
-from github_api import GitHubAPI  # Imported for type checking only to avoid runtime import cycles
+from github_api import GitHubAPI  # Imported for type verifying only to avoid runtime import cycles
 from Logger import Logger  # For logging output to both terminal and file
 from pathlib import Path  # For handling file paths
 

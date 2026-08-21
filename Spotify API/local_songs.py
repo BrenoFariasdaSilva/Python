@@ -225,7 +225,7 @@ def get_artist_name_from_path(relative_path):
 
 def is_music_file(file):
     """
-    Check if the file is a valid music file based on its extension.
+    Verify if the file is a valid music file based on its extension.
 
     :param file: The file name
     :return: True if the file is a music file, False otherwise

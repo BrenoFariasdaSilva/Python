@@ -68,7 +68,7 @@ def verify_git_installed():
     try:
         proc = subprocess.run(["git", "--version"], capture_output=True, text=True, check=False)  # Run the git command
 
-        if proc.returncode != 0:  # Check if the git command was successful
+        if proc.returncode != 0:  # Verify if the git command was successful
             return False  # Git is not installed
 
         return True  # Git is installed
@@ -110,7 +110,7 @@ def get_repository_tags(repo_url):
             ["git", "ls-remote", "--tags", repo_url], capture_output=True, text=True, check=False
         )  # Run the git command
 
-        if proc.returncode != 0:  # Check if the git command was successful
+        if proc.returncode != 0:  # Verify if the git command was successful
             raise RuntimeError(
                 proc.stderr.strip() or f"git exited with code {proc.returncode}"
             )  # Raise an error if the command failed
@@ -127,7 +127,7 @@ def get_repository_tags(repo_url):
                 continue  # Skip lines that don't have enough parts
 
             ref = parts[1]  # Get the reference part
-            if ref.startswith("refs/tags/"):  # Check if the reference is a tag
+            if ref.startswith("refs/tags/"):  # Verify if the reference is a tag
                 tag_part = ref[len("refs/tags/") :]  # Extract the tag name
 
                 if tag_part.endswith("^{}"):  # Handle annotated tags
@@ -204,11 +204,11 @@ def get_commits_information(repo_url, from_tag=None, to_tag=None):
     from_tag = None if from_tag in ("", None) else from_tag  # Normalize the starting tag
     to_tag = None if to_tag in ("", None) else to_tag  # Normalize the ending tag
 
-    if from_tag is None and to_tag is None:  # Check if both tags are missing
+    if from_tag is None and to_tag is None:  # Verify if both tags are missing
         repo = Repository(path_to_repo=repo_url)  # Analyze entire repository
-    elif from_tag is None and to_tag is not None:  # Check if only to_tag exists
+    elif from_tag is None and to_tag is not None:  # Verify if only to_tag exists
         repo = Repository(path_to_repo=repo_url, to_tag=to_tag)  # Analyze from beginning to to_tag
-    elif from_tag is not None and to_tag is None:  # Check if only from_tag exists
+    elif from_tag is not None and to_tag is None:  # Verify if only from_tag exists
         repo = Repository(path_to_repo=repo_url, from_tag=from_tag)  # Analyze from from_tag to HEAD
     else:  # Both tags exist
         repo = Repository(path_to_repo=repo_url, from_tag=from_tag, to_tag=to_tag)  # Analyze between both tags

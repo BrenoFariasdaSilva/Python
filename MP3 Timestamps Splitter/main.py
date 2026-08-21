@@ -74,11 +74,11 @@ def install_ffmpeg_windows():
     :return: None
     """
 
-    verbose_output(f"{BackgroundColors.GREEN}Checking for Chocolatey...{Style.RESET_ALL}")  # Output the verbose message
+    verbose_output(f"{BackgroundColors.GREEN}Verifying for Chocolatey...{Style.RESET_ALL}")  # Output the verbose message
 
     choco_installed = (
         subprocess.run(["choco", "--version"], capture_output=True, text=True).returncode == 0
-    )  # Check if Chocolatey is installed
+    )  # Verify if Chocolatey is installed
 
     if not choco_installed:  # If Chocolatey is not installed
         verbose_output(f"{BackgroundColors.YELLOW}Chocolatey not found. Installing Chocolatey...{Style.RESET_ALL}")
@@ -353,7 +353,7 @@ def list_valid_mp3_files():
         base_name = os.path.splitext(file)[0]  # Get the base name of the file (without extension)
         timestamp_path = os.path.join(TIMESTAMP_DIR, f"{base_name}.txt")  # Path to the timestamp file
 
-        if os.path.exists(timestamp_path):  # Check if the timestamp file exists
+        if os.path.exists(timestamp_path):  # Verify if the timestamp file exists
             valid_files.append(file)  # Add the MP3 file to the list of valid files
         else:  # If the timestamp file doesn't exist or the MP3 file is already processed
             print(

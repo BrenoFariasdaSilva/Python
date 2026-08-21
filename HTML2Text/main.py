@@ -25,11 +25,11 @@ def user_input():
         input(f"{BackgroundColors.GREEN}Selected Input: {Style.RESET_ALL}")
     )  # Get the option from the user input
 
-    # Check if the option is valid
+    # Verify if the option is valid
     while option != 1 and option != 2:
         print(f"{BackgroundColors.YELLOW}Invalid option. Try again.{Style.RESET_ALL}")
 
-        # Check the option
+        # Verify the option
     if option == 1:
         url = input(f"{BackgroundColors.GREEN}Enter a URL: {Style.RESET_ALL}")
     elif option == 2:  # If you choose the option "2" you need to change the url variable on the next line

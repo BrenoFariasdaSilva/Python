@@ -147,7 +147,7 @@ def ensure_env_file():
     :return: True if .env already existed, False if it was created.
     """
 
-    if os.path.exists(".env"):  # Check if .env file exists
+    if os.path.exists(".env"):  # Verify if .env file exists
         return True  # .env exists
 
     copyfile(".env-example", ".env")  # Copy .env-example to .env

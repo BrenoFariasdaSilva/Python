@@ -312,7 +312,7 @@ def print_reverted(src_path, dst_path):
     :return: None
     """
     
-    is_dir = os.path.isdir(dst_path)  # Check filesystem to determine type after rename
+    is_dir = os.path.isdir(dst_path)  # Verify filesystem to determine type after rename
     if is_dir:  # Directory case
         print(f"{BackgroundColors.GREEN}[OK] Reverted Directory: {BackgroundColors.CYAN}{src_path}{BackgroundColors.GREEN} -> {BackgroundColors.CYAN}{dst_path}{Style.RESET_ALL}")  # Print directory success message
     else:  # File case
@@ -329,7 +329,7 @@ def handle_missing_source(src_path, dst_path, counters):
     :return: True if handled, False otherwise
     """
     
-    if os.path.exists(dst_path):  # Check already reverted case
+    if os.path.exists(dst_path):  # Verify already reverted case
         increment_counter(counters, "already_reverted")  # Increment already reverted
         return True  # Signal handled
 
@@ -397,7 +397,7 @@ def safe_rename(src_path, dst_path, counters):
     :return: True if the rename was handled (either performed or skipped), False otherwise
     """
     
-    if not os.path.exists(src_path):  # Check if source exists
+    if not os.path.exists(src_path):  # Verify if source exists
         return handle_missing_source(src_path, dst_path, counters)  # Delegate missing handling
 
     if os.path.exists(dst_path):  # Prevent overwrite
@@ -414,7 +414,7 @@ def report_exists():
     :return: True if the report file exists, False otherwise
     """
     
-    exists = os.path.exists(REPORT_PATH)  # Check report file existence
+    exists = os.path.exists(REPORT_PATH)  # Verify report file existence
     
     if not exists:  # If missing
         print(f"{BackgroundColors.RED}[ERROR] Report Not Found: {BackgroundColors.CYAN}{REPORT_PATH}{Style.RESET_ALL}")  # Print error
@@ -505,21 +505,21 @@ def resolve_video_file_entry(base_dir, file_entry, dir_logs, counters):
         src_path = os.path.normpath(os.path.join(base_dir, new_dir, new_name))  # Case 1 source (normalized)
         dst_path = os.path.normpath(os.path.join(base_dir, old_dir, old_name))  # Case 1 destination (normalized)
 
-        if os.path.exists(src_path) or os.path.exists(dst_path):  # Check case 1
+        if os.path.exists(src_path) or os.path.exists(dst_path):  # Verify case 1
             safe_rename(src_path, dst_path, counters)  # Attempt revert
             return  # Stop after handled
 
         src_path = os.path.normpath(os.path.join(base_dir, old_dir, new_name))  # Case 2 source (normalized)
         dst_path = os.path.normpath(os.path.join(base_dir, old_dir, old_name))  # Case 2 destination (normalized)
 
-        if os.path.exists(src_path) or os.path.exists(dst_path):  # Check case 2
+        if os.path.exists(src_path) or os.path.exists(dst_path):  # Verify case 2
             safe_rename(src_path, dst_path, counters)  # Attempt revert
             return  # Stop after handled
 
     src_path = os.path.normpath(os.path.join(base_dir, new_name))  # Fallback source (normalized)
     dst_path = os.path.normpath(os.path.join(base_dir, old_name))  # Fallback destination (normalized)
 
-    if os.path.exists(src_path) or os.path.exists(dst_path):  # Check fallback
+    if os.path.exists(src_path) or os.path.exists(dst_path):  # Verify fallback
         safe_rename(src_path, dst_path, counters)  # Attempt revert
         return  # Stop after handled
 
@@ -723,7 +723,7 @@ def main():
     )  # Output the welcome message for the reverter tool
     start_time = datetime.datetime.now()  # Get the start time of the program
     
-    if not verify_filepath_exists(REPORT_PATH):  # Check if the report file exists
+    if not verify_filepath_exists(REPORT_PATH):  # Verify if the report file exists
         print(
             f"{BackgroundColors.RED}Report file {BackgroundColors.CYAN}{REPORT_PATH}{BackgroundColors.RED} not found. Make sure the file exists and try again.{Style.RESET_ALL}"
         )

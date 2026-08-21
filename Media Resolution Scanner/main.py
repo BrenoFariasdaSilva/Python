@@ -126,13 +126,13 @@ def normalize_resolution(resolution, standardize=None):
 		f"{BackgroundColors.GREEN}Normalizing resolution:{BackgroundColors.CYAN} {resolution}{Style.RESET_ALL}"
 	)  # Output verbose message for resolution normalization
 
-	if standardize is None:  # Check if standardize parameter is not provided
+	if standardize is None:  # Verify if standardize parameter is not provided
 		standardize = STANDARDIZE_RESOLUTION  # Use module-level constant as default
 
 	raw = resolution.strip()  # Remove leading and trailing whitespace
 	key = raw.lower()  # Convert to lowercase for case-insensitive comparison
 
-	if standardize and key in K_TO_P_MAP:  # Check if k-format conversion is enabled and token exists in map
+	if standardize and key in K_TO_P_MAP:  # Verify if k-format conversion is enabled and token exists in map
 		return K_TO_P_MAP[key]  # Return the mapped p-format value
 
 	return key  # Return the normalized lowercase token
@@ -152,7 +152,7 @@ def has_subdirectories(path):
 	"""
 
 	verbose_output(
-		f"{BackgroundColors.GREEN}Checking for subdirectories in:{BackgroundColors.CYAN} {path}{Style.RESET_ALL}"
+		f"{BackgroundColors.GREEN}Verifying for subdirectories in:{BackgroundColors.CYAN} {path}{Style.RESET_ALL}"
 	)  # Output verbose message for subdirectory check
 
 	try:  # Attempt to check for subdirectories
@@ -195,11 +195,11 @@ def _prepare_report_args(search_dirs, report_output, standardize):
 	:return: Tuple (search_dirs, report_output, standardize)
 	"""
 
-	if search_dirs is None:  # Check if search directories not provided
+	if search_dirs is None:  # Verify if search directories not provided
 		search_dirs = SEARCH_DIRS  # Use default search directories
-	if report_output is None:  # Check if report output path not provided
+	if report_output is None:  # Verify if report output path not provided
 		report_output = REPORT_OUTPUT  # Use default report path
-	if standardize is None:  # Check if standardization flag not provided
+	if standardize is None:  # Verify if standardization flag not provided
 		standardize = STANDARDIZE_RESOLUTION  # Use default standardization flag
 	return search_dirs, report_output, standardize  # Return normalized arguments tuple
 
@@ -214,18 +214,18 @@ def _resolution_sort_key(token):
 
 	key = token.lower().strip()  # Normalize the token to lowercase
 
-	if key in K_TO_P_MAP:  # Check if token exists in k-to-p mapping
+	if key in K_TO_P_MAP:  # Verify if token exists in k-to-p mapping
 		mapped = K_TO_P_MAP[key]  # Get mapped p-format value
 		digits = re.findall(r"\d+", mapped)  # Extract numeric portion
 		return int(digits[0]) if digits else float("inf")  # Return numeric value or infinity
 
-	if key.endswith("p"):  # Check if token has p-suffix
+	if key.endswith("p"):  # Verify if token has p-suffix
 		digits = re.findall(r"\d+", key)  # Extract numeric portion
 		return int(digits[0]) if digits else float("inf")  # Return numeric value or infinity
 
-	if key.endswith("k"):  # Check if token has k-suffix
+	if key.endswith("k"):  # Verify if token has k-suffix
 		digits = re.findall(r"\d+", key)  # Extract numeric portion
-		if digits:  # Check if digits were found
+		if digits:  # Verify if digits were found
 			try:  # Attempt to convert k to pixel count
 				return int(float(digits[0]) * 1000)  # Convert k to approximate pixel count
 			except Exception:  # Handle conversion errors
@@ -250,7 +250,7 @@ def _scan_for_resolutions(search_dirs, standardize):
 	for base_dir in search_dirs:  # Iterate through each base directory to scan
 		base_path = Path(base_dir)  # Convert base directory to Path object
 
-		if not base_path.exists():  # Check if base directory exists
+		if not base_path.exists():  # Verify if base directory exists
 			continue  # Skip missing base directories
 
 		for root, dirs, _ in os.walk(base_path):  # Walk through directory tree
@@ -259,7 +259,7 @@ def _scan_for_resolutions(search_dirs, standardize):
 
 			matches = RESOLUTION_REGEX.findall(dir_name)  # Find resolution tokens in directory name
 
-			if matches:  # Check if resolution tokens were found
+			if matches:  # Verify if resolution tokens were found
 				try:  # Attempt to compute directory size
 					size_bytes = _get_dir_size_bytes(current_dir)  # Get total size in bytes
 					size_gb = round(size_bytes / (1024 ** 3), 2)  # Convert bytes to gigabytes
@@ -268,7 +268,7 @@ def _scan_for_resolutions(search_dirs, standardize):
 
 				try:  # Attempt to get directory creation time
 					st = current_dir.stat()  # Get directory stats
-					if hasattr(st, "st_birthtime"):  # Check if birth time is available
+					if hasattr(st, "st_birthtime"):  # Verify if birth time is available
 						created_ts = st.st_birthtime  # Use birth time when available
 					else:  # Birth time not available
 						created_ts = st.st_ctime  # Fall back to ctime
@@ -281,7 +281,7 @@ def _scan_for_resolutions(search_dirs, standardize):
 					entry = {"name": dir_name, "size_gb": size_gb, "created": created}  # Create entry dictionary
 					resolution_groups.setdefault(normalized, []).append(entry)  # Add entry to resolution group
 			else:  # No resolution tokens found in directory name
-				if not dirs:  # Check if this is a leaf directory
+				if not dirs:  # Verify if this is a leaf directory
 					try:  # Attempt to compute directory size
 						size_bytes = _get_dir_size_bytes(current_dir)  # Get total size in bytes
 						size_gb = round(size_bytes / (1024 ** 3), 2)  # Convert bytes to gigabytes
@@ -289,12 +289,12 @@ def _scan_for_resolutions(search_dirs, standardize):
 						size_bytes = 0  # Default to 0 bytes
 						size_gb = 0.0  # Default to 0 GB
 
-					if size_bytes == 0:  # Check if directory is empty
+					if size_bytes == 0:  # Verify if directory is empty
 						continue  # Skip empty directories entirely
 
 					try:  # Attempt to get directory creation time
 						st = current_dir.stat()  # Get directory stats
-						if hasattr(st, "st_birthtime"):  # Check if birth time is available
+						if hasattr(st, "st_birthtime"):  # Verify if birth time is available
 							created_ts = st.st_birthtime  # Use birth time when available
 						else:  # Birth time not available
 							created_ts = st.st_ctime  # Fall back to ctime
@@ -306,7 +306,7 @@ def _scan_for_resolutions(search_dirs, standardize):
 						rel = str(current_dir.relative_to(base_path))  # Compute relative path to base
 					except Exception:  # Handle relative path computation errors
 						rel = str(current_dir)  # Use full path as fallback
-					if rel in (".", ""):  # Check if relative path is current directory or empty
+					if rel in (".", ""):  # Verify if relative path is current directory or empty
 						rel = dir_name  # Use directory name instead
 
 					no_resolution_found.append({"rel": rel, "size_gb": size_gb, "created": created})  # Store structured entry
@@ -338,7 +338,7 @@ def _build_report_dict(resolution_groups, no_resolution_found, standardize):
 
 	no_items = []  # Initialize no-resolution items list
 	no_total = 0.0  # Initialize no-resolution total size
-	if no_resolution_found:  # Check if there are any no-resolution entries
+	if no_resolution_found:  # Verify if there are any no-resolution entries
 		no_sorted = sorted(no_resolution_found, key=lambda e: e.get("rel", ""))  # Sort by relative path
 		for e in no_sorted:  # Iterate through sorted no-resolution entries
 			rel_raw = e.get("rel", "")  # Raw relative path (OS-specific separators)
@@ -401,7 +401,7 @@ def generate_resolution_report(search_dirs=None, report_output=None, standardize
 		search_dirs, report_output, standardize
 	)  # Prepare arguments with defaults
 
-	if hasattr(search_dirs, "items"):  # Check if search_dirs is a mapping
+	if hasattr(search_dirs, "items"):  # Verify if search_dirs is a mapping
 		outputs = {}  # Initialize outputs dictionary
 		for name, path in search_dirs.items():  # Iterate through each named search directory
 			resolution_groups, no_resolution_found = _scan_for_resolutions([path], standardize)  # Scan directory for resolutions
@@ -498,7 +498,7 @@ def main():
 	start_time = datetime.datetime.now()  # Get the start time of the program
 
 	result = generate_resolution_report()  # Generate resolution report using module-level helper
-	if isinstance(result, tuple):  # Check if result is a tuple (single report)
+	if isinstance(result, tuple):  # Verify if result is a tuple (single report)
 		report_path, report = result  # Unpack report path and report data
 		print(
 			f"{BackgroundColors.GREEN}Resolution report generated at:{BackgroundColors.CYAN} {report_path}{Style.RESET_ALL}"

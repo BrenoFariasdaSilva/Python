@@ -1029,7 +1029,7 @@ def main():
             ]  # Finish building the ordered footer lines
         )  # Finish appending the timing and completion footer
         sys.stdout.write("\n".join(output_lines) + "\n")  # Emit the complete normal execution log in one write call to prevent Logger-added blank lines between individual print calls
-        if RUN_FUNCTIONS["Play Sound"]:  # Check whether the optional completion sound callback is enabled
+        if RUN_FUNCTIONS["Play Sound"]:  # Verify whether the optional completion sound callback is enabled
             atexit.register(play_sound)  # Register the completion sound callback for process shutdown
 
 

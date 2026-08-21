@@ -335,7 +335,7 @@ def install_ffmpeg_windows():
     :return: None
     """
 
-    verbose_output(f"{BackgroundColors.GREEN}Checking for Chocolatey...{Style.RESET_ALL}")  # Output the verbose message
+    verbose_output(f"{BackgroundColors.GREEN}Verifying for Chocolatey...{Style.RESET_ALL}")  # Output the verbose message
 
     choco_installed = (
         subprocess.run(["choco", "--version"], capture_output=True, text=True).returncode == 0
@@ -574,19 +574,19 @@ def extract_special_tokens(tokens):
     i = 0  # Iterator index
     
     while i < len(tokens):  # Scan tokens for special markers
-        if imax_idx is None and re.fullmatch(r"(?i)IMAX", tokens[i]):  # Check IMAX token
+        if imax_idx is None and re.fullmatch(r"(?i)IMAX", tokens[i]):  # Verify IMAX token
             imax_idx = i  # Record IMAX index
             imax_raw = tokens[i]  # Capture original IMAX casing
             i += 1  # Advance after IMAX
             continue  # Continue scanning
         
-        if hdr_idx is None and re.fullmatch(r"(?i)HDR", tokens[i]):  # Check HDR token
+        if hdr_idx is None and re.fullmatch(r"(?i)HDR", tokens[i]):  # Verify HDR token
             hdr_idx = i  # Record HDR index
             hdr_raw = tokens[i]  # Capture original HDR casing
             i += 1  # Advance after HDR
             continue  # Continue scanning
         
-        if ai_idx is None and i + 2 < len(tokens) and tokens[i].lower() == "ai" and tokens[i + 1].lower() == "upscaled" and tokens[i + 2].lower() == "60fps":  # Check AI group
+        if ai_idx is None and i + 2 < len(tokens) and tokens[i].lower() == "ai" and tokens[i + 1].lower() == "upscaled" and tokens[i + 2].lower() == "60fps":  # Verify AI group
             ai_idx = i  # Record AI group start index
             ai_raw = [tokens[i], tokens[i + 1], tokens[i + 2]]  # Capture original AI tokens
             i += 3  # Advance past AI group
@@ -981,8 +981,8 @@ def detect_changes(old_name, new_name):
     toks_old = base_old.split()  # Tokenize old base
     toks_new = base_new.split()  # Tokenize new base
 
-    dup_old = has_duplicate_tokens(toks_old)  # Check duplicates in old
-    dup_new = has_duplicate_tokens(toks_new)  # Check duplicates in new
+    dup_old = has_duplicate_tokens(toks_old)  # Verify duplicates in old
+    dup_new = has_duplicate_tokens(toks_new)  # Verify duplicates in new
 
     if dup_old and not dup_new:  # Duplicates removed
         tags.append("Remove Duplicate Tokens")  # Tag duplicate removal

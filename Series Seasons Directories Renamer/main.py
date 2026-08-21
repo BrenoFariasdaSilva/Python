@@ -312,11 +312,11 @@ def install_ffmpeg_windows():
     :return: None
     """
 
-    verbose_output(f"{BackgroundColors.GREEN}Checking for Chocolatey...{Style.RESET_ALL}")  # Output the verbose message
+    verbose_output(f"{BackgroundColors.GREEN}Verifying for Chocolatey...{Style.RESET_ALL}")  # Output the verbose message
 
     choco_installed = (
         subprocess.run(["choco", "--version"], capture_output=True, text=True).returncode == 0
-    )  # Check if Chocolatey is installed
+    )  # Verify if Chocolatey is installed
 
     if not choco_installed:  # If Chocolatey is not installed
         verbose_output(f"{BackgroundColors.YELLOW}Chocolatey not found. Installing Chocolatey...{Style.RESET_ALL}")
@@ -505,7 +505,7 @@ def get_season_year(api_key, series_id, season_number):
     if not air_date:  # If top-level air_date is missing, fallback to episode-level air_date
         episodes = data.get("episodes", [])  # Extract episodes array from season details
         
-        if episodes and "air_date" in episodes[0]:  # Check first episode for an air_date field
+        if episodes and "air_date" in episodes[0]:  # Verify first episode for an air_date field
             air_date = episodes[0]["air_date"]  # Use first episode air_date as fallback
         else:  # No air_date available anywhere in response
             raise ValueError(f"No air_date found for series {series_id} season {season_number}")  # Raise descriptive error
@@ -746,7 +746,7 @@ def determine_resolution(dir_path, name_hint):
     """
     Unified resolution detection for a given season folder.
 
-    1) Check for resolution token in `name_hint` using the project's regex.
+    1) Verify for resolution token in `name_hint` using the project's regex.
     2) If not found, probe the first video file inside `dir_path` (non-recursive)
        using `get_resolution_from_first_video()`.
     Preserves casing from filename results and returns None when absent.
@@ -804,7 +804,7 @@ def rename_dirs():
     
     for root in roots:  # Iterate each configured root path
         root_path = Path(root)  # Convert to Path object for consistent handling
-        if not root_path.exists():  # Check if the root path exists before processing
+        if not root_path.exists():  # Verify if the root path exists before processing
             verbose_output(f"{BackgroundColors.YELLOW}Input path not found, skipping: {BackgroundColors.CYAN}{root_path}{Style.RESET_ALL}")
             continue
         try:  # Guard against any error when reading the directory contents

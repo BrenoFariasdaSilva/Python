@@ -1,5 +1,5 @@
 import atexit  # For playing a sound when the program finishes
-import ctypes  # For checking hidden/system attributes on Windows
+import ctypes  # For verifying hidden/system attributes on Windows
 import os  # For running a command in the terminal and walking through the filesystem
 import platform  # For getting the operating system name
 from colorama import Style  # For coloring the terminal
@@ -223,7 +223,7 @@ def is_hidden_or_system(filepath):
     """
 
     verbose_output(
-        f"{BackgroundColors.GREEN}Checking if the file is hidden or system: {BackgroundColors.CYAN}{filepath}{Style.RESET_ALL}"
+        f"{BackgroundColors.GREEN}Verifying if the file is hidden or system: {BackgroundColors.CYAN}{filepath}{Style.RESET_ALL}"
     )
 
     filename = os.path.basename(filepath)  # Get the file name from the path
@@ -331,7 +331,7 @@ def is_path_clean(total_files, total_size):
     """
 
     verbose_output(
-        f"{BackgroundColors.GREEN}Checking if the path is clean...{Style.RESET_ALL}"
+        f"{BackgroundColors.GREEN}Verifying if the path is clean...{Style.RESET_ALL}"
     )  # Output the check message
 
     if total_files == 0 and total_size == 0:  # If no files were found
@@ -375,7 +375,7 @@ def is_raw_device_path(path):
     """
 
     verbose_output(
-        f"{BackgroundColors.GREEN}Checking if the path is a raw device: {BackgroundColors.CYAN}{path}{Style.RESET_ALL}"
+        f"{BackgroundColors.GREEN}Verifying if the path is a raw device: {BackgroundColors.CYAN}{path}{Style.RESET_ALL}"
     )  # Output the check message
 
     system = platform.system()  # Get the current operating system

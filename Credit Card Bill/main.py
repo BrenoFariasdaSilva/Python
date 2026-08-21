@@ -1,9 +1,9 @@
 import atexit  # For registering the play_sound function to be called when the program finishes
 import csv  # For CSV quoting and delimiter constants
 import glob  # For pattern matching files
-import os  # For checking if the file exists
+import os  # For verifying if the file exists
 import pandas as pd  # Pandas is used to read and write the CSV files
-import platform  # For checking the operating system
+import platform  # For verifying the operating system
 import re  # For regular expressions
 from datetime import datetime  # For parsing dates in Fatura filenames
 from colorama import Style  # For coloring the terminal

@@ -36,7 +36,7 @@ short_repositories=("commons-lang-short" "jabref-short" "kafka-short" "zookeeper
 for repo_name in "${full_repositories[@]}"; do
    zipfile="$compressed_dir/${repo_name}.zip" # Define the zip file path
    echo "Unzipping $zipfile to $compressed_dir..."
-   if [ -e "$zipfile" ]; then                  # Check if the zip file exists
+   if [ -e "$zipfile" ]; then                  # Verify if the zip file exists
       unzip -q "$zipfile" -d "$compressed_dir" # Unzip the file
       echo "Unzipped $zipfile to $compressed_dir"
    else # If the zip file does not exist, then print an error message
@@ -48,7 +48,7 @@ done
 for repo_name in "${short_repositories[@]}"; do
    zipfile="$compressed_dir/${repo_name}.zip" # Define the zip file path
    echo "Unzipping $zipfile to $compressed_dir..."
-   if [ -e "$zipfile" ]; then                  # Check if the zip file exists
+   if [ -e "$zipfile" ]; then                  # Verify if the zip file exists
       unzip -q "$zipfile" -d "$compressed_dir" # Unzip the file
       echo "Unzipped $zipfile to $compressed_dir"
    else # If the zip file does not exist, then print an error message
