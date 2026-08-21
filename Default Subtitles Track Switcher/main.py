@@ -67,6 +67,7 @@ import shutil  # For checking if a program is installed
 import subprocess  # For running terminal commands
 from colorama import Style  # For coloring the terminal
 from tqdm import tqdm  # For displaying progress bars
+from typing import Any, Dict, List, Optional  # For type hinting dynamic MKV metadata values
 
 
 # Macros:
@@ -375,6 +376,227 @@ def verify_filepath_exists(filepath):
         raise  # Re-raise to preserve original failure semantics
 
 
+def find_mkvtoolnix_executable(command_name: str) -> Optional[str]:
+    """
+    Find an MKVToolNix executable using the same search order as the reference project.
+
+    :param command_name: Executable command name.
+    :return: Executable path or None.
+    """
+
+    path_result = shutil.which(command_name)  # Search PATH first.
+    if path_result is not None:  # Verify PATH lookup found an executable.
+        return path_result  # Return PATH executable.
+
+    if os.name == "nt" and command_name.lower() in {"mkvpropedit", "mkvmerge", "mkvinfo", "mkvextract"}:  # Verify MKVToolNix command on Windows.
+        executable_name = f"{command_name}.exe"  # Build Windows executable name.
+        program_dirs = [os.environ.get("ProgramFiles"), os.environ.get("ProgramFiles(x86)")]  # Read standard install roots.
+        for program_dir in program_dirs:  # Iterate standard install roots.
+            if not program_dir:  # Verify install root exists.
+                continue  # Skip missing install root.
+            candidate = os.path.join(program_dir, "MKVToolNix", executable_name)  # Build MKVToolNix executable path.
+            if os.path.exists(candidate):  # Verify executable exists.
+                return candidate  # Return discovered executable.
+
+    return None  # Return missing executable.
+
+
+def mkv_metadata_tools_available() -> bool:
+    """
+    Verify whether MKVToolNix metadata tools are available.
+
+    :return: True when both mkvmerge and mkvpropedit are available.
+    """
+
+    return find_mkvtoolnix_executable("mkvmerge") is not None and find_mkvtoolnix_executable("mkvpropedit") is not None  # Return required tool availability.
+
+
+def is_supported_mkv_metadata_file(video_path: str) -> bool:
+    """
+    Verify whether the file extension supports MKV metadata-only edits.
+
+    :param video_path: Media file path.
+    :return: True when the path is a Matroska container supported by mkvpropedit.
+    """
+
+    return os.path.splitext(video_path)[1].lower() in (".mkv", ".mk3d")  # Return Matroska extension support status.
+
+
+def read_mkvmerge_media_data(video_path: str) -> Dict[str, Any]:
+    """
+    Read MKVToolNix JSON metadata for one Matroska file.
+
+    :param video_path: Media file path.
+    :return: Parsed mkvmerge metadata or an empty track list.
+    """
+
+    executable = find_mkvtoolnix_executable("mkvmerge")  # Locate mkvmerge with reference-project search behavior.
+    if executable is None:  # Verify mkvmerge is available.
+        return {"tracks": []}  # Return empty metadata when MKVToolNix inspection is unavailable.
+
+    command = [executable, "-J", video_path]  # Build safe mkvmerge JSON command.
+    try:  # Execute mkvmerge without shell interpolation.
+        result = subprocess.run(command, capture_output=True, text=True, encoding="utf-8", errors="replace", check=False)  # Run mkvmerge and capture JSON output.
+    except OSError:  # Handle execution failure.
+        return {"tracks": []}  # Return empty metadata when the executable cannot run.
+
+    if result.returncode != 0:  # Verify mkvmerge inspection succeeded.
+        return {"tracks": []}  # Return empty metadata on MKVToolNix inspection failure.
+
+    try:  # Parse mkvmerge JSON output.
+        parsed_data = json.loads(result.stdout) if result.stdout else {"tracks": []}  # Decode JSON metadata.
+    except json.JSONDecodeError:  # Handle invalid JSON output.
+        return {"tracks": []}  # Return empty metadata when JSON parsing fails.
+
+    return parsed_data if isinstance(parsed_data, dict) else {"tracks": []}  # Return object metadata only.
+
+
+def read_mkvmerge_subtitle_tracks(video_path: str) -> List[Dict[str, Any]]:
+    """
+    Read MKVToolNix subtitle tracks in mkvpropedit selector order.
+
+    :param video_path: Media file path.
+    :return: Subtitle track metadata objects in selector order.
+    """
+
+    media_data = read_mkvmerge_media_data(video_path)  # Read full MKVToolNix metadata.
+    raw_tracks = media_data.get("tracks")  # Read raw track list.
+    tracks = raw_tracks if isinstance(raw_tracks, list) else []  # Normalize track list.
+    return [track for track in tracks if isinstance(track, dict) and track.get("type") == "subtitles"]  # Return subtitle tracks in MKVToolNix order.
+
+
+def read_mkvmerge_track_uid(track: Dict[str, Any]) -> Optional[int]:
+    """
+    Read Matroska Track UID from MKVToolNix track metadata.
+
+    :param track: MKVToolNix track metadata.
+    :return: Track UID or None.
+    """
+
+    raw_properties = track.get("properties")  # Read raw track properties.
+    properties = raw_properties if isinstance(raw_properties, dict) else {}  # Normalize track properties safely.
+    raw_uid = properties.get("uid")  # Read Matroska Track UID.
+    return raw_uid if isinstance(raw_uid, int) else None  # Return integer UID only.
+
+
+def read_mkvmerge_default_flag(track: Dict[str, Any]) -> bool:
+    """
+    Read the Matroska default-track flag from MKVToolNix metadata.
+
+    :param track: MKVToolNix track metadata.
+    :return: True when the default-track flag is enabled.
+    """
+
+    raw_properties = track.get("properties")  # Read raw track properties.
+    properties = raw_properties if isinstance(raw_properties, dict) else {}  # Normalize track properties safely.
+    raw_default = properties.get("default_track")  # Read default-track property.
+    return bool(raw_default) if isinstance(raw_default, bool) else False  # Return normalized default flag.
+
+
+def build_mkvpropedit_track_selector(track_position: int, track_uid: Optional[int]) -> str:
+    """
+    Build a safe subtitle mkvpropedit selector using Track UID when available.
+
+    :param track_position: Zero-based subtitle track position.
+    :param track_uid: Matroska Track UID when available.
+    :return: mkvpropedit track selector.
+    """
+
+    if track_uid is not None:  # Verify stable Matroska Track UID is available.
+        return f"track:={track_uid}"  # Return UID selector.
+    return f"track:s{track_position + 1}"  # Return one-based subtitle ordinal selector.
+
+
+def mkvmerge_order_matches_ffprobe_subtitles(video_path: str, subtitle_streams: List[Dict[str, Any]]) -> bool:
+    """
+    Verify ffprobe subtitle order matches MKVToolNix selector order.
+
+    :param video_path: Media file path.
+    :param subtitle_streams: ffprobe subtitle stream metadata dictionaries.
+    :return: True when subtitle positions can be mapped safely.
+    """
+
+    tracks = read_mkvmerge_subtitle_tracks(video_path)  # Read subtitle tracks in mkvpropedit selector order.
+    if len(tracks) != len(subtitle_streams):  # Verify both tools report the same subtitle count.
+        return False  # Return unsafe mapping when counts differ.
+    ordered_streams = sorted(subtitle_streams, key=lambda stream: stream.get("sub_pos", -1))  # Sort ffprobe subtitles by position.
+    for position, stream in enumerate(ordered_streams):  # Iterate paired ffprobe and mkvmerge tracks.
+        if stream.get("sub_pos") != position:  # Verify ffprobe positions are contiguous.
+            return False  # Return unsafe mapping when positions are not contiguous.
+        mkvmerge_track_id = tracks[position].get("id")  # Read MKVToolNix track ID.
+        ffprobe_index = stream.get("global_index")  # Read ffprobe global stream index.
+        if isinstance(mkvmerge_track_id, int) and isinstance(ffprobe_index, int) and mkvmerge_track_id != ffprobe_index:  # Verify shared stream identity when both IDs are numeric.
+            return False  # Return unsafe mapping when tool IDs disagree.
+    return True  # Return safe mapping when all paired tracks match.
+
+
+def verify_mkv_subtitle_default_flags(video_path: str, chosen_pos: int) -> bool:
+    """
+    Verify MKV subtitle default flags after metadata-only editing.
+
+    :param video_path: Media file path.
+    :param chosen_pos: Zero-based subtitle position expected as default.
+    :return: True when the requested default state is present.
+    """
+
+    tracks = read_mkvmerge_subtitle_tracks(video_path)  # Read current MKVToolNix subtitle metadata.
+    if chosen_pos < 0 or chosen_pos >= len(tracks):  # Verify expected target still exists.
+        return False  # Return failed verification when target cannot be found.
+    for position, track in enumerate(tracks):  # Iterate subtitles to compare flags.
+        expected_default = position == chosen_pos  # Resolve expected default flag.
+        if read_mkvmerge_default_flag(track) != expected_default:  # Verify subtitle flag matches expected value.
+            return False  # Return failed verification on first mismatch.
+    return True  # Return successful verification after all flags match.
+
+
+def apply_mkv_subtitle_metadata_default(full_path: str, chosen_pos: int) -> bool:
+    """
+    Apply subtitle default flags in place through mkvpropedit.
+
+    :param full_path: Media file path.
+    :param chosen_pos: Zero-based subtitle position to set as default.
+    :return: True when metadata-only editing succeeded or no edits were required.
+    """
+
+    executable = find_mkvtoolnix_executable("mkvpropedit")  # Locate mkvpropedit with reference-project search behavior.
+    if executable is None:  # Verify mkvpropedit is available.
+        return False  # Return failure so caller can use fallback only for unsupported tooling.
+
+    tracks = read_mkvmerge_subtitle_tracks(full_path)  # Read subtitle tracks in mkvpropedit selector order.
+    if chosen_pos < 0 or chosen_pos >= len(tracks):  # Verify target subtitle exists in MKVToolNix metadata.
+        return False  # Return failure when selector mapping is unsafe.
+
+    command = [executable, full_path]  # Start mkvpropedit command.
+    setter_count = 0  # Count requested metadata setters.
+    for position, track in enumerate(tracks):  # Iterate subtitles in MKVToolNix selector order.
+        target_default = position == chosen_pos  # Resolve desired default flag.
+        if read_mkvmerge_default_flag(track) == target_default:  # Verify current default flag already matches.
+            continue  # Skip no-op flag edit.
+        selector = build_mkvpropedit_track_selector(position, read_mkvmerge_track_uid(track))  # Build selector using reference logic.
+        command.extend(["--edit", selector, "--set", f"flag-default={1 if target_default else 0}"])  # Add default flag setter.
+        setter_count += 1  # Count setter.
+
+    if setter_count == 0:  # Verify any metadata setter is needed.
+        return True  # Return success for already-correct metadata.
+
+    verbose_output(f"{BackgroundColors.GREEN}Executing mkvpropedit command:{BackgroundColors.CYAN} {' '.join(command)}{Style.RESET_ALL}")  # Output metadata command when verbose.
+    result = subprocess.run(command, capture_output=True, text=True, encoding="utf-8", errors="replace", check=False)  # Run mkvpropedit safely.
+    if result.returncode not in {0, 1}:  # Verify MKVToolNix did not fail.
+        print(f"{BackgroundColors.RED}mkvpropedit failed for: {BackgroundColors.CYAN}{full_path}{Style.RESET_ALL}")  # Report metadata failure.
+        if result.stderr.strip() != "":  # Verify stderr has diagnostic text.
+            print(f"{BackgroundColors.RED}{result.stderr.strip()}{Style.RESET_ALL}")  # Print diagnostic text.
+        return False  # Return failure without fallback.
+    if result.returncode == 1:  # Verify MKVToolNix completed with warnings.
+        warning_text = (result.stderr or result.stdout).strip()  # Capture warning text.
+        verbose_output(f"{BackgroundColors.YELLOW}mkvpropedit warning for {BackgroundColors.CYAN}{full_path}{BackgroundColors.YELLOW}: {warning_text}{Style.RESET_ALL}")  # Log warning without treating it as failure.
+
+    if not verify_mkv_subtitle_default_flags(full_path, chosen_pos):  # Verify post-edit metadata matches requested state.
+        print(f"{BackgroundColors.RED}mkvpropedit verification failed for: {BackgroundColors.CYAN}{full_path}{Style.RESET_ALL}")  # Report verification failure.
+        return False  # Return failure without fallback.
+
+    return True  # Return metadata-only success.
+
+
 def get_subtitle_streams(file_path):
     """
     Returns a list of subtitle streams in physical order (the order FFmpeg sees them).
@@ -508,6 +730,15 @@ def set_default_subtitle(full_path):
             f"{BackgroundColors.YELLOW}No preferred Portuguese subtitle found in {full_path}. Skipping default change.{Style.RESET_ALL}"
         )
         return True  # Nothing to do
+
+    if is_supported_mkv_metadata_file(full_path) and not DELETE_OTHER_SUBTITLES and mkv_metadata_tools_available():  # Prefer metadata-only editing for supported MKV files when no subtitle removal is needed.
+        if not mkvmerge_order_matches_ffprobe_subtitles(full_path, subtitle_streams):  # Verify ffprobe-selected subtitle position maps to mkvpropedit selector order.
+            verbose_output(f"{BackgroundColors.YELLOW}MKVToolNix selector order could not be verified for: {BackgroundColors.CYAN}{full_path}{Style.RESET_ALL}")  # Log unsafe selector mapping.
+        else:  # Use metadata-only path when selector mapping is safe.
+            result = apply_mkv_subtitle_metadata_default(full_path, chosen_pos)  # Apply default subtitle flags in place.
+            if result:  # Verify metadata-only edit succeeded.
+                verbose_output(f"{BackgroundColors.GREEN}Metadata-only default subtitle update completed for: {BackgroundColors.CYAN}{full_path}{Style.RESET_ALL}")  # Log metadata-only success.
+            return result  # Return metadata-only result without silent fallback after tool failure.
 
     base, ext = os.path.splitext(full_path)  # Split file path into base and extension
     temp_output = f"{base}_default{ext}"  # Temporary output file path
