@@ -42,6 +42,17 @@ Dependencies:
     - tqdm.
 
 Assumptions & Notes:
+    - ORIGINAL_ROOT may be a directory or one specific supported media file.
+    - TARGET_ROOT may be a directory or one specific supported media file.
+    - When ORIGINAL_ROOT and TARGET_ROOT are both specific media files, those two
+      explicitly configured files are paired directly even when their names,
+      stems, seasons, episodes, or container extensions differ.
+    - OUTPUT_ROOT may be a directory or a file-shaped path such as
+      "E:/Movies/Example/custom-name.mkv".
+    - When OUTPUT_ROOT is a file-shaped path, only its parent directory is used
+      for output placement and the configured filename itself is ignored.
+    - Generated-output filenames always continue using the target media stem plus
+      UPDATED_SUFFIX and the ".mkv" extension.
     - Movie roots may contain one supported media file directly in each configured
       root; those files are paired even when their filenames and extensions differ.
     - Series season directory names may use forms such as "Season 02" or "S02".
@@ -95,22 +106,23 @@ just_fix_windows_console()  # Enable ANSI color support in compatible Windows te
 
 LanguageClass = Literal["english", "ptbr"]  # Restrict supported audio language classes.
 FallbackAudioOrder = tuple[LanguageClass, LanguageClass] | None  # Define the optional source audio order.
+ConfiguredRootKind = Literal["directory", "file"]  # Distinguish configured directory roots from explicit media-file roots.
 Stream = dict[str, Any]  # Represent one FFprobe stream dictionary.
 MediaInfo = dict[str, Any]  # Represent parsed FFprobe media information.
 MatchedMediaPair = tuple[Path, Path, Path]  # Represent target media, matching original media, and the generated output path.
 
 ORIGINAL_ROOT = Path(r"F:/Movies/Dual/Atividade Paranormal 2 2010 720p Dual/")  # Preserve the configured lower-quality Dual source root providing PT-BR audio.
+ORIGINAL_PTBR_AUDIO_STREAM_INDEX: int | None = 1  # Override automatic original PT-BR selection with an exact global FFprobe audio stream index when known.
 ERASE_ORIGINAL_FILES = False  # Set to True to delete each processed lower-quality original media file only after its new output is safely generated.
 TARGET_ROOT = Path(r"E:/Movies/Legendado/Atividade Paranormal 2 2010 1080p Legendado/")  # Preserve the configured higher-quality target root providing video and English audio.
-ERASE_TARGET_FILES = True  # Set to True to delete each processed higher-quality target media file only after its new output is safely generated.
+ERASE_TARGET_FILES = False  # Set to True to delete each processed higher-quality target media file only after its new output is safely generated.
 OUTPUT_ROOT = Path(r"E:/Movies/Legendado/Atividade Paranormal 2 2010 1080p Legendado/")  # Store generated high-quality Dual outputs on G: instead of consuming limited D: free space.
+TARGET_ENGLISH_AUDIO_STREAM_INDEX: int | None = 1  # Override automatic target English selection with an exact global FFprobe audio stream index when known.
 FFMPEG = "ffmpeg"  # Select the configured FFmpeg executable.
 FFPROBE = "ffprobe"  # Select the configured FFprobe executable.
 UPDATED_SUFFIX = "-updated"  # Append the configured suffix to generated MKV files.
 DRY_RUN = False  # Execute commands instead of only printing planned operations.
 OVERWRITE = False  # Preserve existing generated outputs when disabled.
-TARGET_ENGLISH_AUDIO_STREAM_INDEX: int | None = None  # Override automatic target English selection with an exact global FFprobe audio stream index when known.
-ORIGINAL_PTBR_AUDIO_STREAM_INDEX: int | None = None  # Override automatic original PT-BR selection with an exact global FFprobe audio stream index when known.
 FALLBACK_ORIGINAL_AUDIO_ORDER: FallbackAudioOrder = None  # Preserve automatic PT-BR source-audio detection by default.
 MIN_FREE_SPACE_RESERVE_GB = 10  # Preserve at least this many GiB after the estimated output allocation.
 OUTPUT_SIZE_SAFETY_FACTOR = 1.10  # Reserve ten percent above matched target sizes for the injected PT-BR audio and container overhead.
@@ -182,6 +194,41 @@ def contains_token(value: str, token: str) -> bool:
     normalized_token = f" {normalized_token_text(token)} "  # Add boundaries around the normalized token.
 
     return normalized_token in normalized_value  # Match only complete tokens or token phrases.
+
+
+def is_supported_media_file(path: Path) -> bool:
+    """
+    Determine whether a path points to a supported media file.
+
+    :param path: Filesystem path to inspect.
+    :return: True when the path is an existing file with a supported media extension.
+    """
+
+    return path.is_file() and path.suffix.lower() in SUPPORTED_MEDIA_EXTENSIONS  # Require existing file state plus a supported media extension before classifying a path as explicit media input.
+
+
+def resolve_configured_input_root(path: Path, setting_name: str) -> tuple[ConfiguredRootKind, Path]:
+    """
+    Resolve a configured input root as either a directory or an explicit supported media file.
+
+    :param path: Configured ORIGINAL_ROOT or TARGET_ROOT path.
+    :param setting_name: Configuration constant name used in validation errors.
+    :return: Tuple containing the resolved root kind and the validated path.
+    """
+
+    if path.is_dir():  # Prefer actual filesystem directory state over filename-shape heuristics when the configured path already exists.
+        return "directory", path  # Report the validated directory root without altering the configured path text.
+
+    if path.exists():  # Handle existing non-directory paths using strict media-file validation rather than guessing by suffix alone.
+        if is_supported_media_file(path):  # Accept only existing supported media files as explicit configured inputs.
+            return "file", path  # Report the validated explicit media file without scanning its parent directory.
+
+        raise RuntimeError(f"{setting_name} must reference a directory or a supported media file: {path}")  # Reject existing unsupported files and special filesystem objects before processing starts.
+
+    if path.suffix.lower() in SUPPORTED_MEDIA_EXTENSIONS:  # Interpret a missing supported-media path as an intended explicit file so the failure stays specific and actionable.
+        raise FileNotFoundError(f"{setting_name} media file does not exist: {path}")  # Fail clearly for missing explicit media-file selections instead of reinterpreting them as directories.
+
+    raise FileNotFoundError(f"{setting_name} path does not exist: {path}")  # Fail clearly for missing directory-style roots without guessing another interpretation.
 
 
 def stream_tags(stream: Stream) -> Stream:
@@ -578,25 +625,106 @@ def episode_key(path: Path, expected_season: int | None = None) -> int | None:
     return None  # Report that no supported episode identifier was found.
 
 
-def build_original_season_map() -> dict[int, Path]:
+def media_season_number(path: Path) -> int | None:
+    """
+    Resolve a season number for an explicit media file using existing season rules.
+
+    :param path: Explicit media file path whose filename or parent folder may identify a season.
+    :return: Resolved season number or None when no deterministic season number is available.
+    """
+
+    parent_season = season_key(path.parent) if path.parent != path else None  # Reuse the existing season-directory parser when the explicit media file resides under a season folder.
+    explicit_match = re.search(r"s\s*0*(\d+)\s*e\s*0*\d+", path.stem, re.IGNORECASE)  # Reuse the existing explicit SxxExx filename pattern when the season is embedded in the media filename.
+    explicit_season = int(explicit_match.group(1)) if explicit_match is not None else None  # Parse the explicit season number only when the filename provides one.
+
+    if parent_season is not None and explicit_season is not None and parent_season != explicit_season:  # Reject contradictory explicit-file season metadata rather than guessing between parent-folder and filename context.
+        raise RuntimeError(f"Conflicting season identifiers for explicit media file: {path}")  # Stop before matching an explicit file against the wrong season directory.
+
+    return parent_season if parent_season is not None else explicit_season  # Prefer the existing directory-driven season context and fall back to explicit filename season metadata when needed.
+
+
+def build_season_map(root_directory: Path) -> dict[int, Path]:
+    """
+    Map season numbers to directories located directly under a root directory.
+
+    :param root_directory: Root directory containing candidate season folders.
+    :return: Dictionary mapping season numbers to season directories.
+    """
+
+    seasons: dict[int, Path] = {}  # Initialize the season-directory mapping for the supplied root directory.
+
+    for folder in root_directory.iterdir():  # Inspect each direct child under the supplied root directory in the same way the existing season workflow does.
+        if not folder.is_dir():  # Ignore files and other non-directory entries because season layouts are directory-based.
+            continue  # Continue with the next root entry.
+
+        key = season_key(folder)  # Extract the season number from the current directory name using the existing parser.
+
+        if key is not None:  # Retain only directories with supported season naming.
+            seasons[key] = folder  # Map the parsed season number to the corresponding filesystem directory.
+
+    return seasons  # Return the complete season-directory lookup for the supplied root directory.
+
+
+def build_original_season_map(original_root: Path | None = None) -> dict[int, Path]:
     """
     Map original season numbers to their configured directories.
 
+    :param original_root: Optional original root directory overriding ORIGINAL_ROOT.
     :return: Dictionary mapping season numbers to original season directories.
     """
 
-    seasons: dict[int, Path] = {}  # Initialize the original season mapping.
+    root_directory = original_root if original_root is not None else ORIGINAL_ROOT  # Reuse the configured original root unless a validated directory override is supplied explicitly.
 
-    for folder in ORIGINAL_ROOT.iterdir():  # Inspect each entry under the original media root.
-        if not folder.is_dir():  # Ignore files and other non-directory entries.
-            continue  # Continue with the next original root entry.
+    return build_season_map(root_directory)  # Reuse the shared season-directory mapper so original-root season handling stays consistent across workflows.
 
-        key = season_key(folder)  # Extract the season number from the directory name.
 
-        if key is not None:  # Retain directories with recognized season numbers.
-            seasons[key] = folder  # Map the season number to its original directory.
+def resolve_matching_media(candidate_directory: Path, reference_media: Path, candidate_label: str, reference_label: str, season_number: int | None = None) -> Path | None:
+    """
+    Resolve a media file in one directory using the existing filename, stem, and episode matching rules.
 
-    return seasons  # Return the complete original season mapping.
+    :param candidate_directory: Directory containing media candidates to inspect.
+    :param reference_media: Media file whose counterpart is required.
+    :param candidate_label: Human-readable label describing the candidate side in validation errors.
+    :param reference_label: Human-readable label describing the reference side in validation errors.
+    :param season_number: Optional matched season number used for episode-number resolution.
+    :return: Matching media path or None when no unambiguous match exists.
+    """
+
+    exact_match = candidate_directory / reference_media.name  # Build the candidate path using the exact reference filename and extension before broader matching begins.
+
+    if exact_match.is_file() and exact_match.suffix.lower() in SUPPORTED_MEDIA_EXTENSIONS:  # Prefer an exact supported filesystem filename match when present.
+        return exact_match  # Return the exact matching candidate media file immediately because no broader search is needed.
+
+    casefolded_name = reference_media.name.casefold()  # Normalize the complete reference filename for case-insensitive matching on all supported filesystems.
+    candidate_files = iter_media_files(candidate_directory, include_updated=True)  # Collect supported candidate media files from the requested directory using the existing deterministic ordering.
+    matching_names = [candidate for candidate in candidate_files if candidate.name.casefold() == casefolded_name]  # Locate case-insensitive complete filename matches before stem-based matching.
+
+    if len(matching_names) > 1:  # Reject ambiguous complete filenames on case-sensitive filesystems rather than picking one arbitrarily.
+        raise RuntimeError(f"Multiple {candidate_label} files match {reference_label} media filename: {reference_media}")  # Preserve the existing ambiguity-failure behavior with side-specific wording.
+
+    if matching_names:  # Prefer a unique complete filename match before comparing filename stems.
+        return matching_names[0]  # Return the unique case-insensitive complete filename match.
+
+    casefolded_stem = reference_media.stem.casefold()  # Normalize the reference filename without its container extension for cross-container matching.
+    matching_stems = [candidate for candidate in candidate_files if candidate.stem.casefold() == casefolded_stem]  # Match equivalent media names even when the container extension differs.
+
+    if len(matching_stems) > 1:  # Reject ambiguous same-stem files across multiple container formats rather than guessing between them.
+        raise RuntimeError(f"Multiple {candidate_label} files match {reference_label} media stem: {reference_media}")  # Preserve the existing stem-ambiguity failure with side-specific wording.
+
+    if matching_stems:  # Prefer a unique same-stem match before attempting season-aware episode matching.
+        return matching_stems[0]  # Return the unique same-stem candidate media file.
+
+    reference_episode = episode_key(reference_media, season_number)  # Extract the episode number from the reference filename using the existing episode parser.
+
+    if reference_episode is None:  # Stop when the reference filename provides no safe episode identifier for season-based matching.
+        return None  # Report that no supported candidate match could be resolved deterministically.
+
+    matching_episodes = [candidate for candidate in candidate_files if episode_key(candidate, season_number) == reference_episode]  # Match numeric candidate filenames such as "01.mp4" to descriptive SxxExx reference filenames.
+
+    if len(matching_episodes) > 1:  # Reject duplicate candidate files for the same episode number rather than selecting one arbitrarily.
+        raise RuntimeError(f"Multiple {candidate_label} files match {reference_label} episode S{season_number:02d}E{reference_episode:02d}: {reference_media}" if season_number is not None else f"Multiple {candidate_label} files match {reference_label} episode {reference_episode}: {reference_media}")  # Preserve the existing episode-ambiguity failure while describing both sides clearly.
+
+    return matching_episodes[0] if matching_episodes else None  # Return the unique episode-number match when available and otherwise report that no deterministic match exists.
 
 
 def iter_media_files(directory: Path, include_updated: bool = False) -> list[Path]:
@@ -626,41 +754,20 @@ def resolve_original_media(original_directory: Path, target_media: Path, season_
     :return: Matching original media path or None when no unambiguous match exists.
     """
 
-    exact_match = original_directory / target_media.name  # Build the original path using the exact target filename and extension.
+    return resolve_matching_media(original_directory, target_media, "original", "target", season_number)  # Reuse the shared deterministic matching rules so every original-side resolution path stays consistent.
 
-    if exact_match.is_file() and exact_match.suffix.lower() in SUPPORTED_MEDIA_EXTENSIONS:  # Prefer an exact supported filesystem filename match.
-        return exact_match  # Return the exact matching original media file.
 
-    casefolded_name = target_media.name.casefold()  # Normalize the complete target filename for case-insensitive matching.
-    original_files = iter_media_files(original_directory, include_updated=True)  # Collect supported original media candidates from the requested directory.
-    matching_names = [candidate for candidate in original_files if candidate.name.casefold() == casefolded_name]  # Locate case-insensitive complete filename matches.
+def resolve_target_media(target_directory: Path, original_media: Path, season_number: int | None = None) -> Path | None:
+    """
+    Resolve the target media file matching an original filename, stem, or episode number.
 
-    if len(matching_names) > 1:  # Reject ambiguous complete filenames on case-sensitive filesystems.
-        raise RuntimeError(f"Multiple original files match target media filename: {target_media}")  # Prevent selecting an arbitrary original media file.
+    :param target_directory: Target media directory containing candidate media files.
+    :param original_media: Original media file whose target counterpart is required.
+    :param season_number: Optional matched season number used for episode-number resolution.
+    :return: Matching target media path or None when no unambiguous match exists.
+    """
 
-    if matching_names:  # Prefer a unique complete filename match before comparing filename stems.
-        return matching_names[0]  # Return the unique case-insensitive complete filename match.
-
-    casefolded_stem = target_media.stem.casefold()  # Normalize the target filename without its container extension.
-    matching_stems = [candidate for candidate in original_files if candidate.stem.casefold() == casefolded_stem]  # Match equivalent media names even when container extensions differ.
-
-    if len(matching_stems) > 1:  # Reject ambiguous same-stem files across multiple source container formats.
-        raise RuntimeError(f"Multiple original files match target media stem: {target_media}")  # Prevent guessing between duplicate source representations.
-
-    if matching_stems:  # Prefer a unique same-stem match before attempting series-specific episode matching.
-        return matching_stems[0]  # Return the unique same-stem source media file.
-
-    target_episode = episode_key(target_media, season_number)  # Extract the target episode number from names such as "Breaking Bad - S02E01 - Title.mkv".
-
-    if target_episode is None:  # Stop when the target filename provides no safe episode identifier.
-        return None  # Report that no supported source match could be resolved.
-
-    matching_episodes = [candidate for candidate in original_files if episode_key(candidate, season_number) == target_episode]  # Match numeric source filenames such as "01.mp4" to descriptive SxxExx target filenames.
-
-    if len(matching_episodes) > 1:  # Reject duplicate source candidates for the same season episode number.
-        raise RuntimeError(f"Multiple original files match target episode S{season_number:02d}E{target_episode:02d}: {target_media}" if season_number is not None else f"Multiple original files match target episode {target_episode}: {target_media}")  # Prevent selecting an arbitrary source episode.
-
-    return matching_episodes[0] if matching_episodes else None  # Return the unique episode-number match when available.
+    return resolve_matching_media(target_directory, original_media, "target", "original", season_number)  # Reuse the same deterministic matching rules in reverse so explicit original-file workflows cannot invent new behavior.
 
 
 def select_target_english_audio_track(target_media: Path, streams: list[Stream]) -> Stream:
@@ -849,6 +956,114 @@ def copy_external_srts(target_media: Path, output_mkv: Path) -> None:
             print(f"  {subtitle_path} -> {destination}")  # Display the planned external subtitle copy.
         else:  # Perform the real copy silently so the tqdm progress bar remains the only routine per-file output.
             shutil.copy2(subtitle_path, destination)  # Copy target subtitle contents and filesystem metadata.
+
+
+def resolved_output_root_directory() -> Path:
+    """
+    Resolve the actual directory used for generated outputs from OUTPUT_ROOT.
+
+    :return: Output directory used for generated media placement and storage calculations.
+    """
+
+    if OUTPUT_ROOT.is_dir():  # Prefer actual filesystem directory state when the configured output root already exists as a directory.
+        return OUTPUT_ROOT  # Preserve the existing directory-based output behavior exactly.
+
+    if OUTPUT_ROOT.exists():  # Handle existing non-directory output-root paths using strict file-shape validation rather than directory-creation heuristics.
+        if OUTPUT_ROOT.is_file() and OUTPUT_ROOT.suffix.lower() in SUPPORTED_MEDIA_EXTENSIONS:  # Accept an existing supported media file path only as a signal that its parent directory should receive generated outputs.
+            return OUTPUT_ROOT.parent  # Use only the parent directory so the configured filename never becomes the generated output filename or a directory name.
+
+        raise RuntimeError(f"OUTPUT_ROOT must reference a directory or a supported media file path: {OUTPUT_ROOT}")  # Reject unsupported existing files and special filesystem objects before any output path is derived.
+
+    if OUTPUT_ROOT.suffix:  # Interpret a non-existent suffixed output root using supported media extensions because no actual filesystem state exists yet.
+        if OUTPUT_ROOT.suffix.lower() not in SUPPORTED_MEDIA_EXTENSIONS:  # Reject unsupported suffixed output-root paths because their intended file-versus-directory meaning is ambiguous.
+            raise RuntimeError(f"OUTPUT_ROOT uses an unsupported media extension: {OUTPUT_ROOT}")  # Fail clearly rather than silently creating a directory named after an unsupported filename.
+
+        return OUTPUT_ROOT.parent  # Use only the parent directory for non-existent file-shaped output roots so later directory creation targets the correct filesystem location.
+
+    return OUTPUT_ROOT  # Treat a non-existent suffixless output root as a directory path because that matches the existing configuration style and output naming rules.
+
+
+def output_directory_for_target_media(target_media: Path, target_root_kind: ConfiguredRootKind, target_root: Path) -> Path:
+    """
+    Resolve the generated-output directory for one target media file.
+
+    :param target_media: Target media file whose placement rules must be applied.
+    :param target_root_kind: Resolved TARGET_ROOT kind.
+    :param target_root: Validated TARGET_ROOT path.
+    :return: Output directory used for the generated media file.
+    """
+
+    output_root_directory = resolved_output_root_directory()  # Resolve the actual output base directory once so file-shaped OUTPUT_ROOT values use only their parent directory.
+
+    if target_root_kind == "directory" and target_media.parent != target_root and season_key(target_media.parent) is not None:  # Preserve the existing per-season output folder behavior only for season-based target-directory workflows.
+        return output_root_directory / target_media.parent.name  # Recreate the matched target season directory name beneath the resolved output root.
+
+    return output_root_directory  # Use the resolved output root directly for direct-movie workflows and explicit target-file workflows.
+
+
+def resolve_media_match_from_directory(candidate_root: Path, reference_media: Path, candidate_kind: str) -> Path | None:
+    """
+    Resolve one explicit media file against a configured directory using existing direct-movie and season matching rules.
+
+    :param candidate_root: Directory containing candidate media files or season folders.
+    :param reference_media: Explicit media file whose counterpart is required.
+    :param candidate_kind: Side being resolved, either "original" or "target".
+    :return: Matching media path or None when no deterministic counterpart exists.
+    """
+
+    direct_match = resolve_original_media(candidate_root, reference_media) if candidate_kind == "original" else resolve_target_media(candidate_root, reference_media)  # Reuse the existing direct-root filename, stem, and one-movie matching rules before considering season directories.
+    season_match: Path | None = None  # Initialize the optional season-based match so direct-movie and season workflows can be compared for ambiguity.
+    season_number = media_season_number(reference_media)  # Resolve a deterministic season number from the explicit media file only when the existing season workflow provides one.
+
+    if season_number is not None:  # Attempt season-based matching only when the explicit media file safely exposes a season number.
+        season_map = build_season_map(candidate_root)  # Reuse the existing season-directory parser for the configured candidate directory.
+        season_directory = season_map.get(season_number)  # Resolve the matching season directory using the same season-number lookup used elsewhere in the script.
+
+        if season_directory is not None:  # Attempt episode matching only when the configured directory actually contains the resolved season folder.
+            season_match = resolve_original_media(season_directory, reference_media, season_number) if candidate_kind == "original" else resolve_target_media(season_directory, reference_media, season_number)  # Reuse the existing season-aware episode matching rules within the resolved season directory.
+
+    if direct_match is not None and season_match is not None and direct_match.resolve() != season_match.resolve():  # Reject cross-layout ambiguity when direct-root and season-based matching would select different files.
+        raise RuntimeError(f"Multiple {candidate_kind} files match explicit media selection: {reference_media}")  # Stop rather than inventing precedence between two valid but different configured-directory matches.
+
+    return direct_match or season_match  # Return the unique deterministic match from either existing workflow when available.
+
+
+def resolve_explicit_media_pair() -> MatchedMediaPair | None:
+    """
+    Resolve an explicit configured media pair when either input root is a specific media file.
+
+    :return: Target media, original media, and generated output path tuple, or None when both roots remain directory-based.
+    """
+
+    original_root_kind, original_root = resolve_configured_input_root(ORIGINAL_ROOT, "ORIGINAL_ROOT")  # Classify the configured original input so explicit-file workflows can bypass directory scanning safely.
+    target_root_kind, target_root = resolve_configured_input_root(TARGET_ROOT, "TARGET_ROOT")  # Classify the configured target input so explicit-file workflows can bypass directory scanning safely.
+
+    if original_root_kind == "directory" and target_root_kind == "directory":  # Preserve the existing directory-based discovery flow when neither side is an explicit file.
+        return None  # Report that normal directory-based matching should remain active.
+
+    if original_root_kind == "file" and target_root_kind == "file":  # Pair two explicitly configured files directly because the user selected both inputs intentionally.
+        output_directory = output_directory_for_target_media(target_root, target_root_kind, target_root)  # Resolve the output directory using the explicit target file and the configured OUTPUT_ROOT rules.
+
+        return target_root, original_root, build_output_media_path(target_root, output_directory)  # Return the direct explicit pair while preserving the existing target-based generated-output naming convention.
+
+    if target_root_kind == "file":  # Resolve the original counterpart from the configured original directory without replacing the explicit target file.
+        original_match = resolve_media_match_from_directory(original_root, target_root, "original")  # Reuse the existing original-side matching rules against the explicit target file.
+
+        if original_match is None:  # Reject explicit-target configurations whose directory-side counterpart cannot be resolved unambiguously.
+            raise RuntimeError(f"Could not resolve an original counterpart for explicit target media: {target_root}")  # Fail clearly rather than guessing another original file.
+
+        output_directory = output_directory_for_target_media(target_root, target_root_kind, target_root)  # Resolve the output directory for the explicit target file.
+
+        return target_root, original_match, build_output_media_path(target_root, output_directory)  # Return the resolved explicit-target pair while preserving the existing output naming convention.
+
+    target_match = resolve_media_match_from_directory(target_root, original_root, "target")  # Reuse the existing target-side matching rules against the explicit original file.
+
+    if target_match is None:  # Reject explicit-original configurations whose directory-side counterpart cannot be resolved unambiguously.
+        raise RuntimeError(f"Could not resolve a target counterpart for explicit original media: {original_root}")  # Fail clearly rather than guessing another target file.
+
+    output_directory = output_directory_for_target_media(target_match, target_root_kind, target_root)  # Resolve the output directory using the matched target file and the configured OUTPUT_ROOT rules.
+
+    return target_match, original_root, build_output_media_path(target_match, output_directory)  # Return the resolved explicit-original pair while preserving the existing target-based generated-output naming convention.
 
 
 def build_ffmpeg_command(target_media: Path, original_media: Path, output_mkv: Path) -> list[str]:
@@ -1057,7 +1272,7 @@ def build_output_media_path(target_media: Path, output_directory: Path | None = 
     :return: Generated MKV path.
     """
 
-    destination_directory = output_directory if output_directory is not None else OUTPUT_ROOT  # Select the dedicated output root or a season-specific subdirectory.
+    destination_directory = output_directory if output_directory is not None else resolved_output_root_directory()  # Select the resolved output root directory or a season-specific subdirectory while ignoring any configured OUTPUT_ROOT filename.
 
     return destination_directory / f"{target_media.stem}{UPDATED_SUFFIX}.mkv"  # Build a Matroska output path on the configured output drive.
 
@@ -1130,7 +1345,7 @@ def validate_media_pair_output_storage(target_media: Path, output_mkv: Path) -> 
     if disk_usage.free < required_free_bytes:  # Stop before FFmpeg when actual current capacity cannot safely hold this single generated output.
         gib = 1024 ** 3  # Define the binary gigabyte divisor used for readable runtime diagnostics.
         raise RuntimeError(  # Report a pair-specific capacity shortage without relying on earlier deletion assumptions.
-            f"Insufficient current free space for the next generated output under {OUTPUT_ROOT}. "
+            f"Insufficient current free space for the next generated output under {output_mkv.parent}. "
             f"Need approximately {required_free_bytes / gib:.2f} GiB including reserve for {output_mkv.name}, "
             f"but only {disk_usage.free / gib:.2f} GiB is currently free."
         )
@@ -1146,7 +1361,7 @@ def process_media_pair(target_media: Path, original_media: Path, output_director
     :return: None.
     """
 
-    destination_directory = output_directory if output_directory is not None else OUTPUT_ROOT  # Select the dedicated output root or a season-specific subdirectory.
+    destination_directory = output_directory if output_directory is not None else resolved_output_root_directory()  # Select the resolved output root directory or a season-specific subdirectory while ignoring any configured OUTPUT_ROOT filename.
     output_mkv = build_output_media_path(target_media, destination_directory)  # Build the generated Matroska path using the shared output-path convention.
 
     if output_mkv.exists() and not OVERWRITE:  # Preserve an existing generated output when overwrite is disabled.
@@ -1190,15 +1405,42 @@ def process_root_movies(errors: list[str]) -> bool:
     :return: True when at least one direct target media file is available for processing.
     """
 
-    target_movies = iter_media_files(TARGET_ROOT)  # Collect direct higher-quality target media files while excluding generated outputs.
+    explicit_pair = resolve_explicit_media_pair()  # Resolve any workflow where either configured input root is an explicit media file before directory discovery begins.
+
+    if explicit_pair is not None:  # Handle explicit-file workflows through one deterministic media pair rather than directory scanning.
+        target_media, original_media, output_mkv = explicit_pair  # Unpack the explicit or partially explicit pair resolved by the shared root-classification logic.
+        progress_bar = tqdm(  # Render one inline-updated progress bar so explicit-file workflows keep the existing operator experience.
+            [target_media],
+            total=1,
+            unit="file",
+            dynamic_ncols=True,
+            colour="green",
+            bar_format=f"{{l_bar}}{Fore.GREEN}{{bar}}{Fore.GREEN}| {{n_fmt}}/{{total_fmt}} [{{elapsed}}<{{remaining}}, {{rate_fmt}}{{postfix}}]{Fore.RESET}",
+        )  # Keep the percentage, bar, counters, timing, and rate green even after tqdm emits its own ANSI reset sequences.
+
+        for current_target_media in progress_bar:  # Process the single resolved explicit-file pair through the same muxing path used by directory workflows.
+            progress_bar.set_description(f"{Fore.GREEN}Muxing: {Fore.CYAN}{current_target_media.name}{Fore.GREEN}")  # Keep static progress text green and the current filename cyan.
+
+            try:  # Isolate explicit-pair processing failures so they aggregate consistently with directory workflows.
+                process_media_pair(current_target_media, original_media, output_mkv.parent)  # Mux the resolved explicit-file pair into the already validated output directory.
+            except Exception as exception:  # Aggregate the explicit-pair failure rather than aborting immediately so reporting stays consistent.
+                errors.append(f"{current_target_media}\n{type(exception).__name__}: {exception}")  # Store the explicit target path and exception details.
+
+        progress_bar.close()  # Finalize the explicit-file progress row cleanly.
+
+        return True  # Report that explicit-file processing consumed the requested workflow.
+
+    _, target_root = resolve_configured_input_root(TARGET_ROOT, "TARGET_ROOT")  # Reuse the validated directory root after explicit-file workflows have already been excluded.
+    _, original_root = resolve_configured_input_root(ORIGINAL_ROOT, "ORIGINAL_ROOT")  # Reuse the validated directory root after explicit-file workflows have already been excluded.
+    target_movies = iter_media_files(target_root)  # Collect direct higher-quality target media files while excluding generated outputs.
 
     if not target_movies:  # Report that the configured roots do not use the direct movie layout.
         return False  # Allow the caller to continue with season-based series processing.
 
-    original_movies = iter_media_files(ORIGINAL_ROOT)  # Collect direct original PT-BR source media files while excluding generated outputs.
+    original_movies = iter_media_files(original_root)  # Collect direct original PT-BR source media files while excluding generated outputs.
 
     if not original_movies:  # Handle a target movie layout without any direct original media file.
-        errors.append(f"No original movie media files found directly in: {ORIGINAL_ROOT}")  # Record the missing source movie files.
+        errors.append(f"No original movie media files found directly in: {original_root}")  # Record the missing source movie files.
 
         return True  # Report that a direct target movie layout was detected even though it could not be processed.
 
@@ -1218,14 +1460,14 @@ def process_root_movies(errors: list[str]) -> bool:
             if len(target_movies) == 1 and len(original_movies) == 1:  # Preserve the unambiguous one-movie-per-root matching rule even when filenames differ.
                 original_media = original_movies[0]  # Select the only direct original PT-BR source movie.
             else:  # Resolve multiple direct movies by their existing safe filename/stem matching rules.
-                original_media = resolve_original_media(ORIGINAL_ROOT, target_media)  # Resolve a same-named original movie without guessing among multiple files.
+                original_media = resolve_original_media(original_root, target_media)  # Resolve a same-named original movie without guessing among multiple files.
 
             if original_media is None:  # Handle a direct target movie without an unambiguous original filename or stem match.
                 tqdm.write(f"Skipping target movie without a common original counterpart: {target_media}")  # Report the intentional skip without corrupting the active progress bar.
 
                 continue  # Continue with the next direct target movie.
 
-            process_media_pair(target_media, original_media, OUTPUT_ROOT)  # Mux the resolved direct movie pair into the dedicated output root.
+            process_media_pair(target_media, original_media, resolved_output_root_directory())  # Mux the resolved direct movie pair into the resolved output root directory.
         except Exception as exception:  # Aggregate one direct movie failure without stopping the remaining files.
             errors.append(f"{target_media}\n{type(exception).__name__}: {exception}")  # Store the movie path and exception details.
 
@@ -1245,7 +1487,7 @@ def process_target_season(target_season: Path, original_season: Path, season_num
     :return: None.
     """
 
-    output_season = OUTPUT_ROOT / target_season.name  # Preserve the target season folder name beneath the dedicated G: output root.
+    output_season = resolved_output_root_directory() / target_season.name  # Preserve the target season folder name beneath the resolved output root directory.
     target_media_files = iter_media_files(target_season)  # Collect the deterministic episode list once for progress accounting.
     progress_bar = tqdm(  # Render one inline-updated progress bar for this season.
         target_media_files,
@@ -1282,28 +1524,35 @@ def matched_media_pairs() -> list[MatchedMediaPair]:
     """
 
     matched_pairs: list[MatchedMediaPair] = []  # Initialize matched media pairs used for storage simulation and diagnostics.
-    target_movies = iter_media_files(TARGET_ROOT)  # Collect direct higher-quality target movie files when the configured roots use movie layout.
-    original_movies = iter_media_files(ORIGINAL_ROOT)  # Collect direct lower-quality original movie files when the configured roots use movie layout.
+    explicit_pair = resolve_explicit_media_pair()  # Resolve any workflow where either configured input root is an explicit media file before directory discovery begins.
+
+    if explicit_pair is not None:  # Treat explicit-file workflows as one already resolved pair rather than re-running directory discovery.
+        return [explicit_pair]  # Return the resolved explicit pair so storage simulation and output validation reuse the same deterministic pairing.
+
+    _, target_root = resolve_configured_input_root(TARGET_ROOT, "TARGET_ROOT")  # Reuse the validated target directory root after explicit-file workflows have already been excluded.
+    _, original_root = resolve_configured_input_root(ORIGINAL_ROOT, "ORIGINAL_ROOT")  # Reuse the validated original directory root after explicit-file workflows have already been excluded.
+    target_movies = iter_media_files(target_root)  # Collect direct higher-quality target movie files when the configured roots use movie layout.
+    original_movies = iter_media_files(original_root)  # Collect direct lower-quality original movie files when the configured roots use movie layout.
 
     if len(target_movies) == 1 and len(original_movies) == 1:  # Handle the unambiguous direct one-movie layout.
         target_media = target_movies[0]  # Select the only direct higher-quality target movie.
         original_media = original_movies[0]  # Select the only direct original PT-BR source movie.
-        output_mkv = build_output_media_path(target_media, OUTPUT_ROOT)  # Build the direct movie output path beneath the configured output root.
+        output_mkv = build_output_media_path(target_media, resolved_output_root_directory())  # Build the direct movie output path beneath the resolved output root directory.
         matched_pairs.append((target_media, original_media, output_mkv))  # Retain the complete direct movie pair for ordered storage simulation.
     elif target_movies and original_movies:  # Handle multiple direct movies using only safe filename/stem matches.
         for target_media in target_movies:  # Inspect each direct target movie candidate in the same order used by processing.
             try:  # Ignore ambiguous candidates here because processing will report them with full context.
-                original_media = resolve_original_media(ORIGINAL_ROOT, target_media)  # Resolve a safe matching original direct movie.
+                original_media = resolve_original_media(original_root, target_media)  # Resolve a safe matching original direct movie.
 
                 if original_media is not None:  # Include only direct movies with an unambiguous original counterpart.
-                    output_mkv = build_output_media_path(target_media, OUTPUT_ROOT)  # Build the direct movie output path beneath the configured output root.
+                    output_mkv = build_output_media_path(target_media, resolved_output_root_directory())  # Build the direct movie output path beneath the resolved output root directory.
                     matched_pairs.append((target_media, original_media, output_mkv))  # Add the complete direct movie pair to the ordered storage simulation.
             except RuntimeError:  # Defer ambiguous direct movie reporting to the processing phase.
                 continue  # Exclude the unresolved candidate from storage simulation.
 
-    original_seasons = build_original_season_map()  # Build original season lookup using verbose or compact supported season naming.
+    original_seasons = build_original_season_map(original_root)  # Build original season lookup using verbose or compact supported season naming.
 
-    for target_season in sorted(TARGET_ROOT.iterdir(), key=lambda entry: entry.name.casefold()):  # Inspect higher-quality target season directories in the same deterministic order used by processing.
+    for target_season in sorted(target_root.iterdir(), key=lambda entry: entry.name.casefold()):  # Inspect higher-quality target season directories in the same deterministic order used by processing.
         if not target_season.is_dir():  # Ignore files and other non-directory target-root entries.
             continue  # Continue with the next target-root entry.
 
@@ -1317,7 +1566,7 @@ def matched_media_pairs() -> list[MatchedMediaPair]:
         if original_season is None:  # Skip seasons that are not common to both configured roots.
             continue  # Continue with the next target season.
 
-        output_season = OUTPUT_ROOT / target_season.name  # Preserve the target season folder name beneath the configured output root.
+        output_season = resolved_output_root_directory() / target_season.name  # Preserve the target season folder name beneath the resolved output root directory.
 
         for target_media in iter_media_files(target_season):  # Inspect target episodes in the same deterministic order used by processing.
             try:  # Ignore ambiguous candidates here because processing will report them with full context.
@@ -1356,7 +1605,8 @@ def validate_output_storage() -> None:
         raise RuntimeError("No common target/original media pairs were found for the configured roots.")  # Prevent an apparently successful run that produces nothing.
 
     reserve_bytes = MIN_FREE_SPACE_RESERVE_GB * 1024 ** 3  # Convert the configured post-processing free-space reserve from GiB to bytes.
-    storage_probe = existing_filesystem_path(OUTPUT_ROOT)  # Resolve an existing path on the actual output filesystem without creating anything.
+    output_root_directory = resolved_output_root_directory()  # Resolve the actual output directory once so storage calculations ignore any configured OUTPUT_ROOT filename safely.
+    storage_probe = existing_filesystem_path(output_root_directory)  # Resolve an existing path on the actual output filesystem without creating anything.
     disk_usage = shutil.disk_usage(storage_probe)  # Read total, used, and free bytes from the output filesystem before processing starts.
     running_additional_bytes = 0  # Track net output-filesystem growth relative to the current pre-run filesystem state.
     peak_additional_bytes = 0  # Track the maximum temporary growth reached before configured source deletion occurs for each pair.
@@ -1407,7 +1657,7 @@ def validate_output_storage() -> None:
     gib = 1024 ** 3  # Define the binary gigabyte divisor used for readable storage diagnostics.
 
     print(f"\n{Fore.GREEN}Storage preflight:{Fore.RESET}")  # Announce the destination-drive capacity simulation with the hardcoded label in green.
-    print(f"{Fore.GREEN}  Output root             : {Fore.CYAN}{OUTPUT_ROOT}{Fore.RESET}")  # Display the configured generated-output location with the dynamic value in cyan.
+    print(f"{Fore.GREEN}  Output root             : {Fore.CYAN}{output_root_directory}{Fore.RESET}")  # Display the resolved generated-output directory with the dynamic value in cyan.
     print(f"{Fore.GREEN}  Matched media pairs     : {Fore.CYAN}{len(matched_pairs)}{Fore.RESET}")  # Display all unambiguous common pairs regardless of existing-output skipping.
     print(f"{Fore.GREEN}  Pairs requiring output  : {Fore.CYAN}{pairs_requiring_output}{Fore.RESET}")  # Display how many pairs actually require allocation under the overwrite policy.
     print(f"{Fore.GREEN}  Matched target size     : {Fore.CYAN}{target_bytes / gib:.2f} GiB{Fore.RESET}")  # Display target sizes for outputs that will actually be generated or replaced.
@@ -1429,7 +1679,7 @@ def validate_output_storage() -> None:
 
     if disk_usage.free < required_with_reserve:  # Reject processing only when the erasure-aware peak cannot fit while preserving the configured reserve.
         raise RuntimeError(  # Report the simulated peak capacity shortfall before FFmpeg creates any large output.
-            f"Insufficient peak free space under output root {OUTPUT_ROOT}. "
+            f"Insufficient peak free space under output root {output_root_directory}. "
             f"Need approximately {required_with_reserve / gib:.2f} GiB including reserve after accounting for configured source erasure, "
             f"but only {disk_usage.free / gib:.2f} GiB is currently free."
         )
@@ -1458,44 +1708,44 @@ def main() -> None:
     :return: None.
     """
 
-    if not ORIGINAL_ROOT.exists():  # Validate the configured lower-quality original PT-BR source root.
-        raise FileNotFoundError(f"Original root does not exist: {ORIGINAL_ROOT}")  # Stop before processing an unavailable source root.
-
-    if not TARGET_ROOT.exists():  # Validate the configured higher-quality target root.
-        raise FileNotFoundError(f"Target root does not exist: {TARGET_ROOT}")  # Stop before processing an unavailable target root.
+    original_root_kind, original_root = resolve_configured_input_root(ORIGINAL_ROOT, "ORIGINAL_ROOT")  # Validate and classify the configured original input before any discovery or storage work begins.
+    target_root_kind, target_root = resolve_configured_input_root(TARGET_ROOT, "TARGET_ROOT")  # Validate and classify the configured target input before any discovery or storage work begins.
+    resolved_output_root_directory()  # Validate OUTPUT_ROOT semantics before storage simulation, directory creation, or output-path derivation begins.
 
     validate_output_storage()  # Verify that the dedicated output drive can hold the expected matched outputs before starting FFmpeg.
     errors: list[str] = []  # Initialize aggregated movie, season, and episode processing errors.
     processed_root_movies = process_root_movies(errors)  # Process supported media files located directly inside configured movie roots when present.
-    original_seasons = build_original_season_map()  # Build the original season lookup by season number using supported season naming forms.
     processed_target_seasons = False  # Track whether the target root contains at least one recognized season directory.
 
-    for target_season in sorted(TARGET_ROOT.iterdir(), key=lambda entry: entry.name.casefold()):  # Inspect target root entries in deterministic order.
-        if not target_season.is_dir():  # Ignore files and other non-directory entries.
-            continue  # Continue with the next target root entry.
+    if original_root_kind == "directory" and target_root_kind == "directory":  # Preserve the existing season-based discovery flow only when both configured roots remain directory-based.
+        original_seasons = build_original_season_map(original_root)  # Build the original season lookup by season number using supported season naming forms.
 
-        season_number = season_key(target_season)  # Extract a target season number from forms such as "S02" or "Season 02".
+        for target_season in sorted(target_root.iterdir(), key=lambda entry: entry.name.casefold()):  # Inspect target root entries in deterministic order.
+            if not target_season.is_dir():  # Ignore files and other non-directory entries.
+                continue  # Continue with the next target root entry.
 
-        if season_number is None:  # Handle directories without a recognizable season number.
-            print(f"Skipping folder without season number: {target_season}")  # Report the skipped target directory.
+            season_number = season_key(target_season)  # Extract a target season number from forms such as "S02" or "Season 02".
 
-            continue  # Continue with the next target season directory.
+            if season_number is None:  # Handle directories without a recognizable season number.
+                print(f"Skipping folder without season number: {target_season}")  # Report the skipped target directory.
 
-        original_season = original_seasons.get(season_number)  # Resolve the matching lower-quality original season directory.
+                continue  # Continue with the next target season directory.
 
-        if original_season is None:  # Handle target seasons without a common original counterpart.
-            print(f"Skipping target season without a common original counterpart: {target_season}")  # Report the intentionally skipped non-common season.
+            original_season = original_seasons.get(season_number)  # Resolve the matching lower-quality original season directory.
 
-            continue  # Continue with the next target season directory.
+            if original_season is None:  # Handle target seasons without a common original counterpart.
+                print(f"Skipping target season without a common original counterpart: {target_season}")  # Report the intentionally skipped non-common season.
 
-        processed_target_seasons = True  # Record that at least one common season-based series layout was found.
-        process_target_season(target_season, original_season, season_number, errors)  # Process only common episodes in the matched season.
+                continue  # Continue with the next target season directory.
+
+            processed_target_seasons = True  # Record that at least one common season-based series layout was found.
+            process_target_season(target_season, original_season, season_number, errors)  # Process only common episodes in the matched season.
 
     if not processed_root_movies and not processed_target_seasons:  # Reject roots that contain neither common direct movies nor common season directories.
         raise RuntimeError(  # Report the supported common-media layouts required for processing.
             f"No common direct movie files or matching target/original season folders found between:\n"
-            f"Target  : {TARGET_ROOT}\n"
-            f"Original: {ORIGINAL_ROOT}"
+            f"Target  : {target_root}\n"
+            f"Original: {original_root}"
         )
 
     if errors:  # Report all collected failures after processing every common media layout.
