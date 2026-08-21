@@ -23,8 +23,9 @@ Description :
 
 Usage:
     1. Configure ORIGINAL_ROOT, TARGET_ROOT, OUTPUT_ROOT, DRY_RUN, OVERWRITE,
-       ERASE_TARGET_FILES, ERASE_ORIGINAL_FILES, and the optional
-       FALLBACK_ORIGINAL_AUDIO_ORDER value.
+       ERASE_TARGET_FILES, ERASE_ORIGINAL_FILES,
+       TARGET_ENGLISH_AUDIO_STREAM_INDEX, ORIGINAL_PTBR_AUDIO_STREAM_INDEX,
+       and the optional FALLBACK_ORIGINAL_AUDIO_ORDER value.
     2. Ensure FFmpeg and FFprobe are available through FFMPEG and FFPROBE.
     3. Execute the script with: python main.py
 
@@ -50,8 +51,17 @@ Assumptions & Notes:
     - The higher-quality target provides video and English audio; the original source
       provides PT-BR audio. Existing target English audio is never replaced by the
       lower-quality original English audio.
-    - FALLBACK_ORIGINAL_AUDIO_ORDER is used only when PT-BR cannot be identified
-      from original-source audio metadata.
+    - TARGET_ENGLISH_AUDIO_STREAM_INDEX and ORIGINAL_PTBR_AUDIO_STREAM_INDEX use
+      global FFprobe stream indexes exactly as FFmpeg `-map 0:<index>` and
+      `-map 1:<index>` expect, not audio-relative positions.
+    - When TARGET_ENGLISH_AUDIO_STREAM_INDEX is not None, that exact target audio
+      stream is used and automatic English-language detection is skipped.
+    - When ORIGINAL_PTBR_AUDIO_STREAM_INDEX is not None, that exact original audio
+      stream is used and automatic PT-BR detection plus FALLBACK_ORIGINAL_AUDIO_ORDER
+      are skipped.
+    - FALLBACK_ORIGINAL_AUDIO_ORDER is used only when
+      ORIGINAL_PTBR_AUDIO_STREAM_INDEX is None and PT-BR cannot be identified from
+      original-source audio metadata.
     - Generated media always uses MKV so copied video, audio, subtitle, attachment,
       and chapter streams are not constrained by the target input container format.
     - Generated media is written under OUTPUT_ROOT, which may be located on the same
@@ -89,16 +99,18 @@ Stream = dict[str, Any]  # Represent one FFprobe stream dictionary.
 MediaInfo = dict[str, Any]  # Represent parsed FFprobe media information.
 MatchedMediaPair = tuple[Path, Path, Path]  # Represent target media, matching original media, and the generated output path.
 
-ORIGINAL_ROOT = Path(r"G:\\Series\\Breaking Bad OLD")  # Preserve the configured lower-quality Dual source root providing PT-BR audio.
+ORIGINAL_ROOT = Path(r"F:/Movies/Dual/Atividade Paranormal 2 2010 720p Dual/")  # Preserve the configured lower-quality Dual source root providing PT-BR audio.
 ERASE_ORIGINAL_FILES = False  # Set to True to delete each processed lower-quality original media file only after its new output is safely generated.
-TARGET_ROOT = Path(r"D:\\Sem Backup\\Download\\Torrent\\Completed\\Breaking Bad 1080p")  # Preserve the configured higher-quality target root providing video and English audio.
+TARGET_ROOT = Path(r"E:/Movies/Legendado/Atividade Paranormal 2 2010 1080p Legendado/")  # Preserve the configured higher-quality target root providing video and English audio.
 ERASE_TARGET_FILES = True  # Set to True to delete each processed higher-quality target media file only after its new output is safely generated.
-OUTPUT_ROOT = Path(r"D:\\Sem Backup\\Download\\Torrent\\Completed\\Breaking Bad 1080p Dual")  # Store generated high-quality Dual outputs on G: instead of consuming limited D: free space.
+OUTPUT_ROOT = Path(r"E:/Movies/Legendado/Atividade Paranormal 2 2010 1080p Legendado/")  # Store generated high-quality Dual outputs on G: instead of consuming limited D: free space.
 FFMPEG = "ffmpeg"  # Select the configured FFmpeg executable.
 FFPROBE = "ffprobe"  # Select the configured FFprobe executable.
 UPDATED_SUFFIX = "-updated"  # Append the configured suffix to generated MKV files.
 DRY_RUN = False  # Execute commands instead of only printing planned operations.
 OVERWRITE = False  # Preserve existing generated outputs when disabled.
+TARGET_ENGLISH_AUDIO_STREAM_INDEX: int | None = None  # Override automatic target English selection with an exact global FFprobe audio stream index when known.
+ORIGINAL_PTBR_AUDIO_STREAM_INDEX: int | None = None  # Override automatic original PT-BR selection with an exact global FFprobe audio stream index when known.
 FALLBACK_ORIGINAL_AUDIO_ORDER: FallbackAudioOrder = None  # Preserve automatic PT-BR source-audio detection by default.
 MIN_FREE_SPACE_RESERVE_GB = 10  # Preserve at least this many GiB after the estimated output allocation.
 OUTPUT_SIZE_SAFETY_FACTOR = 1.10  # Reserve ten percent above matched target sizes for the injected PT-BR audio and container overhead.
@@ -367,6 +379,47 @@ def stream_index(stream: Stream, media_path: Path) -> int:
         raise RuntimeError(f"Invalid stream index in media file: {media_path}")  # Reject unusable FFmpeg stream mappings.
 
     return index  # Return the validated global stream index.
+
+
+def configured_audio_stream_index(configured_index: int | None, setting_name: str) -> int | None:
+    """
+    Validate an optional configured global audio stream index.
+
+    :param configured_index: Optional configured global stream index.
+    :param setting_name: Configuration constant name used in validation errors.
+    :return: Validated configured index or None when automatic selection should remain active.
+    """
+
+    if configured_index is None:  # Preserve the existing automatic stream-selection path when no override is configured.
+        return None  # Report that automatic selection should remain active.
+
+    if isinstance(configured_index, bool) or not isinstance(configured_index, int) or configured_index < 0:  # Reject booleans, non-integers, and negative indexes before FFprobe stream lookup.
+        raise RuntimeError(f"{setting_name} must be None or a non-negative integer, got {configured_index!r}.")  # Stop before any automatic fallback can hide an invalid explicit override.
+
+    return configured_index  # Return the validated configured global stream index.
+
+
+def select_configured_audio_stream(media_path: Path, streams: list[Stream], configured_index: int, setting_name: str) -> Stream:
+    """
+    Select an explicitly configured audio stream by global FFprobe index.
+
+    :param media_path: Media path used in validation errors.
+    :param streams: FFprobe stream dictionaries from the inspected media file.
+    :param configured_index: Explicit configured global stream index to resolve.
+    :param setting_name: Configuration constant name used in validation errors.
+    :return: Selected audio stream matching the configured global index.
+    """
+
+    for stream in streams:  # Inspect every probed stream because explicit overrides use global FFprobe indexes rather than audio-relative positions.
+        if stream_index(stream, media_path) != configured_index:  # Skip streams whose validated global index does not match the configured override.
+            continue  # Continue until the configured global stream index is found.
+
+        if stream.get("codec_type") != "audio":  # Reject configured indexes that point to video, subtitle, attachment, or any other non-audio stream.
+            raise RuntimeError(f"{setting_name}={configured_index} does not reference an audio stream in: {media_path}")  # Stop immediately rather than remapping an unintended stream.
+
+        return stream  # Return the exact configured audio stream after validating its codec type.
+
+    raise RuntimeError(f"{setting_name}={configured_index} was not found in: {media_path}")  # Reject absent explicit indexes without falling back to automatic language selection.
 
 
 def probe_media(path: Path) -> MediaInfo:
@@ -812,8 +865,10 @@ def build_ffmpeg_command(target_media: Path, original_media: Path, output_mkv: P
     target_streams = extract_streams(target_info, target_media)  # Validate and extract higher-quality target stream dictionaries.
     original_info = probe_media(original_media)  # Read stream metadata from the lower-quality original source media file.
     original_streams = extract_streams(original_info, original_media)  # Validate and extract original source stream dictionaries.
-    english_audio_track = select_target_english_audio_track(target_media, target_streams)  # Preserve the higher-quality target English audio instead of downgrading it from the source.
-    ptbr_audio_track = select_original_ptbr_audio_track(original_media, original_streams)  # Select only the PT-BR audio required from the lower-quality original source.
+    configured_target_audio_index = configured_audio_stream_index(TARGET_ENGLISH_AUDIO_STREAM_INDEX, "TARGET_ENGLISH_AUDIO_STREAM_INDEX")  # Validate the optional explicit target-audio override before any automatic language selection can run.
+    configured_original_audio_index = configured_audio_stream_index(ORIGINAL_PTBR_AUDIO_STREAM_INDEX, "ORIGINAL_PTBR_AUDIO_STREAM_INDEX")  # Validate the optional explicit original-audio override before any automatic language selection can run.
+    english_audio_track = select_configured_audio_stream(target_media, target_streams, configured_target_audio_index, "TARGET_ENGLISH_AUDIO_STREAM_INDEX") if configured_target_audio_index is not None else select_target_english_audio_track(target_media, target_streams)  # Use the explicit target audio stream when configured, otherwise preserve the existing automatic English selection.
+    ptbr_audio_track = select_configured_audio_stream(original_media, original_streams, configured_original_audio_index, "ORIGINAL_PTBR_AUDIO_STREAM_INDEX") if configured_original_audio_index is not None else select_original_ptbr_audio_track(original_media, original_streams)  # Use the explicit original audio stream when configured, otherwise preserve the existing automatic PT-BR selection and fallback order.
     subtitle_tracks = select_subtitle_tracks(target_streams)  # Preserve every non-forced internal subtitle stream from the higher-quality target release.
     command = [  # Initialize the FFmpeg mux command.
         FFMPEG,  # Select the configured FFmpeg executable.
