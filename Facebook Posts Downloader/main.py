@@ -296,8 +296,18 @@ MESSAGE_SELECTORS = (
 
 ARTICLE_SELECTORS = (
     'div[role="main"] div[role="article"]',
+    'div[role="feed"] div[role="article"]',
     'div[data-pagelet^="FeedUnit_"]',
-)  # Selectors used to locate loaded timeline posts inside Facebook's main profile feed
+    'div[data-pagelet*="FeedUnit"]',
+    'div[role="feed"] > div',
+)  # Current/fallback selectors used to locate mounted profile-feed post containers
+
+PROFILE_FEED_CONTAINER_SELECTORS = (
+    'div[role="feed"]',
+    'div[data-pagelet*="ProfileTimeline"]',
+    'div[data-pagelet*="Timeline"]',
+    'div[data-pagelet*="Feed"]',
+)  # Structural selectors proving that the actual profile timeline/feed rendered
 
 DATE_ELEMENT_SELECTORS = (
     "abbr[data-utime]",
@@ -950,10 +960,20 @@ def is_profile_owner_post_article(article, post_url: str) -> bool:
             return True  # Accept owner post
 
     first_lines = [normalize_whitespace(str(line or '')).casefold() for line in (author_data or {}).get('lines', [])]  # Normalize root-post initial lines
-    if any(line in accepted_names for line in first_lines[:6]):  # Older Facebook markup may render author text without a direct heading anchor
+    if any(line in accepted_names for line in first_lines[:8]):  # Older Facebook markup may render author text without a direct heading anchor
         return True  # Accept owner post from root header text
+    if any(
+        any(line.startswith(f"{accepted_name} ") or line.startswith(f"{accepted_name} ·") for accepted_name in accepted_names)
+        for line in first_lines[:8]
+    ):  # Accept header lines that append action/audience/timestamp text to the owner name
+        return True  # Root article is visibly attributed to the configured owner
 
-    return False  # Reject posts by other authors and ambiguous containers
+    normalized_post_url = normalize_facebook_url(post_url) if post_url else ""  # Normalize optional canonical permalink
+    post_path = (urlparse(normalized_post_url).path or "").casefold().rstrip("/") if normalized_post_url else ""  # Read post route path
+    if profile_path and post_path.startswith(f"{profile_path}/") and is_top_level_timeline_article(article):
+        return True  # A top-level article whose canonical route is under the configured profile is safe owner evidence
+
+    return False  # Reject posts by other authors and genuinely ambiguous containers
 
 
 def extract_post_permalink(article) -> str:
@@ -1174,7 +1194,29 @@ def collect_date_candidates(article) -> list[str]:
         if value and value not in candidates:  # Avoid duplicates
             candidates.append(value)  # Preserve fallback timestamp
 
-    return candidates  # Return only post-level timestamp candidates
+    try:  # Final fallback: inspect only the first root-post lines after nested comments are removed
+        visible_lines = article.evaluate(
+            """root => {
+                const clone = root.cloneNode(true);
+                clone.querySelectorAll('[role="article"]').forEach(node => {
+                    if (node !== clone && node.parentNode) node.remove();
+                });
+                return (clone.innerText || clone.textContent || '')
+                    .split(/\\n+/)
+                    .map(line => line.trim())
+                    .filter(Boolean)
+                    .slice(0, 24);
+            }"""
+        )  # Read likely header/timestamp lines without comment timestamps
+    except Exception:
+        visible_lines = []  # Keep stronger candidates when the mounted article detaches
+
+    for raw_value in visible_lines or []:  # Inspect root-post header text for relative/absolute date labels
+        value = normalize_whitespace(str(raw_value or ""))  # Normalize candidate
+        if value and looks_like_date_candidate(value) and value not in candidates:
+            candidates.append(value)  # Preserve date-like visible fallback
+
+    return candidates  # Return root-post timestamp candidates
 
 
 def looks_like_date_candidate(value: str) -> bool:
@@ -1308,6 +1350,133 @@ def resolve_post_date(article) -> tuple[datetime.datetime | None, str]:
 
     candidates = collect_date_candidates(article)  # Collect all available date representations
     return parse_facebook_date(candidates)  # Parse the candidates in preference order
+
+
+def page_has_content_unavailable_message(page: Page) -> bool:
+    """
+    Detect Facebook's content-unavailable/error view so it cannot be mistaken for a usable timeline.
+
+    :param page: Facebook page to inspect.
+    :return: True when the rendered main content contains a known unavailable-content message.
+    """
+
+    try:  # Read only a bounded amount of visible main-page text
+        body_text = normalize_whitespace(page.locator("body").inner_text(timeout=2_000))[:20_000].casefold()  # Normalize visible page text
+    except Exception:  # A transient DOM read is not enough to classify the page as unavailable
+        return False  # Let the normal readiness checks retry
+
+    unavailable_markers = (
+        "este conteúdo não está disponível no momento",
+        "este conteudo não esta disponível no momento",
+        "este conteudo nao esta disponivel no momento",
+        "this content isn't available right now",
+        "this content is not available right now",
+        "content isn't available right now",
+        "content is not available right now",
+    )  # Known Portuguese/English Facebook unavailable-page messages
+
+    return any(marker in body_text for marker in unavailable_markers)  # Report whether a known unavailable state is visible
+
+
+def collect_profile_timeline_diagnostics(page: Page) -> dict[str, int]:
+    """
+    Collect lightweight DOM counts used to diagnose profile-timeline discovery failures.
+
+    :param page: Current Facebook profile page.
+    :return: Dictionary containing feed/article/permalink/message counts.
+    """
+
+    selectors = {
+        "main": 'div[role="main"]',
+        "feed": 'div[role="feed"]',
+        "articles": 'div[role="article"]',
+        "main_articles": 'div[role="main"] div[role="article"]',
+        "feed_articles": 'div[role="feed"] div[role="article"]',
+        "feed_units": 'div[data-pagelet*="FeedUnit"]',
+        "messages": 'div[data-ad-preview="message"], div[data-ad-comet-preview="message"]',
+        "post_links": 'a[href*="/posts/"], a[href*="/permalink.php"], a[href*="/story.php"], a[href*="/share/p/"]',
+    }  # Stable diagnostic selectors kept separate from extraction policy
+
+    diagnostics: dict[str, int] = {}  # Initialize numeric diagnostic result
+    for key, selector in selectors.items():  # Count each selector independently
+        try:  # One unsupported/transient selector must not break diagnostics
+            diagnostics[key] = int(page.locator(selector).count())  # Capture current DOM count
+        except Exception:
+            diagnostics[key] = 0  # Treat failed count as unavailable for this diagnostic sample
+
+    return diagnostics  # Return diagnostic snapshot
+
+
+def profile_timeline_is_rendered(page: Page) -> bool:
+    """
+    Determine whether the configured profile has rendered a real timeline/feed rather than only page chrome.
+
+    :param page: Authenticated configured-profile page.
+    :return: True when a feed container or mounted post-like container is present.
+    """
+
+    if page.is_closed() or page_has_content_unavailable_message(page):  # Reject closed/error pages immediately
+        return False  # No usable profile timeline exists on this page
+
+    try:  # Prefer explicit feed containers when Facebook exposes them
+        if any(page.locator(selector).count() > 0 for selector in PROFILE_FEED_CONTAINER_SELECTORS):
+            return True  # A profile timeline/feed structure is mounted
+    except Exception:
+        pass  # Continue to article-level fallback
+
+    try:  # Current Facebook commonly exposes profile posts as role=article
+        if any(page.locator(selector).count() > 0 for selector in ARTICLE_SELECTORS):
+            return True  # At least one post-like feed container is mounted
+    except Exception:
+        pass  # Treat transient DOM failures as not ready yet
+
+    return False  # Main page chrome alone is not sufficient to start scraping
+
+
+def build_mounted_article_discovery_key(article) -> str:
+    """
+    Build a stable-enough in-session identity for a top-level post when Facebook exposes no canonical permalink.
+
+    The key is derived only from the root post (nested comments are removed) and is used for current-session
+    discovery/retry bookkeeping. Persisted cross-run identity is still derived later from post content/date/id.
+
+    :param article: Top-level Facebook post/container locator.
+    :return: SHA-256 based discovery key, or an empty string when the article cannot be inspected.
+    """
+
+    try:  # Extract root-post-only text/link/media signals in one browser-side call
+        payload = article.evaluate(
+            """root => {
+                const clone = root.cloneNode(true);
+                clone.querySelectorAll('[role="article"]').forEach(node => {
+                    if (node !== clone && node.parentNode) node.remove();
+                });
+                const text = (clone.innerText || clone.textContent || '').trim();
+                const links = Array.from(clone.querySelectorAll('a[href]'))
+                    .slice(0, 80)
+                    .map(a => a.href || a.getAttribute('href') || '')
+                    .filter(Boolean);
+                const media = Array.from(clone.querySelectorAll('img[src], video[src], video source[src]'))
+                    .slice(0, 80)
+                    .map(el => el.currentSrc || el.src || el.getAttribute('src') || '')
+                    .filter(Boolean);
+                return { text, links, media };
+            }"""
+        )  # Read only signals belonging to this mounted root container
+    except Exception:
+        return ""  # Detached/unsupported article cannot provide a fallback identity
+
+    source = json.dumps(
+        payload or {},
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8", errors="replace")  # Build deterministic in-session hash input
+
+    if not source or source == b"{}":  # Reject empty payloads that would collapse unrelated articles
+        return ""  # No safe fallback identity exists
+
+    return f"mounted:{hashlib.sha256(source).hexdigest()[:32]}"  # Return compact fallback discovery identity
 
 
 def get_article_locator(page: Page):
@@ -1765,21 +1934,35 @@ def wait_for_profile_ready(
                 time.sleep(AUTHENTICATION_POLL_SECONDS)  # Wait briefly before retrying
             continue  # Re-select and validate the profile page
 
-        try:  # Verify that Facebook rendered the authenticated profile's main content
-            has_main_content = page.locator('div[role="main"]').count() > 0  # Detect the main profile region
-            has_timeline_articles = any(page.locator(selector).count() > 0 for selector in ARTICLE_SELECTORS)  # Detect loaded posts
+        if page_has_content_unavailable_message(page):  # Never accept Facebook's unavailable/error view as a profile timeline
+            try:  # Recover explicitly to the configured profile root
+                page.goto(PROFILE_URL, wait_until="domcontentloaded", timeout=PAGE_LOAD_TIMEOUT_MS)  # Reopen the valid profile root
+            except Exception:
+                time.sleep(AUTHENTICATION_POLL_SECONDS)  # Allow another readiness iteration to retry
+            continue  # Re-evaluate only after leaving the unavailable view
 
-            if has_main_content or has_timeline_articles:  # Either signal proves that the authenticated profile UI rendered
-                return page  # Return the concrete profile page to the scraper
-        except Exception:  # Ignore transient client-side rerenders
-            pass  # Continue polling until the page stabilizes
+        try:  # Require both authenticated main chrome and an actual timeline/feed structure
+            has_main_content = page.locator('div[role="main"]').count() > 0  # Detect the configured profile's main region
+        except Exception:
+            has_main_content = False  # Transient DOM state is not ready
+
+        if has_main_content and profile_timeline_is_rendered(page):  # Main chrome without a feed must not start an empty scrape
+            return page  # Return only a page with a real rendered profile timeline
+
+        try:  # Nudge lazy profile sections into mounting while remaining near the newest posts
+            page.evaluate("window.scrollBy(0, 500)")  # Move enough to mount the first timeline cards below the profile header
+            page.wait_for_timeout(500)  # Give Facebook's client renderer a short opportunity to mount the feed
+        except Exception:
+            pass  # Continue readiness polling even when the nudge fails
 
         time.sleep(AUTHENTICATION_POLL_SECONDS)  # Wait before verifying the rendered profile again
 
+    diagnostics = collect_profile_timeline_diagnostics(page)  # Capture DOM state before surfacing readiness failure
     raise TimeoutError(
-        f"Facebook authentication is valid, but the profile did not render usable content within "
-        f"{PROFILE_READY_TIMEOUT_SECONDS} seconds. Current URL: {format_url_for_log(get_live_page_url(page))}"
-    )  # Do not silently run an empty scraper against an unusable page
+        f"Facebook authentication is valid, but the configured profile timeline did not render within "
+        f"{PROFILE_READY_TIMEOUT_SECONDS} seconds. Current URL: {format_url_for_log(get_live_page_url(page))}. "
+        f"DOM diagnostics: {diagnostics}"
+    )  # Fail explicitly instead of silently scraping a page with no timeline
 
 
 def find_existing_facebook_page(context: BrowserContext) -> Page | None:
@@ -1926,50 +2109,21 @@ def navigate_to_profile(
 
 def activate_profile_posts_view(page: Page, context: BrowserContext) -> Page:
     """
-    Activate Facebook's live profile Posts/Publicações tab when the current DOM exposes one.
+    Preserve the configured profile-root timeline without navigating to inferred Posts-tab URLs.
 
-    The function never constructs /<profile>/posts because that route is unavailable for this
-    profile. It only follows a link already rendered by Facebook whose URL contains sk=posts.
+    Facebook may render links containing ``sk=posts`` that are unavailable or unsuitable for a personal
+    profile. The downloader therefore keeps PROFILE_URL as the only profile-feed navigation target.
 
-    :param page: Authenticated profile-root page.
-    :param context: Authenticated browser context.
-    :return: Current profile page, optionally navigated to Facebook's own posts-tab URL.
+    :param page: Authenticated configured-profile page.
+    :param context: Authenticated browser context retained for API compatibility.
+    :return: The same configured-profile page after verifying its real timeline is rendered.
     """
 
-    try:  # Search only links that Facebook itself rendered on the configured profile
-        candidates = page.locator('a[href*="sk=posts"]')  # Locate possible live Posts tab links
-        for index in range(min(candidates.count(), 20)):  # Bound navigation/header candidates
-            link = candidates.nth(index)  # Resolve current link
-            href = str(link.get_attribute('href') or '').strip()  # Read Facebook-provided href
-            if not href:
-                continue  # Ignore empty href
-            absolute_url = urljoin(FACEBOOK_BASE_URL, href)  # Resolve relative Facebook URL
-            if not is_facebook_url(absolute_url) or url_has_comment_context(absolute_url):
-                continue  # Reject external/comment routes
-            parsed = urlparse(absolute_url)  # Parse candidate
-            query = dict(parse_qsl(parsed.query, keep_blank_values=True))  # Read query values
-            if str(query.get('sk') or '').casefold() != 'posts':
-                continue  # Require explicit live posts-tab state
+    _ = context  # Preserve the existing call signature without introducing an unused-parameter warning
+    if page_has_content_unavailable_message(page):  # Defensive guard against an already-invalid page
+        page.goto(PROFILE_URL, wait_until="domcontentloaded", timeout=PAGE_LOAD_TIMEOUT_MS)  # Recover to profile root
 
-            page.goto(absolute_url, wait_until='domcontentloaded', timeout=PAGE_LOAD_TIMEOUT_MS)  # Follow Facebook's own Posts tab
-            page = select_current_facebook_page(context, page)  # Recover page replacement
-            page = wait_for_profile_ready(page, context, allow_interactive_authentication=False)  # Require authenticated rendered feed
-            page.evaluate('window.scrollTo(0, 0)')  # Start newest-first
-            page.wait_for_timeout(1_000)  # Allow first post batch to settle
-            print(
-                f"{BackgroundColors.GREEN}Using Facebook-provided profile Posts view: "
-                f"{BackgroundColors.CYAN}{format_url_for_log(get_live_page_url(page))}{Style.RESET_ALL}"
-            )  # Log only safe URL components
-            return page  # Use live Facebook Posts view
-    except FacebookAuthenticationRequiredError:  # Preserve authentication recovery semantics
-        raise  # Let browser lifecycle reopen visible auth
-    except Exception as error:  # Posts-tab activation is optional; root profile remains valid fallback
-        verbose_output(
-            true_string=f"{BackgroundColors.YELLOW}Facebook Posts view activation unavailable: "
-            f"{BackgroundColors.CYAN}{error}{Style.RESET_ALL}"
-        )  # Log optional diagnostic only in verbose mode
-
-    return page  # Continue from profile root when no live posts-tab URL exists
+    return page  # Never navigate automatically to ?sk=posts or /posts
 
 
 def establish_authenticated_scraping_session(
@@ -3546,16 +3700,16 @@ def process_article(page: Page, context: BrowserContext, article, known_keys: se
     except Exception:  # Detached article can be retried on a later mount
         return False, ''  # Keep retryable
 
-    post_url = extract_post_permalink(article)  # Resolve root-post timestamp/permalink identity
-    if not post_url or url_has_comment_context(post_url):  # Reject comment/reply identity explicitly
-        return False, ''  # Not a safe top-level post
+    post_url = extract_post_permalink(article)  # Resolve canonical root-post permalink when Facebook exposes one
+    if post_url and url_has_comment_context(post_url):  # Reject explicit comment/reply identity
+        return False, ''  # A comment-context URL must never become a post
     if not is_profile_owner_post_article(article, post_url):  # Require configured profile owner as author
         return False, ''  # Ignore other authors
 
-    post_id = extract_post_id(post_url)  # Recover stable id when URL exposes one
+    post_id = extract_post_id(post_url) if post_url else ""  # Recover stable id when an exposed URL contains one
     content = extract_post_content(article)  # Extract root-post body without nested comments
-    post_date, date_raw = resolve_post_date(article)  # Resolve timestamp from root-post canonical link
-    if post_date is None:  # Use dedicated permalink only when timeline timestamp remains unresolved
+    post_date, date_raw = resolve_post_date(article)  # Resolve timestamp from root-post header/date semantics
+    if post_date is None and post_url:  # Use dedicated permalink only when one actually exists
         post_date, date_raw = resolve_post_date_from_permalink(context, post_url)  # Retry exact post page
 
     if not post_id:  # Modern/unknown Facebook routes may not expose a numeric/pfbid identifier
@@ -3766,6 +3920,12 @@ def scroll_profile_and_download(page: Page, context: BrowserContext) -> dict:
         f"{BackgroundColors.CYAN}{len(known_keys)}{Style.RESET_ALL}"
     )  # Log resume state
 
+    initial_diagnostics = collect_profile_timeline_diagnostics(page)  # Capture the exact DOM state handed to the scraper
+    print(
+        f"{BackgroundColors.GREEN}Initial timeline DOM: "
+        f"{BackgroundColors.CYAN}{initial_diagnostics}{Style.RESET_ALL}"
+    )  # Make zero-discovery failures actionable instead of silent
+
     for scroll_iteration in range(1, MAX_SCROLL_ITERATIONS + 1):  # Scroll until discovery/movement stabilizes
         page = ensure_scraping_profile_ready(page, context)  # Revalidate auth before DOM work
         articles = get_article_locator(page)  # Resolve broad mounted article-like containers
@@ -3781,31 +3941,34 @@ def scroll_profile_and_download(page: Page, context: BrowserContext) -> dict:
                     continue  # Skip nested comment/reply article
                 top_level_count += 1  # Count validated root article container
 
-                post_url = extract_post_permalink(article)  # Resolve timestamp/permalink identity
-                if not post_url or url_has_comment_context(post_url):  # Reject cards/comments without safe identity
+                post_url = extract_post_permalink(article)  # Resolve canonical permalink when Facebook exposes one
+                if post_url and url_has_comment_context(post_url):  # Reject explicit comment/reply context
                     continue  # Continue to next root article
                 if not is_profile_owner_post_article(article, post_url):  # Require configured owner as author
                     continue  # Ignore other authors
 
-                normalized_post_url = normalize_facebook_url(post_url)  # Build stable session discovery key
-                if normalized_post_url not in discovered_post_urls:  # First time this canonical URL has appeared
-                    discovered_post_urls.add(normalized_post_url)  # Mark discovery
+                discovery_key = normalize_facebook_url(post_url) if post_url else build_mounted_article_discovery_key(article)  # Build URL or DOM fallback identity
+                if not discovery_key:  # Detached/empty root cards cannot be tracked safely
+                    continue  # Wait for a later mounted representation
+
+                if discovery_key not in discovered_post_urls:  # First time this owner post has appeared
+                    discovered_post_urls.add(discovery_key)  # Mark discovery
                     new_discovered_this_iteration += 1  # Reset end-of-feed confidence
 
-                if normalized_post_url in finished_session_urls:  # Already complete/known in this session
+                if discovery_key in finished_session_urls:  # Already complete/known in this session
                     continue  # Do not repeat expensive processing
 
-                attempts = retry_counts.get(normalized_post_url, 0)  # Read previous retry count
+                attempts = retry_counts.get(discovery_key, 0)  # Read previous retry count
                 if attempts >= MAX_POST_PROCESS_RETRIES_PER_SESSION:  # Bound repeated incomplete/detached work
                     continue  # Leave for next execution rather than looping forever
-                retry_counts[normalized_post_url] = attempts + 1  # Record this processing attempt
+                retry_counts[discovery_key] = attempts + 1  # Record this processing attempt
 
                 processed, terminal_key = process_article(page, context, article, known_keys)  # Extract post/media
                 if processed:  # Metadata was written/refreshed
                     processed_posts += 1  # Increment session total
                     processed_this_iteration += 1  # Increment pass total
                 if terminal_key:  # Post is already complete or newly completed
-                    finished_session_urls.add(normalized_post_url)  # Suppress future mounts safely
+                    finished_session_urls.add(discovery_key)  # Suppress future mounts safely
             except FacebookAuthenticationRequiredError:  # Never swallow manual verification requirement
                 raise  # Browser lifecycle will reopen interactive auth
             except Exception as error:  # One malformed/detached post must not terminate export
@@ -3879,6 +4042,15 @@ def scroll_profile_and_download(page: Page, context: BrowserContext) -> dict:
                 f"{BackgroundColors.CYAN}{error}{Style.RESET_ALL}"
             )  # Log non-auth scroll failure
             time.sleep(SCROLL_PAUSE_SECONDS)  # Allow page to recover
+
+    if not discovered_post_urls:  # A configured profile known to contain posts must never silently succeed with zero discovery
+        diagnostics = collect_profile_timeline_diagnostics(page)  # Capture final DOM selector counts
+        raise RuntimeError(
+            f"No Facebook posts were discovered from {PROFILE_URL}. "
+            f"Current URL: {format_url_for_log(get_live_page_url(page))}. "
+            f"DOM diagnostics: {diagnostics}. "
+            f"The scraper stopped instead of reporting a false successful empty export."
+        )  # Surface selector/profile-view failure explicitly
 
     reindex_post_output_directories()  # Apply final oldest-to-newest indexes after new posts are known
     return {
