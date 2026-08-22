@@ -152,8 +152,8 @@ VERBOSE = False  # Set to True to output verbose messages
 
 # Facebook Constants:
 PROFILE_URL = "https://www.facebook.com/BrenoFariasDaSilva"  # Facebook profile containing the posts to download
-PROFILE_DISPLAY_NAME = "Breno Farias"  # Preferred display name used when deriving titles
-PROFILE_AUTHOR_NAMES = ("Breno Farias", "Breno Farias da Silva")  # Accepted owner names for top-level post validation
+PROFILE_DISPLAY_NAME = "Breno Farias da Silva"  # Preferred current Facebook display name used when deriving titles
+PROFILE_AUTHOR_NAMES = ("Breno Farias da Silva", "Breno Farias")  # Accepted owner names for top-level post validation
 ONLY_PROFILE_OWNER_POSTS = True  # Ignore comments and posts authored by other people on the profile timeline
 FACEBOOK_BASE_URL = "https://www.facebook.com/"  # Base URL used to resolve relative Facebook links
 BROWSER_CHANNEL = "chrome"  # Prefer the locally installed stable Google Chrome browser
@@ -183,6 +183,7 @@ ARTICLE_SETTLE_MS = 700  # Delay after bringing a post into the viewport so lazy
 VIDEO_NETWORK_CAPTURE_MS = 4_000  # Time spent collecting video/audio requests after a post becomes visible
 VIDEO_RANGE_CHUNK_BYTES = 16 * 1024 * 1024  # Chunk size used when reconstructing HTTP 206 ranged media responses
 MEDIA_PERMALINK_SETTLE_MS = 1_500  # Delay after opening a photo/video permalink so viewer media can resolve
+POST_TIMESTAMP_HOVER_SETTLE_MS = 450  # Delay after hovering a post timestamp so Facebook can render its absolute-time tooltip
 MAX_MEDIA_PER_POST = 500  # Safety ceiling for distinct photos/videos resolved from one post
 MAX_POST_PROCESS_RETRIES_PER_SESSION = 3  # Maximum retries for a mounted post that detaches or remains incomplete
 
@@ -190,7 +191,7 @@ MAX_POST_PROCESS_RETRIES_PER_SESSION = 3  # Maximum retries for a mounted post t
 POST_METADATA_FILENAME = "post.json"  # Metadata file written inside every post directory
 POST_DIRECTORY_INDEX_MIN_WIDTH = 2  # Minimum zero-padded width used by oldest-to-newest post directory indexes
 POST_DIRECTORY_INDEX_PATTERN = re.compile(r"^\d+\.\s+")  # Existing post-directory index prefix removed before canonical reindexing
-SCRAPE_SCHEMA_VERSION = 4  # Metadata schema version; older comment/media extraction outputs are intentionally reprocessed
+SCRAPE_SCHEMA_VERSION = 5  # Metadata schema version; older timestamp/comment/media extraction outputs are intentionally reprocessed
 REPROCESS_LEGACY_METADATA = True  # Ignore pre-schema metadata so previously misidentified posts/media are scanned again
 MAX_TITLE_LENGTH = 96  # Maximum filesystem title length used after the date prefix
 MAX_CONTENT_TITLE_LENGTH = 160  # Maximum amount of post text considered while deriving a title
@@ -252,11 +253,13 @@ POST_URL_PATTERNS = (
     re.compile(r"[?&]fbid=(pfbid[A-Za-z0-9]+|\d+)", re.IGNORECASE),
     re.compile(r"/(?:videos|reel)/(pfbid[A-Za-z0-9]+|\d+)", re.IGNORECASE),
     re.compile(r"/share/(?:p|v|r)/([A-Za-z0-9_-]+)", re.IGNORECASE),
+    re.compile(r"[?&]v=([A-Za-z0-9_-]+)", re.IGNORECASE),
 )  # Patterns used to recover stable identifiers from modern and legacy Facebook post permalinks
 
 POST_LINK_HINTS = (
     "/posts/",
     "/permalink.php",
+    "/permalink/",
     "/story.php",
     "story_fbid=",
     "/share/p/",
@@ -266,8 +269,12 @@ POST_LINK_HINTS = (
     "/photos/",
     "/photo.php",
     "/videos/",
+    "/watch/",
     "/reel/",
-)  # Known post/media routes used as secondary permalink-scoring signals after timestamp semantics
+    "/people/",
+    "?v=",
+    "&v=",
+)  # Known personal-profile/post/media routes used as secondary permalink/timestamp-link signals
 
 PHOTO_LINK_HINTS = (
     "/photo/",
@@ -289,10 +296,11 @@ VIDEO_RANGE_QUERY_PARAMETERS = {
 }  # Facebook CDN range query parameters removed only when requesting a complete video resource
 
 MESSAGE_SELECTORS = (
+    'div[data-ad-rendering-role="story_message"]',
     '[data-ad-preview="message"]',
     '[data-ad-comet-preview="message"]',
     'div[dir="auto"]',
-)  # Selectors used in order to recover the textual body of each post
+)  # Current/fallback selectors used in order to recover the textual body of each root post
 
 ARTICLE_SELECTORS = (
     'div[role="main"] div[role="article"]',
@@ -771,6 +779,190 @@ def is_top_level_timeline_article(article) -> bool:
         return False  # Reject the candidate
 
 
+def collect_timestamp_link_candidates(article) -> list[dict]:
+    """
+    Collect likely root-post timestamp links from current and legacy Facebook post headers.
+
+    :param article: Playwright locator representing a top-level Facebook post.
+    :return: Timestamp-link dictionaries sorted strongest-first.
+    """
+
+    if not is_top_level_timeline_article(article):  # Timestamp identity must come from a root post only
+        return []  # Reject nested comments/replies
+
+    try:  # Evaluate ancestry/time semantics in the live DOM before Facebook virtualizes the post
+        raw_candidates = article.evaluate(
+            """root => {
+                const rootArticle = root.matches('[role="article"]') ? root : root.querySelector('[role="article"]') || root;
+                const belongsToRoot = element => {
+                    const closestArticle = element.closest('[role="article"]');
+                    return !closestArticle || closestArticle === rootArticle;
+                };
+                const compactTime = /(?:^|\\s)\\d+\\s*(?:s|m|min|mins|h|hr|hrs|d|w|wk|sem|a|y)(?:\\b|\\s|·|•|$)/i;
+                const timeWords = /ago|just now|yesterday|today|ontem|hoje|agora mesmo|atrás|atras|há\\s|ha\\s|minute|minutes|minuto|minutos|hora|horas|day|days|dia|dias|week|weeks|semana|semanas|month|months|mês|meses|year|years|ano|anos|janeiro|fevereiro|março|marco|abril|maio|junho|julho|agosto|setembro|outubro|novembro|dezembro|january|february|march|april|may|june|july|august|september|october|november|december/i;
+                const postReference = /\\/posts\\/|\\/videos\\/|\\/watch|\\/permalink(?:\\.php|\\/)|\\/story\\.php|\\/reel\\/|\\/share\\/(?:p|v|r)\\/|\\/photo(?:s|\\.php|\\/)|\\/people\\/|[?&](?:fbid|story_fbid|v)=/i;
+
+                return Array.from(root.querySelectorAll('a[href], a[role="link"]'))
+                    .filter(belongsToRoot)
+                    .filter(link => !link.closest('h2, h3, h4, [data-ad-rendering-role="profile_name"]'))
+                    .filter(link => !link.querySelector('svg, img'))
+                    .map(link => {
+                        const href = link.href || link.getAttribute('href') || '';
+                        if (!href || /[?&](?:comment_id|reply_comment_id|reply_comment_token)=/i.test(href)) return null;
+
+                        const ariaLabel = (link.getAttribute('aria-label') || '').trim();
+                        const title = (link.getAttribute('title') || '').trim();
+                        const text = (link.textContent || '').trim();
+                        const combined = `${ariaLabel} ${title} ${text}`.trim();
+                        const hasTimeReference =
+                            /\\d/.test(ariaLabel) ||
+                            /\\d/.test(title) ||
+                            compactTime.test(text) ||
+                            timeWords.test(combined);
+                        if (!hasTimeReference) return null;
+
+                        const hasPostReference = postReference.test(href);
+                        let score = 1000;
+                        if (hasPostReference) score += 800;
+                        if (ariaLabel && /\\d/.test(ariaLabel)) score += 500;
+                        if (title && /\\d/.test(title)) score += 250;
+                        if (link.matches('[role="link"]')) score += 100;
+
+                        return { href, ariaLabel, title, text, hasPostReference, score };
+                    })
+                    .filter(Boolean)
+                    .sort((a, b) => b.score - a.score);
+            }"""
+        )  # Collect timestamp links without assuming one Facebook permalink shape
+    except Exception:  # Detached/transitioning articles provide no trustworthy timestamp link
+        return []  # Allow later mounted representations to retry
+
+    candidates: list[dict] = []  # Normalize browser payload into Python dictionaries
+    seen: set[tuple[str, str, str, str]] = set()  # Deduplicate responsive duplicate links
+
+    for raw_candidate in raw_candidates or []:  # Preserve strongest unique timestamp representations
+        href = str(raw_candidate.get("href") or "").strip()
+        aria_label = normalize_whitespace(str(raw_candidate.get("ariaLabel") or ""))
+        title = normalize_whitespace(str(raw_candidate.get("title") or ""))
+        visible_text = normalize_whitespace(str(raw_candidate.get("text") or ""))
+        identity = (href, aria_label, title, visible_text)
+
+        if identity in seen:
+            continue
+        seen.add(identity)
+
+        candidates.append(
+            {
+                "href": href,
+                "aria_label": aria_label,
+                "title": title,
+                "text": visible_text,
+                "has_post_reference": bool(raw_candidate.get("hasPostReference")),
+                "score": int(raw_candidate.get("score") or 0),
+            }
+        )
+
+    candidates.sort(key=lambda item: -int(item.get("score") or 0))
+    return candidates
+
+
+def split_facebook_timestamp_variants(value: str) -> list[str]:
+    """
+    Normalize Facebook timestamp text and build parseable variants.
+
+    :param value: Raw aria-label, title, tooltip, or visible timestamp text.
+    :return: Ordered unique timestamp variants.
+    """
+
+    normalized = normalize_whitespace(str(value or "")).replace("\n", " ").strip()
+    if not normalized:
+        return []
+
+    variants: list[str] = []
+
+    def add(candidate: str) -> None:
+        cleaned = re.sub(r"\s+", " ", str(candidate or "")).strip(" \t\r\n·•|")
+        cleaned = re.sub(r"^(?:edited|editado)\s*[·•:-]?\s*", "", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(
+            r"\s*[·•]\s*(?:public|público|publico|friends|amigos|only me|somente eu).*$",
+            "",
+            cleaned,
+            flags=re.IGNORECASE,
+        )
+        cleaned = cleaned.strip(" \t\r\n·•|")
+        if cleaned and cleaned not in variants:
+            variants.append(cleaned)
+
+    add(normalized)
+    for part in re.split(r"\s+[·•]\s+|\s*\|\s*", normalized):
+        add(part)
+
+    return variants
+
+
+def collect_hover_timestamp_candidates(page: Page, article) -> list[str]:
+    """
+    Hover likely timestamp links and collect Facebook's absolute-time tooltip.
+
+    :param page: Page containing the mounted root post.
+    :param article: Root post locator.
+    :return: Direct and hover-derived timestamp candidates.
+    """
+
+    timestamp_candidates = collect_timestamp_link_candidates(article)
+    if not timestamp_candidates:
+        return []
+
+    desired_hrefs = {
+        str(candidate.get("href") or "")
+        for candidate in timestamp_candidates[:5]
+        if candidate.get("href")
+    }
+    collected: list[str] = []
+
+    def add(value: str) -> None:
+        for variant in split_facebook_timestamp_variants(value):
+            if variant not in collected:
+                collected.append(variant)
+
+    for candidate in timestamp_candidates[:5]:
+        add(str(candidate.get("aria_label") or ""))
+        add(str(candidate.get("title") or ""))
+        add(str(candidate.get("text") or ""))
+
+    try:
+        links = article.locator('a[href], a[role="link"]')
+        for index in range(min(links.count(), 100)):
+            link = links.nth(index)
+            try:
+                live_href = str(link.evaluate("element => element.href || element.getAttribute('href') || ''") or "")
+                if desired_hrefs and live_href not in desired_hrefs:
+                    continue
+
+                link.hover(timeout=1_500)
+                page.wait_for_timeout(POST_TIMESTAMP_HOVER_SETTLE_MS)
+
+                before_tooltip_count = len(collected)  # Distinguish new hover data from direct aria/title/text candidates
+                tooltips = page.locator('[role="tooltip"]')
+                tooltip_count = tooltips.count()
+                for tooltip_index in range(max(0, tooltip_count - 5), tooltip_count):
+                    tooltip = tooltips.nth(tooltip_index)
+                    try:
+                        if tooltip.is_visible():
+                            add(tooltip.inner_text(timeout=750))
+                    except Exception:
+                        continue
+
+                if len(collected) > before_tooltip_count:
+                    break  # Stop only after this hover actually produced additional tooltip timestamp text
+            except Exception:
+                continue
+    except Exception:
+        pass
+
+    return collected
+
+
 def collect_post_permalink_candidates(article) -> list[dict]:
     """
     Collect post-permalink candidates from one top-level Facebook timeline article.
@@ -794,7 +986,7 @@ def collect_post_permalink_candidates(article) -> list[dict]:
                     if (!rootArticle) return true;
                     return element.closest('[role="article"]') === rootArticle;
                 };
-                const message = root.querySelector('[data-ad-preview="message"], [data-ad-comet-preview="message"]');
+                const message = root.querySelector('div[data-ad-rendering-role="story_message"], [data-ad-preview="message"], [data-ad-comet-preview="message"]');
                 return Array.from(root.querySelectorAll('a[href]'))
                     .filter(belongsToRoot)
                     .map(anchor => {
@@ -928,7 +1120,7 @@ def is_profile_owner_post_article(article, post_url: str) -> bool:
                     if (!rootArticle) return true;
                     return element.closest('[role="article"]') === rootArticle;
                 };
-                const anchors = Array.from(root.querySelectorAll('h1 a[href], h2 a[href], h3 a[href], h4 a[href], strong a[href], a[role="link"][href]'))
+                const anchors = Array.from(root.querySelectorAll('div[data-ad-rendering-role="profile_name"] a[href], h1 a[href], h2 a[href], h3 a[href], h4 a[href], strong a[href], a[role="link"][href]'))
                     .filter(belongsToRoot)
                     .slice(0, 40)
                     .map(anchor => ({
@@ -984,16 +1176,23 @@ def extract_post_permalink(article) -> str:
     :return: Normalized post permalink or an empty string.
     """
 
-    if not is_top_level_timeline_article(article):  # Reject nested comments before scanning links
-        return ''  # Nested article has no independent post identity for this export
+    if not is_top_level_timeline_article(article):
+        return ""
 
-    candidates = collect_post_permalink_candidates(article)  # Collect root-post timestamp/permalink candidates
-    for candidate in candidates:  # Select first safe candidate
-        url = str(candidate.get('url') or '')  # Read normalized URL
-        if url and not url_has_comment_context(url):  # Ensure comment context did not survive normalization
-            return url  # Return strongest safe post permalink
+    for timestamp_candidate in collect_timestamp_link_candidates(article):
+        if not timestamp_candidate.get("has_post_reference"):
+            continue
+        raw_url = str(timestamp_candidate.get("href") or "")
+        if raw_url and not url_has_comment_context(raw_url):
+            return normalize_facebook_url(raw_url)
 
-    return ''  # No safe post identity was found
+    candidates = collect_post_permalink_candidates(article)
+    for candidate in candidates:
+        url = str(candidate.get("url") or "")
+        if url and not url_has_comment_context(url):
+            return url
+
+    return ""
 
 
 def expand_post_text(article) -> None:
@@ -1055,7 +1254,7 @@ def extract_post_content(article) -> str:
                     clone.querySelectorAll('[role="article"]').forEach(node => node.remove());
                     return (clone.innerText || clone.textContent || '').trim();
                 };
-                const explicit = Array.from(root.querySelectorAll('[data-ad-preview="message"], [data-ad-comet-preview="message"]'))
+                const explicit = Array.from(root.querySelectorAll('div[data-ad-rendering-role="story_message"], [data-ad-preview="message"], [data-ad-comet-preview="message"]'))
                     .filter(belongsToRoot)
                     .map(cleanedText)
                     .filter(Boolean);
@@ -1156,114 +1355,122 @@ def derive_post_title(content: str, post_id: str) -> str:
 
 def collect_date_candidates(article) -> list[str]:
     """
-    Collect date strings from the canonical post timestamp instead of arbitrary nested links.
+    Collect root-post date candidates using current Facebook timestamp links first.
 
-    :param article: Playwright locator representing a Facebook post.
-    :return: Ordered list of distinct date candidates.
+    :param article: Playwright locator representing a top-level Facebook post.
+    :return: Ordered unique raw timestamp candidates.
     """
 
-    candidates = []  # Initialize ordered date candidates
+    candidates: list[str] = []
 
-    for permalink_candidate in collect_post_permalink_candidates(article):  # Inspect canonical post links in score order
-        for key in ('aria_label', 'title', 'text'):  # Prefer timestamp metadata attached to the canonical link itself
-            value = normalize_whitespace(str(permalink_candidate.get(key) or ''))  # Normalize candidate text
-            if value and looks_like_date_candidate(value) and value not in candidates:  # Preserve date-like values only
-                candidates.append(value)  # Store timestamp candidate
+    def add(value: str) -> None:
+        for variant in split_facebook_timestamp_variants(value):
+            if variant not in candidates:
+                candidates.append(variant)
 
-    try:  # Fall back to machine-readable date descendants that belong to this article only
+    for timestamp_candidate in collect_timestamp_link_candidates(article):
+        add(str(timestamp_candidate.get("aria_label") or ""))
+        add(str(timestamp_candidate.get("title") or ""))
+        add(str(timestamp_candidate.get("text") or ""))
+
+    for permalink_candidate in collect_post_permalink_candidates(article):
+        add(str(permalink_candidate.get("aria_label") or ""))
+        add(str(permalink_candidate.get("title") or ""))
+        add(str(permalink_candidate.get("text") or ""))
+
+    try:
         fallback_values = article.evaluate(
             """root => {
-                const rootArticle = root.matches('div[role="article"]') ? root : null;
-                const belongsToRoot = element => !rootArticle || element.closest('div[role="article"]') === rootArticle;
-                return Array.from(root.querySelectorAll('abbr[data-utime], time[datetime]'))
+                const rootArticle = root.matches('[role="article"]') ? root : root.querySelector('[role="article"]') || root;
+                const belongsToRoot = element => {
+                    const closestArticle = element.closest('[role="article"]');
+                    return !closestArticle || closestArticle === rootArticle;
+                };
+                const selectors = [
+                    'abbr[data-utime]',
+                    'abbr',
+                    'time[datetime]',
+                    '[data-utime]',
+                    'a[aria-label]',
+                    'a[title]'
+                ];
+
+                return Array.from(root.querySelectorAll(selectors.join(',')))
                     .filter(belongsToRoot)
+                    .filter(element => !element.closest('[data-commentid]'))
+                    .filter(element => {
+                        const href = element.closest('a')?.href || '';
+                        return !/[?&](?:comment_id|reply_comment_id|reply_comment_token)=/i.test(href);
+                    })
                     .flatMap(element => [
                         element.getAttribute('data-utime') || '',
                         element.getAttribute('datetime') || '',
                         element.getAttribute('aria-label') || '',
                         element.getAttribute('title') || '',
-                        (element.innerText || element.textContent || '').trim(),
+                        (element.textContent || '').trim()
                     ]);
             }"""
-        )  # Read same-article timestamp values
-    except Exception:  # Detached articles provide no safe fallback date
-        fallback_values = []  # Continue with canonical-link candidates only
-
-    for raw_value in fallback_values or []:  # Normalize machine-readable fallback values
-        value = normalize_whitespace(str(raw_value or ''))  # Normalize candidate
-        if value and value not in candidates:  # Avoid duplicates
-            candidates.append(value)  # Preserve fallback timestamp
-
-    try:  # Final fallback: inspect only the first root-post lines after nested comments are removed
-        visible_lines = article.evaluate(
-            """root => {
-                const clone = root.cloneNode(true);
-                clone.querySelectorAll('[role="article"]').forEach(node => {
-                    if (node !== clone && node.parentNode) node.remove();
-                });
-                return (clone.innerText || clone.textContent || '')
-                    .split(/\\n+/)
-                    .map(line => line.trim())
-                    .filter(Boolean)
-                    .slice(0, 24);
-            }"""
-        )  # Read likely header/timestamp lines without comment timestamps
+        )
     except Exception:
-        visible_lines = []  # Keep stronger candidates when the mounted article detaches
+        fallback_values = []
 
-    for raw_value in visible_lines or []:  # Inspect root-post header text for relative/absolute date labels
-        value = normalize_whitespace(str(raw_value or ""))  # Normalize candidate
-        if value and looks_like_date_candidate(value) and value not in candidates:
-            candidates.append(value)  # Preserve date-like visible fallback
+    for raw_value in fallback_values or []:
+        value = str(raw_value or "")
+        if looks_like_date_candidate(value):
+            add(value)
 
-    return candidates  # Return root-post timestamp candidates
+    return candidates
 
 
 def looks_like_date_candidate(value: str) -> bool:
     """
-    Determine whether arbitrary Facebook text plausibly represents a post timestamp.
+    Determine whether Facebook text plausibly contains a post timestamp.
 
-    :param value: Candidate date text.
-    :return: True when the value contains a known date/time signal.
+    :param value: Candidate timestamp text.
+    :return: True when at least one normalized variant has a date/time signal.
     """
-
-    normalized = normalize_whitespace(value).casefold()  # Normalize candidate for matching
-    if not normalized:  # Reject empty values
-        return False  # Empty text cannot represent a date
-
-    if re.fullmatch(r"\d{9,11}", normalized):  # Accept Unix timestamps directly
-        return True  # Numeric timestamp is date-like
-
-    if re.search(r"\d{4}-\d{1,2}-\d{1,2}", normalized):  # Accept ISO-like dates
-        return True  # ISO date is date-like
 
     month_words = (
         "janeiro", "fevereiro", "março", "marco", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro",
         "january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december",
-        "enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre",
+        "enero", "febrero", "marzo", "mayo", "junio", "julio", "septiembre", "octubre", "noviembre", "diciembre",
         "janvier", "février", "fevrier", "mars", "avril", "mai", "juin", "juillet", "août", "aout", "septembre", "octobre", "novembre", "décembre", "decembre",
         "januar", "februar", "märz", "marz", "april", "mai", "juni", "juli", "august", "september", "oktober", "november", "dezember",
-    )  # Month names supported by the configured parser languages
-
+        "jan", "fev", "feb", "mar", "abr", "apr", "mai", "may", "jun", "jul", "ago", "aug", "set", "sep", "sept", "out", "oct", "nov", "dez", "dec",
+    )
     relative_words = (
-        "ontem", "hoje", "yesterday", "today", "ayer", "hoy", "hier", "aujourd", "gestern", "heute",
-        "ago", "atrás", "atras", "há ", "ha ", "min", "mins", "minute", "minutes", "hora", "horas",
-        "hour", "hours", "dia", "dias", "day", "days", "semana", "semanas", "week", "weeks", "ano", "anos", "year", "years",
-    )  # Relative date vocabulary commonly emitted by Facebook
+        "ontem", "hoje", "agora mesmo", "yesterday", "today", "just now",
+        "ago", "atrás", "atras", "há ", "ha ",
+        "minute", "minutes", "minuto", "minutos", "hora", "horas", "hour", "hours",
+        "dia", "dias", "day", "days", "semana", "semanas", "week", "weeks",
+        "ano", "anos", "year", "years",
+    )
 
-    if any(word in normalized for word in month_words):  # Accept explicit month names
-        return True  # Month-based label is date-like
+    for variant in split_facebook_timestamp_variants(value):
+        normalized = variant.casefold().strip()
+        if not normalized:
+            continue
 
-    if any(word in normalized for word in relative_words):  # Accept relative Facebook timestamp text
-        return True  # Relative label is date-like
+        if re.fullmatch(r"\d{9,11}", normalized):
+            return True
+        if re.search(r"\b(?:19|20)\d{2}[-/.]\d{1,2}[-/.]\d{1,2}\b", normalized):
+            return True
+        if re.search(r"\b\d{1,2}[-/.]\d{1,2}(?:[-/.](?:19|20)?\d{2})?\b", normalized):
+            return True
+        if re.fullmatch(
+            r"(?:há\s+|ha\s+)?\d+\s*(?:s|seg(?:undo)?s?|m|min(?:uto)?s?|mins|h|hr|hrs|hora|horas|d|dia|dias|w|wk|week|weeks|sem|semana|semanas|a|ano|anos|y|yr|yrs|year|years)(?:\s+ago|\s+atrás|\s+atras)?",
+            normalized,
+            flags=re.IGNORECASE,
+        ):
+            return True
+        if any(word in normalized for word in month_words):
+            return True
+        if any(word in normalized for word in relative_words):
+            return True
+        if re.search(r"\b(?:19|20)\d{2}\b", normalized) and re.search(r"\b\d{1,2}\b", normalized):
+            return True
 
-    if re.fullmatch(r"\d+\s*(s|m|min|h|d|w|sem|a|y)", normalized):  # Accept compact timestamps such as "2 h" or "3 d"
-        return True  # Compact relative label is date-like
-
-    if re.search(r"\b(19|20)\d{2}\b", normalized) and re.search(r"\b\d{1,2}\b", normalized):  # Accept explicit year labels
-        return True  # Year-bearing label is date-like
-
-    return False  # Reject arbitrary aria-labels, names, reaction counts, and accessibility text
+    return False
 
 
 def is_plausible_post_datetime(value: datetime.datetime, reference_now: datetime.datetime) -> bool:
@@ -1287,69 +1494,126 @@ def is_plausible_post_datetime(value: datetime.datetime, reference_now: datetime
 
 def parse_facebook_date(candidates: list[str]) -> tuple[datetime.datetime | None, str]:
     """
-    Parse Facebook date candidates using Unix timestamps, ISO values, and localized text.
+    Parse current and legacy Facebook timestamp candidates into an absolute local datetime.
 
-    :param candidates: Ordered raw date candidates.
-    :return: Tuple containing the parsed datetime and the raw value that produced it.
+    :param candidates: Ordered raw timestamp candidates.
+    :return: Parsed datetime and the value that produced it.
     """
 
-    reference_now = datetime.datetime.now().astimezone()  # Capture a stable base for relative dates
+    reference_now = datetime.datetime.now().astimezone()
 
-    for candidate in candidates:  # Iterate from most likely to least likely date values
-        value = str(candidate).strip()  # Normalize the current candidate
-        if not value or not looks_like_date_candidate(value):  # Reject arbitrary labels before parsing
-            continue  # Continue to the next candidate
+    for candidate in candidates:
+        for value in split_facebook_timestamp_variants(candidate):
+            if not value or not looks_like_date_candidate(value):
+                continue
 
-        if re.fullmatch(r"\d{9,11}", value):  # Detect Unix timestamp values
-            try:  # Attempt timestamp conversion
-                parsed = datetime.datetime.fromtimestamp(int(value), tz=reference_now.tzinfo)  # Convert to local datetime
-                if is_plausible_post_datetime(parsed, reference_now):  # Validate timestamp range
-                    return parsed, value  # Return the parsed result
-            except (OverflowError, OSError, ValueError):  # Ignore invalid timestamp ranges
-                pass  # Continue to text parsing
+            if re.fullmatch(r"\d{9,11}", value):
+                try:
+                    parsed_timestamp = datetime.datetime.fromtimestamp(int(value), tz=reference_now.tzinfo)
+                    if is_plausible_post_datetime(parsed_timestamp, reference_now):
+                        return parsed_timestamp, value
+                except (OverflowError, OSError, ValueError):
+                    pass
 
-        try:  # Attempt native ISO parsing before using dateparser
-            iso_candidate = value.replace("Z", "+00:00")  # Normalize trailing UTC designator
-            parsed_iso = datetime.datetime.fromisoformat(iso_candidate)  # Parse ISO date/time
-            if parsed_iso.tzinfo is None:  # Normalize naive values to local timezone
-                parsed_iso = parsed_iso.replace(tzinfo=reference_now.tzinfo)  # Attach local timezone
-            if is_plausible_post_datetime(parsed_iso, reference_now):  # Validate timestamp range
-                return parsed_iso.astimezone(reference_now.tzinfo), value  # Return normalized ISO result
-        except ValueError:  # Candidate was not ISO-compatible
-            pass  # Continue to localized parsing
+            normalized_relative = value.casefold().strip()
+            relative_match = re.fullmatch(
+                r"(?:há\s+|ha\s+)?(\d+)\s*(s|seg(?:undo)?s?|m|min(?:uto)?s?|mins|h|hr|hrs|hora|horas|d|dia|dias|w|wk|week|weeks|sem|semana|semanas|a|ano|anos|y|yr|yrs|year|years)(?:\s+ago|\s+atrás|\s+atras)?",
+                normalized_relative,
+                flags=re.IGNORECASE,
+            )
+            if relative_match:
+                amount = int(relative_match.group(1))
+                unit = relative_match.group(2).casefold()
 
-        parsed = dateparser.parse(
-            value,
-            languages=["pt", "en", "es", "fr", "de"],
-            settings={
-                "RELATIVE_BASE": reference_now.replace(tzinfo=None),  # Use one stable base for relative labels such as "2 h"
-                "RETURN_AS_TIMEZONE_AWARE": False,  # Parse missing timezone without relying on OS-specific timezone names
-                "PREFER_DATES_FROM": "past",  # Facebook post dates should not resolve into the future
-            },
-        )  # Parse localized Facebook labels
+                if unit in {"s", "seg", "segs", "segundo", "segundos"}:
+                    delta = datetime.timedelta(seconds=amount)
+                elif unit in {"m", "min", "mins", "minuto", "minutos"}:
+                    delta = datetime.timedelta(minutes=amount)
+                elif unit in {"h", "hr", "hrs", "hora", "horas"}:
+                    delta = datetime.timedelta(hours=amount)
+                elif unit in {"d", "dia", "dias"}:
+                    delta = datetime.timedelta(days=amount)
+                elif unit in {"w", "wk", "week", "weeks", "sem", "semana", "semanas"}:
+                    delta = datetime.timedelta(weeks=amount)
+                else:
+                    delta = datetime.timedelta(days=365 * amount)
 
-        if parsed is not None:  # Verify parsing succeeded
-            if parsed.tzinfo is None:  # Attach the current local timezone when the label did not include one
-                parsed = parsed.replace(tzinfo=reference_now.tzinfo)  # Normalize naive result
-            else:  # Normalize timezone-aware results
-                parsed = parsed.astimezone(reference_now.tzinfo)  # Convert to the local timezone
+                parsed_relative = reference_now - delta
+                if is_plausible_post_datetime(parsed_relative, reference_now):
+                    return parsed_relative, value
 
-            if is_plausible_post_datetime(parsed, reference_now):  # Reject false-positive text parses
-                return parsed, value  # Return the parsed result and source text
+            if normalized_relative in {"ontem", "yesterday"}:
+                parsed_relative = reference_now - datetime.timedelta(days=1)
+                return parsed_relative, value
+            if normalized_relative in {"hoje", "today", "agora mesmo", "just now"}:
+                return reference_now, value
 
-    return None, ""  # Return failure without inventing a post date
+            try:
+                iso_candidate = value.replace("Z", "+00:00")
+                parsed_iso = datetime.datetime.fromisoformat(iso_candidate)
+                if parsed_iso.tzinfo is None:
+                    parsed_iso = parsed_iso.replace(tzinfo=reference_now.tzinfo)
+                if is_plausible_post_datetime(parsed_iso, reference_now):
+                    return parsed_iso.astimezone(reference_now.tzinfo), value
+            except ValueError:
+                pass
+
+            parsed = dateparser.parse(
+                value,
+                languages=["pt", "en", "es", "fr", "de"],
+                settings={
+                    "RELATIVE_BASE": reference_now.replace(tzinfo=None),
+                    "RETURN_AS_TIMEZONE_AWARE": False,
+                    "PREFER_DATES_FROM": "past",
+                    "DATE_ORDER": "DMY",
+                },
+            )
+
+            if parsed is not None:
+                if parsed.tzinfo is None:
+                    parsed = parsed.replace(tzinfo=reference_now.tzinfo)
+                else:
+                    parsed = parsed.astimezone(reference_now.tzinfo)
+
+                if is_plausible_post_datetime(parsed, reference_now):
+                    return parsed, value
+
+    return None, ""
 
 
-def resolve_post_date(article) -> tuple[datetime.datetime | None, str]:
+def resolve_post_date(page: Page, article) -> tuple[datetime.datetime | None, str]:
     """
-    Resolve the date of a loaded Facebook post.
+    Resolve a mounted Facebook root-post date, including absolute-time hover fallback.
 
-    :param article: Playwright locator representing a Facebook post.
+    :param page: Page containing the mounted post.
+    :param article: Root post locator.
     :return: Parsed datetime and raw date label.
     """
 
-    candidates = collect_date_candidates(article)  # Collect all available date representations
-    return parse_facebook_date(candidates)  # Parse the candidates in preference order
+    direct_candidates = collect_date_candidates(article)
+    parsed, raw_value = parse_facebook_date(direct_candidates)
+    raw_lowered = raw_value.casefold() if raw_value else ""
+    relative_timestamp = bool(
+        raw_value
+        and (
+            re.fullmatch(
+                r"(?:há\s+|ha\s+)?\d+\s*(?:s|seg(?:undo)?s?|m|min(?:uto)?s?|mins|h|hr|hrs|hora|horas|d|dia|dias|w|wk|week|weeks|sem|semana|semanas|a|ano|anos|y|yr|yrs|year|years)(?:\s+ago|\s+atrás|\s+atras)?",
+                raw_lowered,
+                flags=re.IGNORECASE,
+            )
+            or raw_lowered in {"ontem", "yesterday", "hoje", "today", "agora mesmo", "just now"}
+        )
+    )  # Relative labels are useful fallback dates but hover can expose the exact absolute timestamp
+
+    if parsed is not None and not relative_timestamp:
+        return parsed, raw_value  # Preserve exact direct absolute timestamps without an unnecessary hover
+
+    hover_candidates = collect_hover_timestamp_candidates(page, article)
+    hover_parsed, hover_raw = parse_facebook_date(hover_candidates)
+    if hover_parsed is not None:
+        return hover_parsed, hover_raw  # Prefer hover-derived absolute timestamp when available
+
+    return parsed, raw_value  # Fall back to a valid relative timestamp only if hover could not improve it
 
 
 def page_has_content_unavailable_message(page: Page) -> bool:
@@ -1378,6 +1642,43 @@ def page_has_content_unavailable_message(page: Page) -> bool:
     return any(marker in body_text for marker in unavailable_markers)  # Report whether a known unavailable state is visible
 
 
+def is_probable_timeline_post_article(article) -> bool:
+    """
+    Distinguish an actual Facebook post card from other top-level profile widgets using role=article.
+
+    :param article: Candidate top-level article locator.
+    :return: True when post-header/body/toolbar/timestamp signals are present.
+    """
+
+    if not is_top_level_timeline_article(article):
+        return False
+
+    try:
+        return bool(
+            article.evaluate(
+                """root => {
+                    if (root.querySelector('[data-ad-rendering-role="profile_name"]')) return true;
+                    if (root.querySelector('[data-ad-rendering-role="story_message"]')) return true;
+                    if (root.querySelector('[data-ad-preview="message"], [data-ad-comet-preview="message"]')) return true;
+
+                    const links = Array.from(root.querySelectorAll('a[href], a[role="link"]'));
+                    return links.some(link => {
+                        const href = link.href || link.getAttribute('href') || '';
+                        if (/[?&](?:comment_id|reply_comment_id|reply_comment_token)=/i.test(href)) return false;
+                        if (link.closest('h2, h3, h4, [data-ad-rendering-role="profile_name"]')) return false;
+                        const label = link.getAttribute('aria-label') || '';
+                        const text = (link.textContent || '').trim();
+                        const hasTime = /\\d/.test(label) || /\\d+\\s*(?:s|m|min|h|d|w|sem|a|y)\\b/i.test(text);
+                        const hasPostRef = /\\/posts\\/|\\/videos\\/|\\/watch|\\/permalink|\\/story\\.php|\\/reel\\/|\\/share\\/[pvr]\\/|[?&](?:fbid|story_fbid|v)=/i.test(href);
+                        return hasTime && hasPostRef;
+                    });
+                }"""
+            )
+        )
+    except Exception:
+        return False
+
+
 def collect_profile_timeline_diagnostics(page: Page) -> dict[str, int]:
     """
     Collect lightweight DOM counts used to diagnose profile-timeline discovery failures.
@@ -1393,6 +1694,8 @@ def collect_profile_timeline_diagnostics(page: Page) -> dict[str, int]:
         "main_articles": 'div[role="main"] div[role="article"]',
         "feed_articles": 'div[role="feed"] div[role="article"]',
         "feed_units": 'div[data-pagelet*="FeedUnit"]',
+        "profile_name_roles": 'div[data-ad-rendering-role="profile_name"]',
+        "story_messages": 'div[data-ad-rendering-role="story_message"]',
         "messages": 'div[data-ad-preview="message"], div[data-ad-comet-preview="message"]',
         "post_links": 'a[href*="/posts/"], a[href*="/permalink.php"], a[href*="/story.php"], a[href*="/share/p/"]',
     }  # Stable diagnostic selectors kept separate from extraction policy
@@ -1409,28 +1712,36 @@ def collect_profile_timeline_diagnostics(page: Page) -> dict[str, int]:
 
 def profile_timeline_is_rendered(page: Page) -> bool:
     """
-    Determine whether the configured profile has rendered a real timeline/feed rather than only page chrome.
+    Determine whether the configured profile has rendered at least one real post/timeline structure.
 
     :param page: Authenticated configured-profile page.
-    :return: True when a feed container or mounted post-like container is present.
+    :return: True when the actual profile timeline is mounted.
     """
 
-    if page.is_closed() or page_has_content_unavailable_message(page):  # Reject closed/error pages immediately
-        return False  # No usable profile timeline exists on this page
+    if page.is_closed() or page_has_content_unavailable_message(page):
+        return False
 
-    try:  # Prefer explicit feed containers when Facebook exposes them
-        if any(page.locator(selector).count() > 0 for selector in PROFILE_FEED_CONTAINER_SELECTORS):
-            return True  # A profile timeline/feed structure is mounted
+    try:
+        has_feed_structure = any(page.locator(selector).count() > 0 for selector in PROFILE_FEED_CONTAINER_SELECTORS)
+        has_current_post_marker = (
+            page.locator('div[data-ad-rendering-role="profile_name"]').count() > 0
+            or page.locator('div[data-ad-rendering-role="story_message"]').count() > 0
+            or page.locator('div[role="feed"] div[role="article"]').count() > 0
+        )
+        if has_feed_structure and has_current_post_marker:
+            return True
     except Exception:
-        pass  # Continue to article-level fallback
+        pass
 
-    try:  # Current Facebook commonly exposes profile posts as role=article
-        if any(page.locator(selector).count() > 0 for selector in ARTICLE_SELECTORS):
-            return True  # At least one post-like feed container is mounted
+    try:
+        root_articles = page.locator('div[role="main"] div[role="article"]')
+        for index in range(min(root_articles.count(), 25)):
+            if is_probable_timeline_post_article(root_articles.nth(index)):
+                return True
     except Exception:
-        pass  # Treat transient DOM failures as not ready yet
+        pass
 
-    return False  # Main page chrome alone is not sufficient to start scraping
+    return False
 
 
 def build_mounted_article_discovery_key(article) -> str:
@@ -2100,9 +2411,14 @@ def navigate_to_profile(
         pass  # Continue with current top position
 
     print(
+        f"{BackgroundColors.GREEN}Configured Facebook profile: "
+        f"{BackgroundColors.CYAN}{PROFILE_DISPLAY_NAME}{BackgroundColors.GREEN} | username "
+        f"{BackgroundColors.CYAN}{PROFILE_USERNAME}{Style.RESET_ALL}"
+    )  # Log the configured display name and URL-derived username explicitly
+    print(
         f"{BackgroundColors.GREEN}Profile timeline loaded from newest position: "
         f"{BackgroundColors.CYAN}{PROFILE_URL}{Style.RESET_ALL}"
-    )  # Log profile-root timeline readiness
+    )  # Log the complete configured profile URL
 
     return page  # Return exact Page object ready for timeline scraping
 
@@ -3638,42 +3954,51 @@ def write_post_metadata(post_dir: Path, metadata: dict) -> None:
 
 def resolve_post_date_from_permalink(context: BrowserContext, post_url: str) -> tuple[datetime.datetime | None, str]:
     """
-    Resolve a post date from its dedicated permalink page when the timeline card does not expose enough date information.
+    Resolve a post date from its dedicated permalink page when the timeline card lacks enough date information.
 
     :param context: Authenticated browser context.
     :param post_url: Facebook permalink to inspect.
     :return: Parsed datetime and raw date label.
     """
 
-    if not post_url:  # Verify a permalink exists
-        return None, ""  # No fallback navigation can be performed
+    if not post_url:
+        return None, ""
 
-    details_page = None  # Initialize detail page for guaranteed cleanup
+    details_page: Page | None = None
 
-    try:  # Open a separate page so the scrolling timeline remains untouched
-        details_page = context.new_page()  # Create a temporary authenticated page
-        details_page.set_default_navigation_timeout(PAGE_LOAD_TIMEOUT_MS)  # Configure navigation timeout
-        details_page.goto(post_url, wait_until="domcontentloaded", timeout=PAGE_LOAD_TIMEOUT_MS)  # Open the post permalink
-        details_page.wait_for_timeout(1_500)  # Allow Facebook client rendering to complete
+    try:
+        active_page: Page = context.new_page()
+        details_page = active_page
+        active_page.set_default_navigation_timeout(PAGE_LOAD_TIMEOUT_MS)
+        active_page.goto(post_url, wait_until="domcontentloaded", timeout=PAGE_LOAD_TIMEOUT_MS)
+        active_page.wait_for_timeout(1_500)
 
-        articles = get_article_locator(details_page)  # Locate the post on its dedicated page
-        if articles.count() == 0:  # Verify a post container is available
-            return None, ""  # No date-bearing post container could be found
+        articles = get_article_locator(active_page)
+        if articles.count() == 0:
+            return None, ""
 
-        return resolve_post_date(articles.first)  # Parse date from the dedicated post view
-    except Exception as error:  # Permalink fallback is best-effort and must not terminate timeline scrolling
+        for index in range(min(articles.count(), 10)):
+            article = articles.nth(index)
+            if not is_top_level_timeline_article(article):
+                continue
+            parsed, raw_value = resolve_post_date(active_page, article)
+            if parsed is not None:
+                return parsed, raw_value
+
+        return None, ""
+    except Exception as error:
         verbose_output(
             true_string=f"{BackgroundColors.YELLOW}Permalink date fallback failed for "
-            f"{BackgroundColors.CYAN}{post_url}{BackgroundColors.YELLOW}: "
+            f"{BackgroundColors.CYAN}{format_url_for_log(post_url)}{BackgroundColors.YELLOW}: "
             f"{BackgroundColors.CYAN}{error}{Style.RESET_ALL}"
-        )  # Log diagnostic details only in verbose mode
-        return None, ""  # Report unresolved date
-    finally:  # Always close the temporary details page
-        if details_page is not None:  # Verify the page was created
-            try:  # Protect cleanup if navigation crashed the page
-                details_page.close()  # Close only the temporary details page
-            except Exception:  # Ignore cleanup failure
-                pass  # No further action required
+        )
+        return None, ""
+    finally:
+        if details_page is not None:
+            try:
+                details_page.close()
+            except Exception:
+                pass
 
 
 def process_article(page: Page, context: BrowserContext, article, known_keys: set[str]) -> tuple[bool, str]:
@@ -3708,7 +4033,7 @@ def process_article(page: Page, context: BrowserContext, article, known_keys: se
 
     post_id = extract_post_id(post_url) if post_url else ""  # Recover stable id when an exposed URL contains one
     content = extract_post_content(article)  # Extract root-post body without nested comments
-    post_date, date_raw = resolve_post_date(article)  # Resolve timestamp from root-post header/date semantics
+    post_date, date_raw = resolve_post_date(page, article)  # Resolve timestamp from root-post ARIA/text/tooltip semantics
     if post_date is None and post_url:  # Use dedicated permalink only when one actually exists
         post_date, date_raw = resolve_post_date_from_permalink(context, post_url)  # Retry exact post page
 
@@ -3720,10 +4045,22 @@ def process_article(page: Page, context: BrowserContext, article, known_keys: se
         return False, sorted(post_keys)[0]  # Return terminal key so same mounted post is not reprocessed
 
     if post_date is None:  # Never invent a date-based directory
+        timestamp_debug = collect_timestamp_link_candidates(article)[:3]  # Capture safe current-DOM timestamp evidence
+        safe_timestamp_debug = [
+            {
+                "url": format_url_for_log(str(candidate.get("href") or "")),
+                "aria_label": str(candidate.get("aria_label") or "")[:160],
+                "title": str(candidate.get("title") or "")[:160],
+                "text": str(candidate.get("text") or "")[:160],
+            }
+            for candidate in timestamp_debug
+        ]  # Strip query strings and bound potentially large accessibility strings
         print(
             f"{BackgroundColors.YELLOW}Skipping top-level post because its date could not be resolved safely: "
-            f"{BackgroundColors.CYAN}{format_url_for_log(post_url)}{Style.RESET_ALL}"
-        )  # Surface retryable timestamp failure
+            f"{BackgroundColors.CYAN}{format_url_for_log(post_url)}"
+            f"{BackgroundColors.YELLOW} | timestamp candidates: "
+            f"{BackgroundColors.CYAN}{safe_timestamp_debug}{Style.RESET_ALL}"
+        )  # Surface exactly what Facebook exposed without leaking URL query parameters
         return False, ''  # Keep post retryable during this run
 
     expected_photo_count, expected_video_count = count_post_media_indicators(article)  # Count visible root-post media indicators
@@ -3887,7 +4224,7 @@ def scroll_profile_and_download(page: Page, context: BrowserContext) -> dict:
     """
     Incrementally scroll the profile timeline and archive every validated owner post.
 
-    Discovery and processing are tracked separately. A canonical URL contributes to end-of-feed
+    Discovery and processing are tracked separately. A URL or mounted-post identity contributes to end-of-feed
     discovery once, but it is not permanently suppressed until it is already complete or becomes
     complete in this session. Detached/incomplete posts can therefore be retried when Facebook
     remounts them later in the virtualized feed.
@@ -3912,7 +4249,7 @@ def scroll_profile_and_download(page: Page, context: BrowserContext) -> dict:
     discovered_post_urls: set[str] = set()  # Track canonical owner-post URLs for feed-discovery progress
     finished_session_urls: set[str] = set()  # Track already-known/newly-complete URLs that need no more processing
     retry_counts: dict[str, int] = {}  # Bound retry attempts for detached/incomplete posts in one session
-    no_new_discovery_scrolls = 0  # Track consecutive passes without new canonical owner URLs
+    no_new_discovery_scrolls = 0  # Track consecutive passes without new owner-post identities
     previous_scroll_y = -1  # Track actual viewport movement
 
     print(
@@ -3931,7 +4268,7 @@ def scroll_profile_and_download(page: Page, context: BrowserContext) -> dict:
         articles = get_article_locator(page)  # Resolve broad mounted article-like containers
         current_count = articles.count()  # Count mounted candidates including comments
         top_level_count = 0  # Count actual root timeline articles
-        new_discovered_this_iteration = 0  # Count new canonical owner URLs
+        new_discovered_this_iteration = 0  # Count new owner-post identities
         processed_this_iteration = 0  # Count metadata writes this pass
 
         for index in range(current_count):  # Inspect mounted candidates before virtualization removes them
@@ -3939,7 +4276,9 @@ def scroll_profile_and_download(page: Page, context: BrowserContext) -> dict:
                 article = articles.nth(index)  # Resolve current locator
                 if not is_top_level_timeline_article(article):  # Facebook comments are also role=article
                     continue  # Skip nested comment/reply article
-                top_level_count += 1  # Count validated root article container
+                if not is_probable_timeline_post_article(article):  # Profile chrome/widgets can also use role=article
+                    continue  # Process only actual root post cards
+                top_level_count += 1  # Count validated root post container
 
                 post_url = extract_post_permalink(article)  # Resolve canonical permalink when Facebook exposes one
                 if post_url and url_has_comment_context(post_url):  # Reject explicit comment/reply context
@@ -4015,7 +4354,7 @@ def scroll_profile_and_download(page: Page, context: BrowserContext) -> dict:
             f"{BackgroundColors.GREEN}Timeline pass {BackgroundColors.CYAN}{scroll_iteration}"
             f"{BackgroundColors.GREEN}: mounted {BackgroundColors.CYAN}{current_count}"
             f"{BackgroundColors.GREEN}, top-level {BackgroundColors.CYAN}{top_level_count}"
-            f"{BackgroundColors.GREEN}, new canonical posts {BackgroundColors.CYAN}{new_discovered_this_iteration}"
+            f"{BackgroundColors.GREEN}, new posts {BackgroundColors.CYAN}{new_discovered_this_iteration}"
             f"{BackgroundColors.GREEN}, processed {BackgroundColors.CYAN}{processed_this_iteration}"
             f"{BackgroundColors.GREEN}, total discovered {BackgroundColors.CYAN}{len(discovered_post_urls)}"
             f"{BackgroundColors.GREEN}, pending retries {BackgroundColors.CYAN}{pending_retry_count}"
@@ -4051,6 +4390,15 @@ def scroll_profile_and_download(page: Page, context: BrowserContext) -> dict:
             f"DOM diagnostics: {diagnostics}. "
             f"The scraper stopped instead of reporting a false successful empty export."
         )  # Surface selector/profile-view failure explicitly
+
+    if processed_posts == 0 and not known_keys:  # Discovery without one successful archive is also a failed run
+        diagnostics = collect_profile_timeline_diagnostics(page)
+        raise RuntimeError(
+            f"Facebook posts were discovered ({len(discovered_post_urls)}), but none could be archived. "
+            f"Profile: {PROFILE_DISPLAY_NAME} ({PROFILE_USERNAME}). "
+            f"DOM diagnostics: {diagnostics}. "
+            f"The run is considered failed instead of reporting a false successful empty export."
+        )
 
     reindex_post_output_directories()  # Apply final oldest-to-newest indexes after new posts are known
     return {
