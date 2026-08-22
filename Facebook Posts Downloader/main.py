@@ -191,7 +191,7 @@ MAX_POST_PROCESS_RETRIES_PER_SESSION = 3  # Maximum retries for a mounted post t
 POST_METADATA_FILENAME = "post.json"  # Metadata file written inside every post directory
 POST_DIRECTORY_INDEX_MIN_WIDTH = 2  # Minimum zero-padded width used by oldest-to-newest post directory indexes
 POST_DIRECTORY_INDEX_PATTERN = re.compile(r"^\d+\.\s+")  # Existing post-directory index prefix removed before canonical reindexing
-SCRAPE_SCHEMA_VERSION = 5  # Metadata schema version; older timestamp/comment/media extraction outputs are intentionally reprocessed
+SCRAPE_SCHEMA_VERSION = 6  # Metadata schema version; older post-root/timestamp/media extraction outputs are intentionally reprocessed
 REPROCESS_LEGACY_METADATA = True  # Ignore pre-schema metadata so previously misidentified posts/media are scanned again
 MAX_TITLE_LENGTH = 96  # Maximum filesystem title length used after the date prefix
 MAX_CONTENT_TITLE_LENGTH = 160  # Maximum amount of post text considered while deriving a title
@@ -304,11 +304,14 @@ MESSAGE_SELECTORS = (
 
 ARTICLE_SELECTORS = (
     'div[role="main"] div[role="article"]',
+    'div[role="main"] [data-focus="feed_story"]',
     'div[role="feed"] div[role="article"]',
     'div[data-pagelet^="FeedUnit_"]',
     'div[data-pagelet*="FeedUnit"]',
     'div[role="feed"] > div',
-)  # Current/fallback selectors used to locate mounted profile-feed post containers
+)  # Legacy/fallback selectors used only when current post-root discovery cannot mark containers
+
+POST_ROOT_MARKER_ATTRIBUTE = "data-fpd-post-root"  # Temporary DOM attribute marking one current Facebook post container
 
 PROFILE_FEED_CONTAINER_SELECTORS = (
     'div[role="feed"]',
@@ -757,26 +760,59 @@ def url_has_comment_context(url: str) -> bool:
 
 def is_top_level_timeline_article(article) -> bool:
     """
-    Determine whether a locator is a top-level timeline article instead of a nested comment/reply article.
+    Determine whether a locator represents a root Facebook post instead of a nested comment/reply.
 
-    :param article: Playwright locator representing a Facebook article-like container.
-    :return: True only when the candidate is not nested inside another role=article container.
+    Current Facebook no longer guarantees that posts themselves use ``role="article"``. Containers
+    marked by ``mark_current_post_containers`` are therefore authoritative. Legacy article ancestry
+    remains only as a fallback for layouts where the current post-root anchors are unavailable.
+
+    :param article: Playwright locator representing a Facebook post/container candidate.
+    :return: True when the candidate can safely be treated as a root post container.
     """
 
-    try:  # Ask the browser to inspect ancestry because Facebook nests comments as role=article elements
+    try:  # Inspect current DOM state in one evaluation to avoid virtualization races
         return bool(
             article.evaluate(
                 """root => {
+                    if (root.hasAttribute('data-fpd-post-root')) return true;
+                    if (root.matches('[data-focus="feed_story"]')) return true;
+
+                    const actionLabelIsPost = value => {
+                        const normalized = String(value || '')
+                            .normalize('NFD')
+                            .replace(/[\\u0300-\\u036f]/g, '')
+                            .toLowerCase();
+                        return (
+                            normalized.includes('actions for this post') ||
+                            /\\bacoes?\\b.*\\b(publicacao|postagem|post)\\b/.test(normalized) ||
+                            /\\bopcoes?\\b.*\\b(publicacao|postagem|post)\\b/.test(normalized) ||
+                            /\\bacciones?\\b.*\\b(publicacion|post)\\b/.test(normalized) ||
+                            /\\bactions?\\b.*\\b(publication|post)\\b/.test(normalized) ||
+                            /\\baktionen?\\b.*\\b(beitrag|post)\\b/.test(normalized)
+                        );
+                    };
+                    const hasPostMarker = node => (
+                        !!node.querySelector('[data-ad-rendering-role="story_message"]') ||
+                        !!node.querySelector('[data-ad-preview="message"], [data-ad-comet-preview="message"]') ||
+                        !!node.querySelector('[data-ad-rendering-role="profile_name"]') ||
+                        Array.from(node.querySelectorAll('[aria-label]'))
+                            .some(element => actionLabelIsPost(element.getAttribute('aria-label')))
+                    );
+
                     if (root.matches('[role="article"]')) {
-                        const parent = root.parentElement;
-                        return !parent || !parent.closest('[role="article"]');
+                        const parentArticle = root.parentElement
+                            ? root.parentElement.closest('[role="article"]')
+                            : null;
+                        if (!parentArticle) return true;
+                        return hasPostMarker(root);
                     }
-                    return !root.closest('[role="article"]');
+
+                    return !root.closest('[role="article"]') && hasPostMarker(root);
                 }"""
             )
-        )  # Reject comment/reply articles nested inside the actual post
-    except Exception:  # Detached/ambiguous nodes cannot safely be treated as posts
-        return False  # Reject the candidate
+        )  # Accept marked/current post roots and safe legacy article fallbacks
+    except Exception:  # Detached/transitioning nodes can be retried after the next scroll mount
+        return False  # Do not classify an unstable candidate as a post
 
 
 def collect_timestamp_link_candidates(article) -> list[dict]:
@@ -793,10 +829,12 @@ def collect_timestamp_link_candidates(article) -> list[dict]:
     try:  # Evaluate ancestry/time semantics in the live DOM before Facebook virtualizes the post
         raw_candidates = article.evaluate(
             """root => {
-                const rootArticle = root.matches('[role="article"]') ? root : root.querySelector('[role="article"]') || root;
+                const rootArticle = root.hasAttribute('data-fpd-post-root')
+                    ? root
+                    : (root.matches('[role="article"]') ? root : root.querySelector('[role="article"]') || root);
                 const belongsToRoot = element => {
-                    const closestArticle = element.closest('[role="article"]');
-                    return !closestArticle || closestArticle === rootArticle;
+                    const closestBoundary = element.closest('[data-fpd-post-root], [role="article"]');
+                    return !closestBoundary || closestBoundary === rootArticle;
                 };
                 const compactTime = /(?:^|\\s)\\d+\\s*(?:s|m|min|mins|h|hr|hrs|d|w|wk|sem|a|y)(?:\\b|\\s|·|•|$)/i;
                 const timeWords = /ago|just now|yesterday|today|ontem|hoje|agora mesmo|atrás|atras|há\\s|ha\\s|minute|minutes|minuto|minutos|hora|horas|day|days|dia|dias|week|weeks|semana|semanas|month|months|mês|meses|year|years|ano|anos|janeiro|fevereiro|março|marco|abril|maio|junho|julho|agosto|setembro|outubro|novembro|dezembro|january|february|march|april|may|june|july|august|september|october|november|december/i;
@@ -981,10 +1019,12 @@ def collect_post_permalink_candidates(article) -> list[dict]:
     try:  # Extract same-post anchors and semantic timestamp metadata in one browser-side pass
         raw_candidates = article.evaluate(
             """root => {
-                const rootArticle = root.matches('[role="article"]') ? root : root.querySelector('[role="article"]');
+                const rootArticle = root.hasAttribute('data-fpd-post-root')
+                    ? root
+                    : (root.matches('[role="article"]') ? root : root.querySelector('[role="article"]'));
                 const belongsToRoot = element => {
                     if (!rootArticle) return true;
-                    return element.closest('[role="article"]') === rootArticle;
+                    return element.closest('[data-fpd-post-root], [role="article"]') === rootArticle;
                 };
                 const message = root.querySelector('div[data-ad-rendering-role="story_message"], [data-ad-preview="message"], [data-ad-comet-preview="message"]');
                 return Array.from(root.querySelectorAll('a[href]'))
@@ -1115,10 +1155,12 @@ def is_profile_owner_post_article(article, post_url: str) -> bool:
     try:  # Extract author/header links belonging only to the root post article
         author_data = article.evaluate(
             """root => {
-                const rootArticle = root.matches('[role="article"]') ? root : root.querySelector('[role="article"]');
+                const rootArticle = root.hasAttribute('data-fpd-post-root')
+                    ? root
+                    : (root.matches('[role="article"]') ? root : root.querySelector('[role="article"]'));
                 const belongsToRoot = element => {
                     if (!rootArticle) return true;
-                    return element.closest('[role="article"]') === rootArticle;
+                    return element.closest('[data-fpd-post-root], [role="article"]') === rootArticle;
                 };
                 const anchors = Array.from(root.querySelectorAll('div[data-ad-rendering-role="profile_name"] a[href], h1 a[href], h2 a[href], h3 a[href], h4 a[href], strong a[href], a[role="link"][href]'))
                     .filter(belongsToRoot)
@@ -1130,7 +1172,11 @@ def is_profile_owner_post_article(article, post_url: str) -> bool:
                     }));
                 const clone = root.cloneNode(true);
                 clone.querySelectorAll('[role="article"]').forEach(node => {
-                    if (node !== clone && node.parentNode) node.remove();
+                    if (node === clone || !node.parentNode) return;
+                    const hasPostMarker = !!node.querySelector(
+                        '[data-ad-rendering-role="story_message"], [data-ad-preview="message"], [data-ad-comet-preview="message"], [data-ad-rendering-role="profile_name"]'
+                    );
+                    if (!hasPostMarker) node.remove();
                 });
                 const lines = (clone.innerText || clone.textContent || '').split(/\\n+/).map(line => line.trim()).filter(Boolean).slice(0, 12);
                 return { anchors, lines };
@@ -1197,35 +1243,43 @@ def extract_post_permalink(article) -> str:
 
 def expand_post_text(article) -> None:
     """
-    Expand truncated root-post text without clicking "See more" controls inside nested comments.
+    Expand truncated root-post text without clicking controls belonging to comments/replies.
 
     :param article: Playwright locator representing a Facebook post.
     :return: None
     """
 
-    for label in SEE_MORE_TEXTS:  # Iterate supported localized labels
-        try:  # Inspect exact controls in this root post
-            controls = article.get_by_text(label, exact=True)  # Locate expansion controls
-            for index in range(min(controls.count(), 10)):  # Bound repeated controls
-                control = controls.nth(index)  # Resolve current control
-                try:  # Verify control belongs to root post rather than a nested comment article
+    for label in SEE_MORE_TEXTS:
+        try:
+            controls = article.get_by_text(label, exact=True)
+            for index in range(min(controls.count(), 10)):
+                control = controls.nth(index)
+                try:
                     belongs_to_root = bool(
                         control.evaluate(
                             """element => {
-                                const root = element.closest('[role="article"]');
-                                const outer = root && root.parentElement ? root.parentElement.closest('[role="article"]') : null;
-                                return !root || !outer;
+                                const markedRoot = element.closest('[data-fpd-post-root]');
+                                if (markedRoot) {
+                                    const closestBoundary = element.closest('[data-fpd-post-root], [role="article"]');
+                                    return closestBoundary === markedRoot;
+                                }
+
+                                const closestArticle = element.closest('[role="article"]');
+                                const outerArticle = closestArticle && closestArticle.parentElement
+                                    ? closestArticle.parentElement.closest('[role="article"]')
+                                    : null;
+                                return !closestArticle || !outerArticle;
                             }"""
                         )
-                    )  # Reject nested-comment controls
-                except Exception:  # Detached control cannot be safely clicked
-                    belongs_to_root = False  # Skip ambiguous control
+                    )  # Reject nested comment controls while supporting non-article post roots
+                except Exception:
+                    belongs_to_root = False
 
-                if belongs_to_root and control.is_visible():  # Click only visible root-post expansion
-                    control.click(timeout=1_500)  # Expand post body
-                    return  # Stop after first successful expansion
-        except Exception:  # Expansion is optional and must never abort extraction
-            continue  # Try next localized label
+                if belongs_to_root and control.is_visible():
+                    control.click(timeout=1_500)
+                    return  # Stop after first successful root-post expansion
+        except Exception:
+            continue  # Expansion is optional
 
 
 def extract_post_content(article) -> str:
@@ -1244,14 +1298,21 @@ def extract_post_content(article) -> str:
     try:  # Extract explicit message containers and fallback text browser-side without nested role=article descendants
         payload = article.evaluate(
             """root => {
-                const rootArticle = root.matches('[role="article"]') ? root : root.querySelector('[role="article"]');
+                const rootArticle = root.hasAttribute('data-fpd-post-root')
+                    ? root
+                    : (root.matches('[role="article"]') ? root : root.querySelector('[role="article"]'));
                 const belongsToRoot = element => {
                     if (!rootArticle) return true;
-                    return element.closest('[role="article"]') === rootArticle;
+                    return element.closest('[data-fpd-post-root], [role="article"]') === rootArticle;
                 };
                 const cleanedText = element => {
                     const clone = element.cloneNode(true);
-                    clone.querySelectorAll('[role="article"]').forEach(node => node.remove());
+                    clone.querySelectorAll('[role="article"]').forEach(node => {
+                        const hasPostMarker = !!node.querySelector(
+                            '[data-ad-rendering-role="story_message"], [data-ad-preview="message"], [data-ad-comet-preview="message"], [data-ad-rendering-role="profile_name"]'
+                        );
+                        if (!hasPostMarker) node.remove();
+                    });
                     return (clone.innerText || clone.textContent || '').trim();
                 };
                 const explicit = Array.from(root.querySelectorAll('div[data-ad-rendering-role="story_message"], [data-ad-preview="message"], [data-ad-comet-preview="message"]'))
@@ -1264,7 +1325,12 @@ def extract_post_content(article) -> str:
                     .filter(Boolean)
                     .slice(0, 80);
                 const rootClone = root.cloneNode(true);
-                rootClone.querySelectorAll('[role="article"]').forEach(node => node.remove());
+                rootClone.querySelectorAll('[role="article"]').forEach(node => {
+                    const hasPostMarker = !!node.querySelector(
+                        '[data-ad-rendering-role="story_message"], [data-ad-preview="message"], [data-ad-comet-preview="message"], [data-ad-rendering-role="profile_name"]'
+                    );
+                    if (!hasPostMarker) node.remove();
+                });
                 const fallback = (rootClone.innerText || rootClone.textContent || '').trim();
                 return { explicit, generic, fallback };
             }"""
@@ -1381,10 +1447,12 @@ def collect_date_candidates(article) -> list[str]:
     try:
         fallback_values = article.evaluate(
             """root => {
-                const rootArticle = root.matches('[role="article"]') ? root : root.querySelector('[role="article"]') || root;
+                const rootArticle = root.hasAttribute('data-fpd-post-root')
+                    ? root
+                    : (root.matches('[role="article"]') ? root : root.querySelector('[role="article"]') || root);
                 const belongsToRoot = element => {
-                    const closestArticle = element.closest('[role="article"]');
-                    return !closestArticle || closestArticle === rootArticle;
+                    const closestBoundary = element.closest('[data-fpd-post-root], [role="article"]');
+                    return !closestBoundary || closestBoundary === rootArticle;
                 };
                 const selectors = [
                     'abbr[data-utime]',
@@ -1644,53 +1712,298 @@ def page_has_content_unavailable_message(page: Page) -> bool:
 
 def is_probable_timeline_post_article(article) -> bool:
     """
-    Distinguish an actual Facebook post card from other profile widgets using post-specific DOM signals.
+    Determine whether a candidate container exposes Facebook post-specific DOM signals.
 
-    Top-level ancestry is intentionally validated by the caller. Rechecking it inside this function caused
-    valid Facebook cards to be rejected when the virtualized DOM changed between two consecutive evaluations.
-
-    :param article: Candidate article/container locator already selected from the profile timeline.
-    :return: True when post-header/body/toolbar/timestamp signals are present.
+    :param article: Candidate post/container locator.
+    :return: True when the candidate is already marked or exposes body/author/action/permalink signals.
     """
 
-    try:  # Inspect the candidate once so Facebook virtualization cannot invalidate a redundant ancestry check
+    try:  # Inspect the candidate in one browser-side evaluation
         return bool(
             article.evaluate(
                 """root => {
+                    if (root.hasAttribute('data-fpd-post-root')) return true;
+                    if (root.matches('[data-focus="feed_story"]')) return true;
                     if (root.querySelector('[data-ad-rendering-role="profile_name"]')) return true;
                     if (root.querySelector('[data-ad-rendering-role="story_message"]')) return true;
                     if (root.querySelector('[data-ad-preview="message"], [data-ad-comet-preview="message"]')) return true;
 
-                    const links = Array.from(root.querySelectorAll('a[href], a[role="link"]'));
-                    return links.some(link => {
+                    const normalize = value => String(value || '')
+                        .normalize('NFD')
+                        .replace(/[\\u0300-\\u036f]/g, '')
+                        .toLowerCase();
+                    const actionLabelIsPost = value => {
+                        const label = normalize(value);
+                        return (
+                            label.includes('actions for this post') ||
+                            /\\bacoes?\\b.*\\b(publicacao|postagem|post)\\b/.test(label) ||
+                            /\\bopcoes?\\b.*\\b(publicacao|postagem|post)\\b/.test(label) ||
+                            /\\bacciones?\\b.*\\b(publicacion|post)\\b/.test(label) ||
+                            /\\bactions?\\b.*\\b(publication|post)\\b/.test(label) ||
+                            /\\baktionen?\\b.*\\b(beitrag|post)\\b/.test(label)
+                        );
+                    };
+
+                    if (
+                        Array.from(root.querySelectorAll('[aria-label]'))
+                            .some(element => actionLabelIsPost(element.getAttribute('aria-label')))
+                    ) return true;
+
+                    const postReference = /\\/posts\\/|\\/videos\\/|\\/watch|\\/permalink(?:\\.php|\\/)|\\/story\\.php|\\/reel\\/|\\/share\\/(?:p|v|r)\\/|[?&](?:fbid|story_fbid|v)=/i;
+                    return Array.from(root.querySelectorAll('a[href]')).some(link => {
                         const href = link.href || link.getAttribute('href') || '';
-                        if (/[?&](?:comment_id|reply_comment_id|reply_comment_token)=/i.test(href)) return false;
-                        if (link.closest('h2, h3, h4, [data-ad-rendering-role="profile_name"]')) return false;
-                        const label = link.getAttribute('aria-label') || '';
-                        const title = link.getAttribute('title') || '';
-                        const text = (link.textContent || '').trim();
-                        const hasTime =
-                            /\\d/.test(label) ||
-                            /\\d/.test(title) ||
-                            /\\d+\\s*(?:s|m|min|h|d|w|sem|a|y)\\b/i.test(text);
-                        const hasPostRef = /\\/posts\\/|\\/videos\\/|\\/watch|\\/permalink|\\/story\\.php|\\/reel\\/|\\/share\\/[pvr]\\/|[?&](?:fbid|story_fbid|v)=/i.test(href);
-                        return hasTime && hasPostRef;
+                        return (
+                            postReference.test(href) &&
+                            !/[?&](?:comment_id|reply_comment_id|reply_comment_token)=/i.test(href)
+                        );
                     });
                 }"""
             )
-        )  # Return whether the mounted container exposes any strong post signal
-    except Exception:  # Detached/transitioning candidates can be retried on a later mount
-        return False  # Do not classify an unstable container as a post
+        )  # Return whether the container has any strong post signal
+    except Exception:  # Facebook may detach the candidate during virtualization
+        return False  # Retry later instead of misclassifying the node
+
+
+def mark_current_post_containers(page: Page) -> dict[str, int]:
+    """
+    Discover and mark current Facebook post roots without assuming posts use ``role="article"``.
+
+    Modern Facebook can expose only an "Actions for this post" control and current rendering-role
+    markers. The browser-side routine walks upward from those anchors and keeps the highest ancestor
+    that still contains signals for exactly one post, stopping before shared page/profile wrappers.
+
+    :param page: Current authenticated Facebook profile page.
+    :return: Diagnostic counts for anchors considered and post roots marked.
+    """
+
+    try:  # Perform discovery atomically against one DOM snapshot
+        result = page.evaluate(
+            """({ markerAttribute, authorNames }) => {
+                const main = document.querySelector('div[role="main"]');
+                if (!main) {
+                    return {
+                        post_action_controls: 0,
+                        story_markers: 0,
+                        profile_name_markers: 0,
+                        owner_name_links: 0,
+                        post_reference_links: 0,
+                        marked_post_containers: 0,
+                    };
+                }
+
+                document.querySelectorAll(`[${markerAttribute}]`).forEach(
+                    element => element.removeAttribute(markerAttribute)
+                );
+
+                const normalize = value => String(value || '')
+                    .normalize('NFD')
+                    .replace(/[\\u0300-\\u036f]/g, '')
+                    .replace(/\\s+/g, ' ')
+                    .trim()
+                    .toLowerCase();
+
+                const acceptedAuthors = new Set((authorNames || []).map(normalize).filter(Boolean));
+                const actionLabelIsPost = value => {
+                    const label = normalize(value);
+                    return (
+                        label.includes('actions for this post') ||
+                        /\\bacoes?\\b.*\\b(publicacao|postagem|post)\\b/.test(label) ||
+                        /\\bopcoes?\\b.*\\b(publicacao|postagem|post)\\b/.test(label) ||
+                        /\\bacciones?\\b.*\\b(publicacion|post)\\b/.test(label) ||
+                        /\\bactions?\\b.*\\b(publication|post)\\b/.test(label) ||
+                        /\\baktionen?\\b.*\\b(beitrag|post)\\b/.test(label)
+                    );
+                };
+                const postReference = /\\/posts\\/|\\/videos\\/|\\/watch|\\/permalink(?:\\.php|\\/)|\\/story\\.php|\\/reel\\/|\\/share\\/(?:p|v|r)\\/|\\/photo(?:s|\\.php|\\/)|[?&](?:fbid|story_fbid|v)=/i;
+                const commentContext = /[?&](?:comment_id|reply_comment_id|reply_comment_token)=/i;
+
+                const actionControls = Array.from(main.querySelectorAll('[aria-label]'))
+                    .filter(element => actionLabelIsPost(element.getAttribute('aria-label')))
+                    .slice(0, 500);
+                const storyMarkers = Array.from(
+                    main.querySelectorAll(
+                        '[data-ad-rendering-role="story_message"], [data-ad-preview="message"], [data-ad-comet-preview="message"], [data-focus="feed_story"]'
+                    )
+                ).slice(0, 500);
+                const profileMarkers = Array.from(
+                    main.querySelectorAll('[data-ad-rendering-role="profile_name"]')
+                ).slice(0, 500);
+                const ownerLinks = Array.from(main.querySelectorAll('a[href]'))
+                    .filter(link => acceptedAuthors.has(normalize(link.textContent || link.innerText || '')))
+                    .slice(0, 500);
+                const postLinks = Array.from(main.querySelectorAll('a[href]'))
+                    .filter(link => {
+                        const href = link.href || link.getAttribute('href') || '';
+                        return postReference.test(href) && !commentContext.test(href);
+                    })
+                    .slice(0, 1000);
+
+                const countPostActions = node => Array.from(node.querySelectorAll('[aria-label]'))
+                    .filter(element => actionLabelIsPost(element.getAttribute('aria-label'))).length;
+                const countStoryMarkers = node => node.querySelectorAll(
+                    '[data-ad-rendering-role="story_message"], [data-ad-preview="message"], [data-ad-comet-preview="message"], [data-focus="feed_story"]'
+                ).length;
+                const countProfileMarkers = node => node.querySelectorAll(
+                    '[data-ad-rendering-role="profile_name"]'
+                ).length;
+                const countOwnerLinks = node => Array.from(node.querySelectorAll('a[href]'))
+                    .filter(link => acceptedAuthors.has(normalize(link.textContent || link.innerText || ''))).length;
+                const countPostLinks = node => Array.from(node.querySelectorAll('a[href]'))
+                    .filter(link => {
+                        const href = link.href || link.getAttribute('href') || '';
+                        return postReference.test(href) && !commentContext.test(href);
+                    }).length;
+
+                const signalCounts = node => ({
+                    actions: countPostActions(node),
+                    stories: countStoryMarkers(node),
+                    profiles: countProfileMarkers(node),
+                    authors: countOwnerLinks(node),
+                    postLinks: countPostLinks(node),
+                });
+
+                const isPageWrapper = node => (
+                    !node ||
+                    node === main ||
+                    node === document.body ||
+                    node === document.documentElement ||
+                    node.matches('[role="main"]') ||
+                    !!node.querySelector(':scope > h1') ||
+                    !!node.querySelector(':scope > [role="navigation"]')
+                );
+
+                const candidateRoots = new Set();
+
+                const addBestRoot = (anchor, mode) => {
+                    let current = anchor instanceof Element ? anchor : null;
+                    let best = null;
+
+                    while (current && main.contains(current) && current !== main) {
+                        if (isPageWrapper(current)) break;
+
+                        const counts = signalCounts(current);
+                        let valid = false;
+                        let crossedBoundary = false;
+
+                        if (mode === 'action') {
+                            valid = counts.actions === 1;
+                            crossedBoundary = counts.actions > 1;
+                        } else if (mode === 'story') {
+                            valid = counts.stories === 1 && (
+                                counts.actions === 1 ||
+                                counts.profiles > 0 ||
+                                counts.authors > 0 ||
+                                counts.postLinks > 0
+                            );
+                            crossedBoundary = counts.stories > 1 || counts.actions > 1 || counts.profiles > 1;
+                        } else if (mode === 'profile') {
+                            valid = counts.profiles === 1 && (
+                                counts.actions === 1 ||
+                                counts.stories === 1 ||
+                                counts.postLinks > 0
+                            );
+                            crossedBoundary = counts.profiles > 1 || counts.actions > 1 || counts.stories > 1;
+                        } else if (mode === 'owner') {
+                            valid = counts.authors >= 1 && counts.authors <= 4 && (
+                                counts.actions === 1 ||
+                                counts.stories === 1 ||
+                                counts.profiles === 1
+                            ) && counts.postLinks > 0;
+                            crossedBoundary = counts.authors > 4 || counts.actions > 1 || counts.stories > 1 || counts.profiles > 1;
+                        } else if (mode === 'link') {
+                            valid = counts.postLinks >= 1 && counts.postLinks <= 16 && (
+                                counts.actions === 1 ||
+                                counts.stories === 1 ||
+                                counts.profiles === 1
+                            );
+                            crossedBoundary = counts.postLinks > 24 ||
+                                counts.actions > 1 ||
+                                counts.stories > 1 ||
+                                counts.profiles > 1;
+                        }
+
+                        if (crossedBoundary) break;
+                        if (valid) best = current;
+                        current = current.parentElement;
+                    }
+
+                    if (best) candidateRoots.add(best);
+                };
+
+                actionControls.forEach(element => addBestRoot(element, 'action'));
+                storyMarkers.forEach(element => addBestRoot(element, 'story'));
+                profileMarkers.forEach(element => addBestRoot(element, 'profile'));
+                ownerLinks.forEach(element => addBestRoot(element, 'owner'));
+                postLinks.forEach(element => addBestRoot(element, 'link'));
+
+                const candidates = Array.from(candidateRoots);
+                const finalRoots = candidates.filter(root => {
+                    return !candidates.some(other => (
+                        other !== root &&
+                        other.contains(root) &&
+                        !isPageWrapper(other)
+                    ));
+                });
+
+                finalRoots.forEach(root => root.setAttribute(markerAttribute, '1'));
+
+                return {
+                    post_action_controls: actionControls.length,
+                    story_markers: storyMarkers.length,
+                    profile_name_markers: profileMarkers.length,
+                    owner_name_links: ownerLinks.length,
+                    post_reference_links: postLinks.length,
+                    marked_post_containers: finalRoots.length,
+                };
+            }""",
+            {
+                "markerAttribute": POST_ROOT_MARKER_ATTRIBUTE,
+                "authorNames": list(PROFILE_AUTHOR_NAMES),
+            },
+        )  # Mark current post roots and return diagnostics
+
+        if not isinstance(result, dict):  # Browser-side result must be a mapping
+            return {
+                "post_action_controls": 0,
+                "story_markers": 0,
+                "profile_name_markers": 0,
+                "owner_name_links": 0,
+                "post_reference_links": 0,
+                "marked_post_containers": 0,
+            }  # Return deterministic empty diagnostics for unexpected payloads
+
+        return {
+            "post_action_controls": int(result.get("post_action_controls") or 0),
+            "story_markers": int(result.get("story_markers") or 0),
+            "profile_name_markers": int(result.get("profile_name_markers") or 0),
+            "owner_name_links": int(result.get("owner_name_links") or 0),
+            "post_reference_links": int(result.get("post_reference_links") or 0),
+            "marked_post_containers": int(result.get("marked_post_containers") or 0),
+        }  # Normalize browser values for logging/readiness logic
+    except Exception as error:  # DOM discovery must remain retryable across Facebook rerenders
+        verbose_output(
+            true_string=f"{BackgroundColors.YELLOW}Post-root discovery failed: "
+            f"{BackgroundColors.CYAN}{error}{Style.RESET_ALL}"
+        )  # Log only in verbose mode
+        return {
+            "post_action_controls": 0,
+            "story_markers": 0,
+            "profile_name_markers": 0,
+            "owner_name_links": 0,
+            "post_reference_links": 0,
+            "marked_post_containers": 0,
+        }  # Return deterministic empty diagnostics
 
 
 def collect_profile_timeline_diagnostics(page: Page) -> dict[str, int]:
     """
-    Collect lightweight DOM counts used to diagnose profile-timeline discovery failures.
+    Collect DOM counts used to diagnose current Facebook profile/post discovery.
 
     :param page: Current Facebook profile page.
-    :return: Dictionary containing feed/article/permalink/message counts.
+    :return: Dictionary containing structural, current-marker, action-anchor, and marked-root counts.
     """
 
+    marked_diagnostics = mark_current_post_containers(page)  # Refresh current post-root markers first
     selectors = {
         "main": 'div[role="main"]',
         "feed": 'div[role="feed"]',
@@ -1701,76 +2014,61 @@ def collect_profile_timeline_diagnostics(page: Page) -> dict[str, int]:
         "profile_name_roles": 'div[data-ad-rendering-role="profile_name"]',
         "story_messages": 'div[data-ad-rendering-role="story_message"]',
         "messages": 'div[data-ad-preview="message"], div[data-ad-comet-preview="message"]',
+        "feed_story_markers": '[data-focus="feed_story"]',
         "post_links": 'a[href*="/posts/"], a[href*="/permalink.php"], a[href*="/story.php"], a[href*="/share/p/"]',
-    }  # Stable diagnostic selectors kept separate from extraction policy
+    }  # Stable diagnostics separate from extraction policy
 
-    diagnostics: dict[str, int] = {}  # Initialize numeric diagnostic result
-    for key, selector in selectors.items():  # Count each selector independently
-        try:  # One unsupported/transient selector must not break diagnostics
+    diagnostics: dict[str, int] = dict(marked_diagnostics)  # Preserve marker-discovery counts
+    for key, selector in selectors.items():  # Count each structural selector independently
+        try:
             diagnostics[key] = int(page.locator(selector).count())  # Capture current DOM count
         except Exception:
-            diagnostics[key] = 0  # Treat failed count as unavailable for this diagnostic sample
+            diagnostics[key] = 0  # Treat transient count failures as unavailable for this sample
 
-    return diagnostics  # Return diagnostic snapshot
+    return diagnostics  # Return a complete current-DOM snapshot
 
 
 def profile_timeline_is_rendered(page: Page) -> bool:
     """
     Determine whether the configured profile has rendered usable post content.
 
-    Facebook personal profiles do not consistently expose ``role="feed"`` or FeedUnit pagelets. Current
-    layouts can render valid posts directly under ``role="main"`` while exposing only profile_name,
-    story_message, legacy message, and post-link signals. Any strong combination is therefore sufficient.
+    Current Facebook post readiness is based primarily on marked post roots and post-action/story
+    anchors. ``role="feed"`` and ``role="article"`` remain supplementary legacy signals only.
 
     :param page: Authenticated configured-profile page.
-    :return: True when actual profile-post content is mounted and the page is not an unavailable/error view.
+    :return: True when at least one strong post signal is mounted and the page is not unavailable.
     """
 
-    if page.is_closed() or page_has_content_unavailable_message(page):  # Reject closed and Facebook unavailable views
-        return False  # No usable timeline exists
+    if page.is_closed() or page_has_content_unavailable_message(page):
+        return False  # Closed/error views are never scrape-ready
 
-    diagnostics = collect_profile_timeline_diagnostics(page)  # Read all readiness signals in one consistent snapshot
+    diagnostics = collect_profile_timeline_diagnostics(page)  # Refresh post-root markers and read one diagnostic snapshot
+    if diagnostics.get("main", 0) <= 0:
+        return False  # Authenticated profile main content has not mounted
 
-    main_count = diagnostics.get("main", 0)  # Require authenticated profile main content
-    main_article_count = diagnostics.get("main_articles", 0)  # Count root/profile article containers
-    feed_count = diagnostics.get("feed", 0)  # Explicit feed is useful when present but no longer mandatory
-    feed_article_count = diagnostics.get("feed_articles", 0)  # Count explicit feed articles
-    feed_unit_count = diagnostics.get("feed_units", 0)  # Legacy/current FeedUnit wrappers
-    profile_name_count = diagnostics.get("profile_name_roles", 0)  # Current Facebook post-author rendering role
-    story_message_count = diagnostics.get("story_messages", 0)  # Current Facebook post-body rendering role
-    legacy_message_count = diagnostics.get("messages", 0)  # Older message attributes
-    post_link_count = diagnostics.get("post_links", 0)  # Canonical/legacy post-like links
+    if diagnostics.get("marked_post_containers", 0) > 0:
+        return True  # Strongest current-Facebook evidence: bounded post roots were marked
 
-    if main_count <= 0:  # Profile chrome has not rendered yet
-        return False  # Continue waiting
+    if diagnostics.get("post_action_controls", 0) > 0:
+        return True  # Current Facebook exposes post menu anchors even when wrapper roles are absent
 
-    if story_message_count > 0 and profile_name_count > 0:  # Strongest current Facebook post signature
-        return True  # Current personal-profile posts are already mounted
+    if diagnostics.get("story_markers", 0) > 0 and (
+        diagnostics.get("profile_name_markers", 0) > 0
+        or diagnostics.get("owner_name_links", 0) > 0
+        or diagnostics.get("post_reference_links", 0) > 0
+    ):
+        return True  # Current story/body marker paired with author or permalink evidence
 
-    if story_message_count > 0 and main_article_count > 0:  # Current body marker inside article-based profile layout
-        return True  # Accept without requiring role=feed
+    if diagnostics.get("story_messages", 0) > 0 and diagnostics.get("profile_name_roles", 0) > 0:
+        return True  # Current rendering-role layout
 
-    if legacy_message_count > 0 and main_article_count > 0:  # Older post-message markup remains valid
-        return True  # Accept legacy profile post layout
+    if diagnostics.get("messages", 0) > 0 and diagnostics.get("main_articles", 0) > 0:
+        return True  # Legacy message/article layout
 
-    if post_link_count > 0 and main_article_count > 0:  # Post links plus article containers prove usable timeline content
-        return True  # Accept link-driven Facebook layouts
+    if diagnostics.get("feed_story_markers", 0) > 0:
+        return True  # Older/alternate feed_story layout
 
-    if feed_count > 0 and (feed_article_count > 0 or profile_name_count > 0 or story_message_count > 0):
-        return True  # Accept explicit role=feed layouts
-
-    if feed_unit_count > 0 and (profile_name_count > 0 or story_message_count > 0 or legacy_message_count > 0):
-        return True  # Accept FeedUnit layouts without role=feed
-
-    try:  # Final structural fallback inspects the first mounted main articles directly
-        root_articles = page.locator('div[role="main"] div[role="article"]')  # Resolve current main article candidates
-        for index in range(min(root_articles.count(), 25)):  # Bound readiness inspection
-            if is_probable_timeline_post_article(root_articles.nth(index)):
-                return True  # At least one actual post-like card is mounted
-    except Exception:
-        pass  # A transient rerender will be retried by wait_for_profile_ready
-
-    return False  # No strong post signal is available yet
+    return False  # Post links or arbitrary article widgets alone are not enough to start scraping
 
 
 def build_mounted_article_discovery_key(article) -> str:
@@ -1789,7 +2087,11 @@ def build_mounted_article_discovery_key(article) -> str:
             """root => {
                 const clone = root.cloneNode(true);
                 clone.querySelectorAll('[role="article"]').forEach(node => {
-                    if (node !== clone && node.parentNode) node.remove();
+                    if (node === clone || !node.parentNode) return;
+                    const hasPostMarker = !!node.querySelector(
+                        '[data-ad-rendering-role="story_message"], [data-ad-preview="message"], [data-ad-comet-preview="message"], [data-ad-rendering-role="profile_name"]'
+                    );
+                    if (!hasPostMarker) node.remove();
                 });
                 const text = (clone.innerText || clone.textContent || '').trim();
                 const links = Array.from(clone.querySelectorAll('a[href]'))
@@ -1821,24 +2123,29 @@ def build_mounted_article_discovery_key(article) -> str:
 
 def get_article_locator(page: Page):
     """
-    Return the first Facebook article selector that currently matches the profile timeline.
+    Return currently mounted Facebook post containers, preferring current marker-based discovery.
 
-    Facebook also marks comments as role=article, so callers must use is_top_level_timeline_article
-    before interpreting any returned element as a post.
+    Modern Facebook posts may not use ``role="article"`` at all. The function therefore marks roots
+    from post action/story/profile/permalink anchors first and falls back to legacy selectors only when
+    no bounded current post root can be found.
 
-    :param page: Facebook profile page.
-    :return: Playwright locator for currently mounted article-like containers.
+    :param page: Facebook profile or dedicated post page.
+    :return: Playwright locator for currently mounted post/container candidates.
     """
 
-    for selector in ARTICLE_SELECTORS:  # Iterate supported post/container selectors
-        locator = page.locator(selector)  # Build candidate locator
-        try:  # Attempt to inspect current count
-            if locator.count() > 0:  # Verify at least one article-like container is mounted
-                return locator  # Return matching broad locator; top-level filtering occurs per element
-        except Exception:  # Ignore transient DOM failures
-            continue  # Continue to next selector
+    marker_diagnostics = mark_current_post_containers(page)  # Refresh post-root markers on every virtualized DOM pass
+    if marker_diagnostics.get("marked_post_containers", 0) > 0:
+        return page.locator(f'[{POST_ROOT_MARKER_ATTRIBUTE}="1"]')  # Use bounded current post roots directly
 
-    return page.locator(ARTICLE_SELECTORS[0])  # Return primary selector so scrolling can retry naturally
+    for selector in ARTICLE_SELECTORS:  # Fall back only for older Facebook layouts
+        locator = page.locator(selector)
+        try:
+            if locator.count() > 0:
+                return locator  # Caller still validates fallback candidates
+        except Exception:
+            continue  # Try next legacy selector after transient failure
+
+    return page.locator(f'[{POST_ROOT_MARKER_ATTRIBUTE}="1"]')  # Empty locator allows scrolling to load posts naturally
 
 
 def get_live_page_url(page: Page) -> str:
@@ -2302,15 +2609,15 @@ def wait_for_profile_ready(
     if (
         diagnostics.get("main", 0) > 0
         and (
-            diagnostics.get("story_messages", 0) > 0
+            diagnostics.get("marked_post_containers", 0) > 0
+            or diagnostics.get("post_action_controls", 0) > 0
+            or diagnostics.get("story_markers", 0) > 0
+            or diagnostics.get("story_messages", 0) > 0
             or diagnostics.get("messages", 0) > 0
-            or (
-                diagnostics.get("profile_name_roles", 0) > 0
-                and diagnostics.get("post_links", 0) > 0
-            )
+            or diagnostics.get("feed_story_markers", 0) > 0
         )
-    ):  # Defensive final acceptance for layouts that changed during the last readiness iteration
-        return page  # Do not reject a page whose final DOM snapshot already proves post content is mounted
+    ):  # Defensive final acceptance only when current/legacy post content is actually mounted
+        return page  # Do not reject a final DOM snapshot that already proves usable post content
 
     raise TimeoutError(
         f"Facebook authentication is valid, but the configured profile timeline did not render within "
@@ -3050,8 +3357,9 @@ def count_post_media_indicators(article) -> tuple[int, int]:
     try:  # Count only elements whose nearest article is the current post, excluding comments
         counts = article.evaluate(
             """root => {
-                const rootArticle = root.matches('div[role="article"]') ? root : null;
-                const belongsToRoot = element => !rootArticle || element.closest('div[role="article"]') === rootArticle;
+                const rootArticle = root.matches('[data-fpd-post-root], div[role="article"]') ? root : null;
+                const belongsToRoot = element => !rootArticle ||
+                    element.closest('[data-fpd-post-root], div[role="article"]') === rootArticle;
                 const anchors = Array.from(root.querySelectorAll('a[href]')).filter(belongsToRoot);
                 const photoLinks = new Set(anchors
                     .map(anchor => anchor.href || anchor.getAttribute('href') || '')
@@ -3083,8 +3391,11 @@ def collect_photo_permalink_urls(article) -> list[str]:
     try:  # Extract same-root media anchors browser-side
         raw_urls = article.evaluate(
             """root => {
-                const rootArticle = root.matches('[role="article"]') ? root : root.querySelector('[role="article"]');
-                const belongsToRoot = element => !rootArticle || element.closest('[role="article"]') === rootArticle;
+                const rootArticle = root.hasAttribute('data-fpd-post-root')
+                    ? root
+                    : (root.matches('[role="article"]') ? root : root.querySelector('[role="article"]'));
+                const belongsToRoot = element => !rootArticle ||
+                    element.closest('[data-fpd-post-root], [role="article"]') === rootArticle;
                 return Array.from(root.querySelectorAll('a[href]'))
                     .filter(belongsToRoot)
                     .map(anchor => anchor.href || anchor.getAttribute('href') || '')
@@ -3128,8 +3439,11 @@ def collect_video_permalink_urls(article) -> list[str]:
     try:  # Extract same-root anchors browser-side
         raw_urls = article.evaluate(
             """root => {
-                const rootArticle = root.matches('[role="article"]') ? root : root.querySelector('[role="article"]');
-                const belongsToRoot = element => !rootArticle || element.closest('[role="article"]') === rootArticle;
+                const rootArticle = root.hasAttribute('data-fpd-post-root')
+                    ? root
+                    : (root.matches('[role="article"]') ? root : root.querySelector('[role="article"]'));
+                const belongsToRoot = element => !rootArticle ||
+                    element.closest('[data-fpd-post-root], [role="article"]') === rootArticle;
                 return Array.from(root.querySelectorAll('a[href]'))
                     .filter(belongsToRoot)
                     .map(anchor => anchor.href || anchor.getAttribute('href') || '')
@@ -3421,8 +3735,9 @@ def collect_image_candidates(article) -> list[dict]:
     try:  # Read image/media relationship data in one browser-side pass
         raw_images = article.evaluate(
             """root => {
-                const rootArticle = root.matches('div[role="article"]') ? root : null;
-                const belongsToRoot = element => !rootArticle || element.closest('div[role="article"]') === rootArticle;
+                const rootArticle = root.matches('[data-fpd-post-root], div[role="article"]') ? root : null;
+                const belongsToRoot = element => !rootArticle ||
+                    element.closest('[data-fpd-post-root], div[role="article"]') === rootArticle;
                 const chooseLargestSrcset = srcset => {
                     if (!srcset) return '';
                     const entries = srcset.split(',').map(item => item.trim()).filter(Boolean).map(item => {
@@ -3517,8 +3832,11 @@ def collect_video_element_candidates(article) -> list[dict]:
     try:  # Inspect only video elements belonging to the root post
         raw_videos = article.evaluate(
             """root => {
-                const rootArticle = root.matches('[role="article"]') ? root : root.querySelector('[role="article"]');
-                const belongsToRoot = element => !rootArticle || element.closest('[role="article"]') === rootArticle;
+                const rootArticle = root.hasAttribute('data-fpd-post-root')
+                    ? root
+                    : (root.matches('[role="article"]') ? root : root.querySelector('[role="article"]'));
+                const belongsToRoot = element => !rootArticle ||
+                    element.closest('[data-fpd-post-root], [role="article"]') === rootArticle;
                 return Array.from(root.querySelectorAll('video')).filter(belongsToRoot).map(video => ({
                     src: video.currentSrc || video.src || '',
                     poster: video.poster || '',
@@ -4310,14 +4628,14 @@ def scroll_profile_and_download(page: Page, context: BrowserContext) -> dict:
         page = ensure_scraping_profile_ready(page, context)  # Revalidate auth before DOM work
         articles = get_article_locator(page)  # Resolve broad mounted article-like containers
         current_count = articles.count()  # Count mounted candidates including comments
-        top_level_count = 0  # Count actual root timeline articles
+        top_level_count = 0  # Count validated root post containers
         new_discovered_this_iteration = 0  # Count new owner-post identities
         processed_this_iteration = 0  # Count metadata writes this pass
 
         for index in range(current_count):  # Inspect mounted candidates before virtualization removes them
             try:  # Isolate one article
                 article = articles.nth(index)  # Resolve current locator
-                if not is_top_level_timeline_article(article):  # Facebook comments are also role=article
+                if not is_top_level_timeline_article(article):  # Validate current marked roots or safe legacy article fallbacks
                     continue  # Skip nested comment/reply article
                 if not is_probable_timeline_post_article(article):  # Profile chrome/widgets can also use role=article
                     continue  # Process only actual root post cards
@@ -4396,7 +4714,7 @@ def scroll_profile_and_download(page: Page, context: BrowserContext) -> dict:
         print(
             f"{BackgroundColors.GREEN}Timeline pass {BackgroundColors.CYAN}{scroll_iteration}"
             f"{BackgroundColors.GREEN}: mounted {BackgroundColors.CYAN}{current_count}"
-            f"{BackgroundColors.GREEN}, top-level {BackgroundColors.CYAN}{top_level_count}"
+            f"{BackgroundColors.GREEN}, post roots {BackgroundColors.CYAN}{top_level_count}"
             f"{BackgroundColors.GREEN}, new posts {BackgroundColors.CYAN}{new_discovered_this_iteration}"
             f"{BackgroundColors.GREEN}, processed {BackgroundColors.CYAN}{processed_this_iteration}"
             f"{BackgroundColors.GREEN}, total discovered {BackgroundColors.CYAN}{len(discovered_post_urls)}"
