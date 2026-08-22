@@ -315,7 +315,7 @@ PROFILE_FEED_CONTAINER_SELECTORS = (
     'div[data-pagelet*="ProfileTimeline"]',
     'div[data-pagelet*="Timeline"]',
     'div[data-pagelet*="Feed"]',
-)  # Structural selectors proving that the actual profile timeline/feed rendered
+)  # Optional Facebook feed/pagelet selectors used as supplementary readiness evidence
 
 DATE_ELEMENT_SELECTORS = (
     "abbr[data-utime]",
@@ -1644,16 +1644,16 @@ def page_has_content_unavailable_message(page: Page) -> bool:
 
 def is_probable_timeline_post_article(article) -> bool:
     """
-    Distinguish an actual Facebook post card from other top-level profile widgets using role=article.
+    Distinguish an actual Facebook post card from other profile widgets using post-specific DOM signals.
 
-    :param article: Candidate top-level article locator.
+    Top-level ancestry is intentionally validated by the caller. Rechecking it inside this function caused
+    valid Facebook cards to be rejected when the virtualized DOM changed between two consecutive evaluations.
+
+    :param article: Candidate article/container locator already selected from the profile timeline.
     :return: True when post-header/body/toolbar/timestamp signals are present.
     """
 
-    if not is_top_level_timeline_article(article):
-        return False
-
-    try:
+    try:  # Inspect the candidate once so Facebook virtualization cannot invalidate a redundant ancestry check
         return bool(
             article.evaluate(
                 """root => {
@@ -1667,16 +1667,20 @@ def is_probable_timeline_post_article(article) -> bool:
                         if (/[?&](?:comment_id|reply_comment_id|reply_comment_token)=/i.test(href)) return false;
                         if (link.closest('h2, h3, h4, [data-ad-rendering-role="profile_name"]')) return false;
                         const label = link.getAttribute('aria-label') || '';
+                        const title = link.getAttribute('title') || '';
                         const text = (link.textContent || '').trim();
-                        const hasTime = /\\d/.test(label) || /\\d+\\s*(?:s|m|min|h|d|w|sem|a|y)\\b/i.test(text);
+                        const hasTime =
+                            /\\d/.test(label) ||
+                            /\\d/.test(title) ||
+                            /\\d+\\s*(?:s|m|min|h|d|w|sem|a|y)\\b/i.test(text);
                         const hasPostRef = /\\/posts\\/|\\/videos\\/|\\/watch|\\/permalink|\\/story\\.php|\\/reel\\/|\\/share\\/[pvr]\\/|[?&](?:fbid|story_fbid|v)=/i.test(href);
                         return hasTime && hasPostRef;
                     });
                 }"""
             )
-        )
-    except Exception:
-        return False
+        )  # Return whether the mounted container exposes any strong post signal
+    except Exception:  # Detached/transitioning candidates can be retried on a later mount
+        return False  # Do not classify an unstable container as a post
 
 
 def collect_profile_timeline_diagnostics(page: Page) -> dict[str, int]:
@@ -1712,36 +1716,61 @@ def collect_profile_timeline_diagnostics(page: Page) -> dict[str, int]:
 
 def profile_timeline_is_rendered(page: Page) -> bool:
     """
-    Determine whether the configured profile has rendered at least one real post/timeline structure.
+    Determine whether the configured profile has rendered usable post content.
+
+    Facebook personal profiles do not consistently expose ``role="feed"`` or FeedUnit pagelets. Current
+    layouts can render valid posts directly under ``role="main"`` while exposing only profile_name,
+    story_message, legacy message, and post-link signals. Any strong combination is therefore sufficient.
 
     :param page: Authenticated configured-profile page.
-    :return: True when the actual profile timeline is mounted.
+    :return: True when actual profile-post content is mounted and the page is not an unavailable/error view.
     """
 
-    if page.is_closed() or page_has_content_unavailable_message(page):
-        return False
+    if page.is_closed() or page_has_content_unavailable_message(page):  # Reject closed and Facebook unavailable views
+        return False  # No usable timeline exists
 
-    try:
-        has_feed_structure = any(page.locator(selector).count() > 0 for selector in PROFILE_FEED_CONTAINER_SELECTORS)
-        has_current_post_marker = (
-            page.locator('div[data-ad-rendering-role="profile_name"]').count() > 0
-            or page.locator('div[data-ad-rendering-role="story_message"]').count() > 0
-            or page.locator('div[role="feed"] div[role="article"]').count() > 0
-        )
-        if has_feed_structure and has_current_post_marker:
-            return True
-    except Exception:
-        pass
+    diagnostics = collect_profile_timeline_diagnostics(page)  # Read all readiness signals in one consistent snapshot
 
-    try:
-        root_articles = page.locator('div[role="main"] div[role="article"]')
-        for index in range(min(root_articles.count(), 25)):
+    main_count = diagnostics.get("main", 0)  # Require authenticated profile main content
+    main_article_count = diagnostics.get("main_articles", 0)  # Count root/profile article containers
+    feed_count = diagnostics.get("feed", 0)  # Explicit feed is useful when present but no longer mandatory
+    feed_article_count = diagnostics.get("feed_articles", 0)  # Count explicit feed articles
+    feed_unit_count = diagnostics.get("feed_units", 0)  # Legacy/current FeedUnit wrappers
+    profile_name_count = diagnostics.get("profile_name_roles", 0)  # Current Facebook post-author rendering role
+    story_message_count = diagnostics.get("story_messages", 0)  # Current Facebook post-body rendering role
+    legacy_message_count = diagnostics.get("messages", 0)  # Older message attributes
+    post_link_count = diagnostics.get("post_links", 0)  # Canonical/legacy post-like links
+
+    if main_count <= 0:  # Profile chrome has not rendered yet
+        return False  # Continue waiting
+
+    if story_message_count > 0 and profile_name_count > 0:  # Strongest current Facebook post signature
+        return True  # Current personal-profile posts are already mounted
+
+    if story_message_count > 0 and main_article_count > 0:  # Current body marker inside article-based profile layout
+        return True  # Accept without requiring role=feed
+
+    if legacy_message_count > 0 and main_article_count > 0:  # Older post-message markup remains valid
+        return True  # Accept legacy profile post layout
+
+    if post_link_count > 0 and main_article_count > 0:  # Post links plus article containers prove usable timeline content
+        return True  # Accept link-driven Facebook layouts
+
+    if feed_count > 0 and (feed_article_count > 0 or profile_name_count > 0 or story_message_count > 0):
+        return True  # Accept explicit role=feed layouts
+
+    if feed_unit_count > 0 and (profile_name_count > 0 or story_message_count > 0 or legacy_message_count > 0):
+        return True  # Accept FeedUnit layouts without role=feed
+
+    try:  # Final structural fallback inspects the first mounted main articles directly
+        root_articles = page.locator('div[role="main"] div[role="article"]')  # Resolve current main article candidates
+        for index in range(min(root_articles.count(), 25)):  # Bound readiness inspection
             if is_probable_timeline_post_article(root_articles.nth(index)):
-                return True
+                return True  # At least one actual post-like card is mounted
     except Exception:
-        pass
+        pass  # A transient rerender will be retried by wait_for_profile_ready
 
-    return False
+    return False  # No strong post signal is available yet
 
 
 def build_mounted_article_discovery_key(article) -> str:
@@ -2269,11 +2298,25 @@ def wait_for_profile_ready(
         time.sleep(AUTHENTICATION_POLL_SECONDS)  # Wait before verifying the rendered profile again
 
     diagnostics = collect_profile_timeline_diagnostics(page)  # Capture DOM state before surfacing readiness failure
+
+    if (
+        diagnostics.get("main", 0) > 0
+        and (
+            diagnostics.get("story_messages", 0) > 0
+            or diagnostics.get("messages", 0) > 0
+            or (
+                diagnostics.get("profile_name_roles", 0) > 0
+                and diagnostics.get("post_links", 0) > 0
+            )
+        )
+    ):  # Defensive final acceptance for layouts that changed during the last readiness iteration
+        return page  # Do not reject a page whose final DOM snapshot already proves post content is mounted
+
     raise TimeoutError(
         f"Facebook authentication is valid, but the configured profile timeline did not render within "
         f"{PROFILE_READY_TIMEOUT_SECONDS} seconds. Current URL: {format_url_for_log(get_live_page_url(page))}. "
         f"DOM diagnostics: {diagnostics}"
-    )  # Fail explicitly instead of silently scraping a page with no timeline
+    )  # Fail explicitly only when the final DOM truly lacks post-content signals
 
 
 def find_existing_facebook_page(context: BrowserContext) -> Page | None:
