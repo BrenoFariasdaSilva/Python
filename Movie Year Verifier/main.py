@@ -1,49 +1,60 @@
 """
 ================================================================================
-<PROJECT OR SCRIPT TITLE>
+Movie Year Verifier
 ================================================================================
 Author      : Breno Farias da Silva
-Created     : <YYYY-MM-DD>
+Created     : Not specified
 Description :
-   <Provide a concise and complete overview of what this script does.>
-   <Mention its purpose, scope, and relevance to the larger project.>
+    Scans the configured movie library structure and identifies files whose
+    filenames do not contain a four-digit year from 1900 through 2099.
 
-   Key features include:
-      - <Feature 1 — e.g., automatic data loading and preprocessing>
-      - <Feature 2 — e.g., model training and evaluation>
-      - <Feature 3 — e.g., visualization or report generation>
-      - <Feature 4 — e.g., logging or notification system>
-      - <Feature 5 — e.g., integration with other modules or datasets>
+    The script expects the input root to contain movie-type directories as its
+    immediate children. It scans files directly inside each of those
+    directories, records files missing a valid year token, and writes a
+    structured JSON report while logging console output and execution timing.
+
+    Key features include:
+        - Scans immediate movie-type subdirectories under the configured root.
+        - Checks every direct child file for a standalone 1900-2099 year token.
+        - Records the movie type, filename, and POSIX-form file path for misses.
+        - Writes a readable UTF-8 JSON report with scanned/missing totals.
+        - Redirects stdout/stderr through the project Logger to a log file.
+        - Prints scan totals plus start, finish, and formatted execution time.
+        - Creates the Logs directory automatically when required.
 
 Usage:
-   1. <Explain any configuration steps before running, such as editing variables or paths.>
-   2. <Describe how to execute the script — typically via Makefile or Python.>
-         $ make <target>   or   $ python <script_name>.py
-   3. <List what outputs are expected or where results are saved.>
+    1. Set INPUT_DIRECTORY to the movie-library root to verify.
+    2. Optionally adjust LOGS_DIR and REPORT_FILE.
+    3. Run the script:
+         $ python main.py
+    4. Review the generated JSON report and log output.
 
 Outputs:
-   - <Output file or directory 1 — e.g., results.csv>
-   - <Output file or directory 2 — e.g., Feature_Analysis/plots/>
-   - <Output file or directory 3 — e.g., logs/output.txt>
+    - ./Logs/main_movie_year_report.json
+      JSON report containing files without a detected year and summary counts.
+    - ./Logs/main.log
+      Logger output for the current execution.
+    - Terminal output showing scan totals and execution timing.
 
 TODOs:
-   - <Add a task or improvement — e.g., implement CLI argument parsing.>
-   - <Add another improvement — e.g., extend support to Parquet files.>
-   - <Add optimization — e.g., parallelize evaluation loop.>
-   - <Add robustness — e.g., error handling or data validation.>
+    - None explicitly implemented or documented in this script.
 
 Dependencies:
-   - Python >= <version>
-   - <Library 1 — e.g., pandas>
-   - <Library 2 — e.g., numpy>
-   - <Library 3 — e.g., scikit-learn>
-   - <Library 4 — e.g., matplotlib, seaborn, tqdm, colorama>
+    - Python 3.x
+    - colorama
+    - Logger module from this project
+    - Python standard library: datetime, os, sys, re, json, pathlib
 
 Assumptions & Notes:
-   - <List any key assumptions — e.g., last column is the target variable.>
-   - <Mention data format — e.g., CSV files only.>
-   - <Mention platform or OS-specific notes — e.g., sound disabled on Windows.>
-   - <Note on output structure or reusability.>
+    - INPUT_DIRECTORY is expected to contain movie-type folders directly below
+      the configured root.
+    - Scanning is not recursive beyond files directly inside those movie-type
+      directories.
+    - The script checks filenames only; it does not inspect media metadata.
+    - Any standalone four-digit value from 1900 through 2099 is accepted as a
+      year; the script does not verify that it is the movie's actual release year.
+    - File extensions are not filtered, so every direct child file is checked.
+    - The script only reports missing years; it does not rename or modify files.
 """
 
 import datetime  # For getting the current date and time
