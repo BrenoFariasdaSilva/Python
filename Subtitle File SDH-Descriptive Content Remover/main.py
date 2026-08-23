@@ -51,8 +51,10 @@ import datetime  # For getting the current date and time
 import os  # For running a command in the terminal
 import platform  # For getting the operating system name
 import re  # For matching SRT timestamps and SDH fragments
+import sys  # For system-specific parameters and functions
 import unicodedata  # For normalizing Unicode subtitle text
 from colorama import Style  # For coloring the terminal
+from Logger import Logger  # For logging output to both terminal and file
 from pathlib import Path  # For handling file paths
 from tqdm import tqdm  # For displaying in-place per-directory progress bars
 
@@ -80,6 +82,12 @@ EMPTY_SUBTITLE_FORMATTING_TAG_PATTERN = re.compile(r"<(i|b|u|font)(?:\s+[^<>]*)?
 DESCRIPTIVE_PHRASES = frozenset(("music", "door closes", "applause", "speaking indistinctly", "laughing", "laughs", "sighs", "sigh", "whispers", "whispering", "inaudible", "indistinct chatter", "chuckles", "gasps", "coughs", "sobs", "crying", "screaming", "phone ringing", "knocking", "footsteps", "thunder", "alarm", "silence"))  # Conservative complete SDH fragments
 DESCRIPTIVE_KEYWORDS = frozenset(("music", "applause", "laughing", "laughs", "sighs", "sigh", "whispers", "whispering", "inaudible", "indistinctly", "chatter", "chuckles", "gasps", "coughs", "sobs", "crying", "screaming", "ringing", "knocking", "footsteps", "thunder", "alarm", "silence"))  # SDH indicator words
 DESCRIPTIVE_WORDS = frozenset(("music", "door", "doors", "closes", "close", "closing", "opens", "opening", "applause", "speaking", "indistinctly", "indistinct", "laughing", "laughs", "sighs", "sigh", "whispers", "whispering", "inaudible", "chatter", "crowd", "chuckles", "softly", "gasps", "coughs", "sobs", "crying", "screaming", "phone", "ringing", "knocking", "knocks", "footsteps", "thunder", "alarm", "silence", "dramatic"))  # Allowed words inside SDH fragments
+
+# Logger Setup:
+PROGRESS_OUTPUT = sys.stdout  # Preserve the original terminal stream so tqdm can update one line in place
+logger = Logger(f"./Logs/{Path(__file__).stem}.log", clean=True)  # Create a Logger instance
+sys.stdout = logger  # Redirect stdout to the logger
+sys.stderr = logger  # Redirect stderr to the logger
 
 # Sound Constants:
 SOUND_COMMANDS = {
@@ -847,7 +855,7 @@ def process_srt_file(filepath: Path, input_dir: Path, log_output: bool = True) -
         if log_output:  # Use normal output outside progress-bar mode
             print(failure_message)  # Log failure directly
         else:  # Keep tqdm progress display intact while surfacing the error
-            tqdm.write(failure_message)  # Print above the active progress bar and redraw it
+            tqdm.write(failure_message, file=PROGRESS_OUTPUT)  # Print above the active progress bar and redraw it without routing carriage returns through Logger
         return 0, 0, 1, 0, 0  # Return failure count
 
 
@@ -887,6 +895,7 @@ def main():
         with tqdm(
             srt_files,
             total=len(srt_files),
+            file=PROGRESS_OUTPUT,
             desc=f"{BackgroundColors.GREEN}Processing {BackgroundColors.CYAN}{directory_display}{Style.RESET_ALL}",
             unit="file",
             dynamic_ncols=True,
