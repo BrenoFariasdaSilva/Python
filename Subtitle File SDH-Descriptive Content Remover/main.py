@@ -69,6 +69,7 @@ class BackgroundColors:  # Colors for the terminal
 
 # Execution Constants:
 VERBOSE = False  # Set to True to output verbose messages
+IN_PLACE_UPDATE = False  # Set to True to atomically update original SRT files instead of creating .cleaned.srt files
 INPUT_DIRS = [f"E:/Movies/", f"F:/Movies/", f"F:/Series/", f"G:/Series/"]  # Directories searched recursively for source SRT files
 SRT_TEXT_ENCODINGS = ("utf-8-sig", "utf-8", "cp1252", "latin-1")  # Common UTF-8 and Western/Portuguese subtitle encodings
 MOJIBAKE_MARKERS = ("Ã", "Â", "â€", "ðŸ", "ï»¿", "�")  # Strong indicators of UTF-8 text decoded through a Western single-byte encoding
@@ -783,7 +784,7 @@ def display_relative_path(filepath: Path, input_dir: Path) -> str:
 
 def process_srt_file(filepath: Path, input_dir: Path) -> tuple[int, int, int, int, int]:
     """
-    Process one SRT file and write cleaned outputs when content changed.
+    Process one SRT file and write cleaned output when content changed.
 
     :param filepath: Source SRT path.
     :param input_dir: Input root path.
@@ -802,10 +803,12 @@ def process_srt_file(filepath: Path, input_dir: Path) -> tuple[int, int, int, in
             print(f"No SDH/descriptive content found: {relative_path}")  # Log unchanged source
             return 0, 1, 0, 0, 0  # Return unchanged count
 
-        cleaned_srt_filepath = filepath.with_name(f"{filepath.stem}.cleaned.srt")  # Build per-source cleaned SRT path
+        cleaned_srt_filepath = filepath if IN_PLACE_UPDATE else filepath.with_name(f"{filepath.stem}.cleaned.srt")  # Select original file or separate cleaned output
         diff_filepath = filepath.with_name(f"{filepath.stem}.cleaned.diff")  # Build per-source diff path
 
-        if cleaned_srt_filepath == filepath or diff_filepath == filepath:  # Prevent source overwrite
+        if diff_filepath == filepath:  # Prevent diff report from overwriting source subtitle
+            raise ValueError(f"Refusing to overwrite source file with diff report: {filepath}")  # Report unsafe output path
+        if not IN_PLACE_UPDATE and cleaned_srt_filepath == filepath:  # Prevent accidental source overwrite outside explicit in-place mode
             raise ValueError(f"Refusing to overwrite source file: {filepath}")  # Report unsafe output path
 
         cleaned_content = serialize_srt_entries(cleaned_entries)  # Serialize cleaned SRT with sequential numbering
@@ -818,7 +821,8 @@ def process_srt_file(filepath: Path, input_dir: Path) -> tuple[int, int, int, in
         atomic_write_text(cleaned_srt_filepath, cleaned_content)  # Write cleaned SRT beside source
         atomic_write_text(diff_filepath, diff_content)  # Write diff report beside source
 
-        print(f"Cleaned: {display_relative_path(cleaned_srt_filepath, input_dir)}")  # Log cleaned output
+        output_label = "Updated in place" if IN_PLACE_UPDATE else "Cleaned"  # Describe how cleaned subtitle content was published
+        print(f"{output_label}: {display_relative_path(cleaned_srt_filepath, input_dir)}")  # Log cleaned output destination
         print(f"Diff: {display_relative_path(diff_filepath, input_dir)}")  # Log diff output
         return 1, 0, 0, removed_count, modified_count  # Return cleaned counts
     except Exception as exc:  # Report file-specific failure and continue
