@@ -15,11 +15,14 @@ Description :
           .cleaned.srt files.
         - Decodes UTF-16 BOM, UTF-8, CP1252, and Latin-1 subtitle files and
           conservatively repairs common mojibake/Unicode normalization issues.
-        - Repairs safely normalizable SRT timestamps, subtitle blocks split by
-          invalid blank lines, and valid timestamp blocks containing no text.
+        - Repairs safely normalizable SRT timestamps, subtitle entries split by
+          one or multiple invalid blank lines anywhere inside their text, and
+          valid timestamp blocks containing no text.
         - Removes conservative bracketed/parenthesized SDH cues and music-only
           descriptive lines while preserving ambiguous dialogue content.
         - Removes recognized SRT formatting tags (<i>, <b>, <u>, and <font>),
+          ASS override tags such as {\\an8}, and paired # lyric delimiters while
+          preserving the lyric/dialogue text between those # markers.
           collapses repeated horizontal whitespace, fixes spacing before
           punctuation, detects non-sequential/duplicate/out-of-order indexes,
           and strictly renumbers every published subtitle entry as 1..N.
@@ -35,6 +38,8 @@ Description :
           optionally plays a completion sound on supported non-Windows systems.
         - Failed-file logs always show the complete source SRT path, including
           the configured input root, using forward slashes.
+        - Detects binary/non-text corruption before strict SRT parsing, while
+          still recognizing UTF-16 subtitle files without a BOM when possible.
         - Attempts to resolve path components with trailing spaces and may
           rename such directory entries to their stripped names when possible.
 
@@ -116,6 +121,7 @@ MOJIBAKE_MARKERS = ("Ã", "Â", "â€", "ðŸ", "ï»¿", "�")  # Strong indi
 SRT_TIMESTAMP_PATTERN = re.compile(r"^\d{2}:\d{2}:\d{2},\d{3}\s+-->\s+\d{2}:\d{2}:\d{2},\d{3}(?:\s+.*)?$")  # SRT timestamp validation pattern
 SRT_REPAIRABLE_TIMESTAMP_PATTERN = re.compile(r"^(?P<start_h>\d{1,2}):(?P<start_m>\d{1,2}):(?P<start_s>\d{1,2}),(?P<start_ms>\d+)\s+-->\s+(?P<end_h>\d{1,2}):(?P<end_m>\d{1,2}):(?P<end_s>\d{1,2}),(?P<end_ms>\d+)(?P<suffix>(?:\s+.*)?)$")  # Repair pattern accepting short time fields plus short/overlong fractional fields
 SUBTITLE_FORMATTING_TAG_PATTERN = re.compile(r"</?(?:i|b|u|font)(?:\s+[^<>]*)?>", re.IGNORECASE)  # Recognized SRT formatting tag pattern
+ASS_OVERRIDE_TAG_PATTERN = re.compile(r"\{\\[^{}\r\n]+\}")  # Recognized ASS/SSA inline override tags such as {\\an8} and {\\i1}
 EMPTY_SUBTITLE_FORMATTING_TAG_PATTERN = re.compile(r"<(i|b|u|font)(?:\s+[^<>]*)?>\s*</\1>", re.IGNORECASE)  # Recognized empty SRT formatting tag pattern
 DESCRIPTIVE_PHRASES = frozenset(("music", "door closes", "applause", "speaking indistinctly", "laughing", "laughs", "sighs", "sigh", "whispers", "whispering", "inaudible", "indistinct chatter", "chuckles", "gasps", "coughs", "sobs", "crying", "screaming", "phone ringing", "knocking", "footsteps", "thunder", "alarm", "silence"))  # Conservative complete SDH fragments
 DESCRIPTIVE_KEYWORDS = frozenset(("music", "applause", "laughing", "laughs", "sighs", "sigh", "whispers", "whispering", "inaudible", "indistinctly", "chatter", "chuckles", "gasps", "coughs", "sobs", "crying", "screaming", "ringing", "knocking", "footsteps", "thunder", "alarm", "silence"))  # SDH indicator words
@@ -536,33 +542,180 @@ def build_unicode_repair_issues(original_text: str, repaired_text: str) -> list[
     return issues  # Return specific Unicode repair objects
 
 
+def count_srt_header_candidates(value: str) -> int:
+    """
+    Count lines that look like an SRT numeric index followed by a timestamp line.
+
+    The timestamp line only needs to contain "-->" here because strict timestamp
+    repair/validation happens later in the pipeline.
+
+    :param value: Decoded text candidate.
+    :return: Number of plausible SRT entry headers.
+    """
+
+    normalized_value = value.replace("\r\n", "\n").replace("\r", "\n")
+    lines = normalized_value.split("\n")
+    return sum(
+        1
+        for line_index in range(len(lines) - 1)
+        if lines[line_index].strip().isdigit() and "-->" in lines[line_index + 1]
+    )
+
+
+def binary_text_score(value: str) -> tuple[int, int, int]:
+    """
+    Measure strong binary/non-text indicators in a decoded text candidate.
+
+    :param value: Decoded text candidate.
+    :return: Null-byte count, disallowed control-character count, replacement-character count.
+    """
+
+    null_count = value.count("\x00")
+    replacement_count = value.count("\ufffd")
+    control_count = sum(
+        1
+        for character in value
+        if (
+            (ord(character) < 32 and character not in "\n\r\t")
+            or 0x7F <= ord(character) <= 0x9F
+        )
+    )
+    return null_count, control_count, replacement_count
+
+
+def is_probably_binary_text(value: str) -> bool:
+    """
+    Detect decoded content that is too binary/corrupted to process as subtitle text.
+
+    A few damaged characters do not classify an otherwise valid subtitle as
+    binary; the thresholds target dense control/NUL/replacement-character data.
+
+    :param value: Decoded text candidate.
+    :return: True when the content is strongly binary/non-text.
+    """
+
+    if not value:
+        return False
+
+    null_count, control_count, replacement_count = binary_text_score(value)
+    length = max(len(value), 1)
+
+    if null_count > max(4, int(length * 0.01)):
+        return True
+    if control_count > max(12, int(length * 0.02)):
+        return True
+    if replacement_count > max(12, int(length * 0.02)):
+        return True
+
+    return False
+
+
+def decode_srt_bytes(data: bytes, filepath: Path) -> tuple[str, str]:
+    """
+    Decode SRT bytes by evaluating all realistic text encodings instead of
+    accepting the first single-byte decoder that happens not to raise.
+
+    This prevents arbitrary binary bytes from being silently accepted as
+    CP1252/Latin-1 and also recovers common UTF-16 LE/BE subtitles without BOMs.
+
+    :param data: Raw source bytes.
+    :param filepath: Source path for error context.
+    :return: Best decoded text and selected encoding.
+    """
+
+    encoding_candidates = []
+
+    if data.startswith((b"\xff\xfe\x00\x00", b"\x00\x00\xfe\xff")):
+        encoding_candidates.append("utf-32")
+    elif data.startswith((b"\xff\xfe", b"\xfe\xff")):
+        encoding_candidates.append("utf-16")
+
+    for encoding in ("utf-8-sig", "utf-8", "cp1252", "latin-1", "utf-16-le", "utf-16-be"):
+        if encoding not in encoding_candidates:
+            encoding_candidates.append(encoding)
+
+    decoded_candidates = []
+
+    for preference_index, encoding in enumerate(encoding_candidates):
+        try:
+            decoded_text = data.decode(encoding)
+        except (UnicodeDecodeError, UnicodeError):
+            continue
+
+        header_count = count_srt_header_candidates(decoded_text)
+        null_count, control_count, replacement_count = binary_text_score(decoded_text)
+        binary_penalty = (null_count * 8) + (control_count * 4) + (replacement_count * 8)
+        decoded_candidates.append(
+            {
+                "encoding": encoding,
+                "text": decoded_text,
+                "header_count": header_count,
+                "binary_penalty": binary_penalty,
+                "preference_index": preference_index,
+                "binary_like": is_probably_binary_text(decoded_text),
+            }
+        )
+
+    if not decoded_candidates:
+        raise UnicodeDecodeError("utf-8", data, 0, min(1, len(data)), "Unable to decode subtitle file")
+
+    candidates_with_headers = [
+        candidate for candidate in decoded_candidates if candidate["header_count"] > 0
+    ]
+
+    if candidates_with_headers:
+        selected = sorted(
+            candidates_with_headers,
+            key=lambda candidate: (
+                -candidate["header_count"],
+                candidate["binary_penalty"],
+                candidate["preference_index"],
+            ),
+        )[0]
+    else:
+        plausible_text_candidates = [
+            candidate for candidate in decoded_candidates if not candidate["binary_like"]
+        ]
+
+        if not plausible_text_candidates:
+            raise ValueError(
+                f"Source appears binary/corrupted and does not contain recoverable SRT text: "
+                f"{filepath.resolve().as_posix()}"
+            )
+
+        selected = sorted(
+            plausible_text_candidates,
+            key=lambda candidate: candidate["preference_index"],
+        )[0]
+
+    selected_text = str(selected["text"])
+
+    if selected["header_count"] == 0 and is_probably_binary_text(selected_text):
+        raise ValueError(
+            f"Source appears binary/corrupted and does not contain recoverable SRT text: "
+            f"{filepath.resolve().as_posix()}"
+        )
+
+    return selected_text, str(selected["encoding"])
+
+
 def read_srt_file(filepath: Path) -> tuple[str, str, list[dict[str, object]]]:
     """
-    Read an SRT file with PT-BR-friendly encoding fallbacks and mojibake repair.
+    Read an SRT file with structure-aware encoding selection and mojibake repair.
+
+    The decoder evaluates UTF-8, Western single-byte encodings, BOM-based Unicode,
+    and UTF-16 LE/BE without BOM. Dense binary/non-text data is rejected before
+    the strict SRT parser so corrupted files are not misreported as bad indexes.
 
     :param filepath: Source SRT path.
     :return: Decoded/repaired text, detected encoding name, and applied text-repair descriptions.
     """
 
     data = filepath.read_bytes()  # Read raw bytes without altering source file
-
-    if data.startswith((b"\xff\xfe", b"\xfe\xff")):  # Detect UTF-16 BOM before trying single-byte encodings
-        decoded_text = data.decode("utf-16")  # Decode UTF-16 using BOM byte order
-        repaired_text = repair_common_mojibake(decoded_text)  # Normalize and repair decoded subtitle text
-        text_repairs = build_unicode_repair_issues(decoded_text, repaired_text)  # Record exact Unicode/mojibake changes with block context
-        return repaired_text, "utf-16", text_repairs  # Return decoded subtitle text and repair metadata
-
-    for encoding in SRT_TEXT_ENCODINGS:  # Try common UTF-8 and Western/Portuguese subtitle encodings
-        try:
-            decoded_text = data.decode(encoding)  # Decode source bytes using current candidate
-            repaired_text = repair_common_mojibake(decoded_text)  # Repair common mojibake after successful decoding
-            text_repairs = build_unicode_repair_issues(decoded_text, repaired_text)  # Record exact Unicode/mojibake changes with block context
-            return repaired_text, encoding, text_repairs  # Return decoded subtitle text and repair metadata
-        except UnicodeDecodeError:
-            continue  # Try next encoding after strict decode failure
-
-    raise UnicodeDecodeError("utf-8", data, 0, 1, "Unable to decode subtitle file")  # Report unsupported encoding
-
+    decoded_text, encoding = decode_srt_bytes(data, filepath)  # Select the most plausible subtitle decoding
+    repaired_text = repair_common_mojibake(decoded_text)  # Normalize and repair reversible mojibake
+    text_repairs = build_unicode_repair_issues(decoded_text, repaired_text)  # Record exact Unicode/mojibake changes
+    return repaired_text, encoding, text_repairs  # Return decoded subtitle text and repair metadata
 
 def discover_srt_files(input_dir: Path) -> list[Path]:
     """
@@ -728,52 +881,84 @@ def is_srt_block_header(block: str) -> bool:
 
 def repair_split_srt_blocks(content: str) -> tuple[str, list[tuple[int, str, str]]]:
     """
-    Repair SRT entries accidentally split by a blank line between timestamp and text.
+    Reassemble SRT entries split by one or more invalid blank-line groups.
 
-    Example:
-        161
-        00:10:59,380 --> 00:11:00,920
+    Any non-header text chunk following a valid SRT entry is reattached to that
+    entry until the next real numeric-index + timestamp header begins. Chunks
+    that themselves look like malformed SRT headers are deliberately not hidden
+    inside the previous subtitle and remain available for strict validation.
 
-        - They're not exactly
+    This repairs cases such as:
+        483
+        00:51:13,280 --> 00:51:15,824
+        R
 
-    becomes one valid block containing the dialogue line.
+        O, babaca.
+
+        484
+        ...
+
+    and subtitle text split by several consecutive blank lines.
 
     :param content: SRT text after timestamp normalization.
-    :return: Repaired SRT text and records of reattached orphan text.
+    :return: Repaired SRT text and exact reattached-text records.
     """
 
-    normalized_content = content.replace("\r\n", "\n").replace("\r", "\n").strip("\ufeff")  # Normalize line endings
-    raw_blocks = [block for block in re.split(r"\n\s*\n", normalized_content.strip()) if block.strip()]  # Split logical blocks
-    repaired_blocks = []  # Store repaired logical SRT blocks
-    repairs = []  # Store index, timestamp, and exact reattached orphan text
-    block_index = 0  # Track current raw block position
+    normalized_content = content.replace("\r\n", "\n").replace("\r", "\n").strip("\ufeff")
+    raw_blocks = [block for block in re.split(r"\n\s*\n", normalized_content.strip()) if block.strip()]
+    repaired_blocks = []
+    repairs = []
+    current_block = None
+    current_index = None
+    current_timestamp = None
 
-    while block_index < len(raw_blocks):  # Scan logical blocks in order
-        block = raw_blocks[block_index]  # Read current raw block
-        lines = block.split("\n")  # Split current block into structural lines
+    def looks_like_malformed_header(block: str) -> bool:
+        block_lines = block.split("\n")
+        return (
+            len(block_lines) >= 2
+            and (
+                block_lines[0].strip().isdigit()
+                or "-->" in block_lines[1]
+            )
+        )
 
-        if len(lines) == 2 and lines[0].strip().isdigit() and SRT_TIMESTAMP_PATTERN.match(lines[1].strip()):
-            original_index = int(lines[0].strip())  # Capture source subtitle index
-            timestamp = lines[1].strip()  # Capture valid timestamp
+    for raw_block in raw_blocks:
+        if is_srt_block_header(raw_block):
+            if current_block is not None:
+                repaired_blocks.append(current_block)
 
-            if block_index + 1 < len(raw_blocks):  # Verify a following block exists
-                orphan_block = raw_blocks[block_index + 1]  # Inspect text immediately after timestamp-only block
+            header_lines = raw_block.split("\n")
+            current_block = raw_block.strip("\n")
+            current_index = int(header_lines[0].strip())
+            current_timestamp = header_lines[1].strip()
+            continue
 
-                if not is_srt_block_header(orphan_block):  # Only merge text that is not another SRT entry
-                    orphan_text = orphan_block.strip("\n")  # Preserve exact orphan subtitle text without boundary blank lines
+        if (
+            current_block is not None
+            and current_index is not None
+            and current_timestamp is not None
+            and not looks_like_malformed_header(raw_block)
+        ):
+            orphan_text = raw_block.strip("\n")
 
-                    if orphan_text.strip():  # Require meaningful subtitle text
-                        repaired_blocks.append(f"{lines[0].strip()}\n{timestamp}\n{orphan_text}")  # Rebuild valid SRT block
-                        repairs.append((original_index, timestamp, orphan_text))  # Record exact structural repair
-                        block_index += 2  # Consume both timestamp-only block and orphan text block
-                        continue
+            if orphan_text.strip():
+                current_block = f"{current_block}\n{orphan_text}"
+                repairs.append((current_index, current_timestamp, orphan_text))
+            continue
 
-        repaired_blocks.append(block)  # Preserve blocks that do not match this repair pattern
-        block_index += 1  # Advance normally
+        if current_block is not None:
+            repaired_blocks.append(current_block)
+            current_block = None
+            current_index = None
+            current_timestamp = None
 
-    repaired_content = "\n\n".join(repaired_blocks) + ("\n" if repaired_blocks else "")  # Rebuild deterministic SRT text
-    return repaired_content, repairs  # Return repaired content and structural repair metadata
+        repaired_blocks.append(raw_block)
 
+    if current_block is not None:
+        repaired_blocks.append(current_block)
+
+    repaired_content = "\n\n".join(repaired_blocks) + ("\n" if repaired_blocks else "")
+    return repaired_content, repairs
 
 def build_split_block_repair_report(repairs: list[tuple[int, str, str]]) -> str:
     """
@@ -789,7 +974,7 @@ def build_split_block_repair_report(repairs: list[tuple[int, str, str]]) -> str:
         sections.append(
             f"Original index: {original_index}\n"
             f"Timestamp: {timestamp}\n"
-            f"Change: Reattached subtitle text separated by an invalid blank line\n"
+            f"Change: Reattached subtitle text separated by invalid blank line(s)\n"
             f"Reattached text:\n{orphan_text}"
         )
 
@@ -1079,6 +1264,71 @@ def normalize_subtitle_whitespace(value: str) -> str:
     return re.sub(r"[^\S\r\n]+", " ", value).strip()  # Collapse spaces, tabs, and other horizontal whitespace runs
 
 
+def remove_paired_lyric_hash_markers(lines: list[str]) -> tuple[list[str], bool]:
+    """
+    Remove paired # lyric delimiters while preserving all text between them.
+
+    Supported forms include a complete pair on any individual line:
+        #I can't wait to get on the road again #
+
+    and a pair spanning multiple lines of one subtitle entry:
+        # Eu não posso esperar para
+        pegar a estrada novamente #
+
+    Unpaired/interior # characters are preserved.
+
+    :param lines: Already formatting-normalized subtitle lines.
+    :return: Updated lines and whether one or more paired lyric markers were removed.
+    """
+
+    updated_lines = list(lines)
+    changed = False
+
+    for line_index, line in enumerate(updated_lines):
+        stripped_line = line.strip()
+
+        if (
+            len(stripped_line) >= 2
+            and stripped_line.startswith("#")
+            and stripped_line.endswith("#")
+            and stripped_line.count("#") >= 2
+        ):
+            updated_lines[line_index] = stripped_line[1:-1].strip()
+            changed = True
+
+    nonempty_indexes = [
+        index for index, line in enumerate(updated_lines) if line.strip()
+    ]
+
+    if not nonempty_indexes:
+        return updated_lines, changed
+
+    first_index = nonempty_indexes[0]
+    last_index = nonempty_indexes[-1]
+
+    if first_index != last_index:
+        first_stripped = updated_lines[first_index].strip()
+        last_stripped = updated_lines[last_index].strip()
+
+        if first_stripped.startswith("#") and last_stripped.endswith("#"):
+            updated_lines[first_index] = first_stripped[1:].strip()
+            updated_lines[last_index] = last_stripped[:-1].strip()
+            changed = True
+
+    return updated_lines, changed
+
+def has_paired_lyric_hash_markers(lines: list[str]) -> bool:
+    """
+    Detect whether subtitle lines contain a removable paired # lyric wrapper.
+
+    :param lines: Subtitle text lines.
+    :return: True when the same conservative rule used by the cleaner would remove a pair.
+    """
+
+    _, changed = remove_paired_lyric_hash_markers(lines)
+    return changed
+
+
 def clean_subtitle_line(line: str) -> str:
     """
     Remove conservative SDH/descriptive fragments from one subtitle line.
@@ -1099,7 +1349,8 @@ def clean_subtitle_line(line: str) -> str:
         inner_text = fragment[1:-1]  # Extract fragment text without brackets
         return " " if is_descriptive_phrase(inner_text) else fragment  # Remove descriptor or preserve text
 
-    cleaned_line = remove_subtitle_formatting_tags(line)  # Remove formatting tags before SDH cue removal
+    cleaned_line = remove_subtitle_formatting_tags(line)  # Remove HTML-like subtitle formatting tags before SDH cue removal
+    cleaned_line = ASS_OVERRIDE_TAG_PATTERN.sub("", cleaned_line)  # Remove ASS/SSA override tags such as {\\an8} while preserving visible text
     cleaned_line = re.sub(r"\[[^\[\]\n]{1,80}\]|\([^\(\)\n]{1,80}\)", replace_fragment, cleaned_line)  # Remove conservative bracket fragments
     cleaned_line = remove_empty_html_tags(cleaned_line)  # Remove tags emptied by fragment removal
 
@@ -1116,22 +1367,15 @@ def clean_subtitle_line(line: str) -> str:
 
 def clean_subtitle_lines(lines: list[str]) -> list[str]:
     """
-    Remove SDH/descriptive content from multiline subtitle text.
+    Remove SDH/descriptive content and paired lyric # delimiters from multiline text.
 
     :param lines: Original subtitle text lines.
     :return: Cleaned subtitle text lines.
     """
 
-    cleaned_lines = []  # Store cleaned text lines
-
-    for line in lines:  # Clean every original subtitle line
-        cleaned_line = clean_subtitle_line(line)  # Remove SDH fragments from current line
-
-        if cleaned_line:  # Preserve non-empty dialogue lines
-            cleaned_lines.append(cleaned_line)  # Add cleaned dialogue line
-
-    return cleaned_lines  # Return cleaned text lines
-
+    cleaned_lines = [clean_subtitle_line(line) for line in lines]  # Apply per-line formatting/SDH cleanup first
+    cleaned_lines, _lyric_hash_removed = remove_paired_lyric_hash_markers(cleaned_lines)  # Remove only paired lyric delimiters while keeping enclosed text
+    return [line for line in cleaned_lines if line]  # Preserve every non-empty visible subtitle line
 
 def clean_subtitle_entries(entries: list[tuple[int, str, list[str]]]) -> tuple[list[tuple[int, str, list[str]]], list[tuple[int, str, str, str, bool]], int, int]:
     """
@@ -1323,6 +1567,27 @@ def detect_specific_subtitle_issues(original_text: str, cleaned_text: str) -> li
             }
         )
 
+    ass_override_tags = ASS_OVERRIDE_TAG_PATTERN.findall(original_text)  # Capture ASS/SSA override tags removed by cleaner
+    if ass_override_tags:
+        specific_issues.append(
+            {
+                "type": "ass_override_tags",
+                "values": ass_override_tags,
+            }
+        )
+
+    formatting_free_lines = [
+        ASS_OVERRIDE_TAG_PATTERN.sub("", remove_subtitle_formatting_tags(line))
+        for line in original_text.split("\n")
+    ]  # Match the cleaner state immediately before lyric-marker normalization
+    if has_paired_lyric_hash_markers(formatting_free_lines):
+        specific_issues.append(
+            {
+                "type": "paired_lyric_hash_delimiters",
+                "action": "removed_hash_markers_preserved_enclosed_text",
+            }
+        )
+
     music_only_lines = []  # Store exact music-only descriptive lines
     repeated_whitespace_lines = []  # Store exact lines containing horizontal whitespace problems
     punctuation_spacing_lines = []  # Store exact lines with whitespace before punctuation
@@ -1376,7 +1641,7 @@ def describe_fixed_issues(
 
     :param text_repairs: Exact Unicode/mojibake repairs.
     :param timestamp_repairs: Repaired timestamp records.
-    :param split_block_repairs: Reattached text from SRT blocks split by invalid blank lines.
+    :param split_block_repairs: Reattached text from SRT entries split by invalid blank lines.
     :param empty_block_repairs: Removed empty block records.
     :param index_repairs: Original-to-corrected sequential SRT index mappings.
     :param changes: Subtitle text changes/removals.
@@ -1402,7 +1667,7 @@ def describe_fixed_issues(
                 "original_index": index,
                 "timestamp": timestamp,
                 "reattached_text": reattached_text,
-                "action": "reattached_text_after_invalid_blank_line",
+                "action": "reattached_text_after_invalid_blank_lines",
             }
         )
 
