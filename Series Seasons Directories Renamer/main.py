@@ -59,6 +59,7 @@ import subprocess  # For probing video metadata with ffprobe
 from colorama import Style  # For coloring the terminal
 from dotenv import load_dotenv  # For loading environment variables
 from pathlib import Path  # For path handling
+from tqdm import tqdm  # For displaying one inline colored progress bar during directory processing
 
 
 # Macros:
@@ -108,6 +109,29 @@ def verbose_output(true_string="", false_string=""):
         print(true_string)  # Output the true statement string
     elif false_string != "":  # If a false_string was provided
         print(false_string)  # Output the false statement string
+
+
+def output_rename_change(change_desc: str, old_name: str, new_name: str) -> None:
+    """
+    Output one persistent rename line without breaking the active tqdm progress bar.
+
+    Static labels remain green while dynamic change descriptions and directory
+    names are cyan, matching the terminal color conventions used by this project.
+
+    :param change_desc: Human-readable change description returned by detect_changes().
+    :param old_name: Original directory name.
+    :param new_name: Final renamed directory name.
+    :return: None
+    """
+
+    tqdm.write(
+        f"{BackgroundColors.GREEN}Renaming subdir "
+        f"{BackgroundColors.CYAN}({change_desc})"
+        f"{BackgroundColors.GREEN}: "
+        f"'{BackgroundColors.CYAN}{old_name}{BackgroundColors.GREEN}' → "
+        f"'{BackgroundColors.CYAN}{new_name}{BackgroundColors.GREEN}'"
+        f"{Style.RESET_ALL}"
+    )  # Write above the active progress bar so the bar remains an inline update
 
 
 def resolve_entry_with_trailing_space(current_path: str, entry: str, stripped_part: str) -> str:
@@ -817,9 +841,22 @@ def rename_dirs():
             continue
         
     total = len(entries)  # Compute total number of directories to process
-    
-    for idx, (root_path, entry) in enumerate(entries, start=1):  # Iterate with index and unpacked (root,entry)
-        print(f"{BackgroundColors.GREEN}Processing {BackgroundColors.CYAN}{idx}{BackgroundColors.GREEN}/{BackgroundColors.CYAN}{total}{BackgroundColors.GREEN}: {BackgroundColors.CYAN}{entry.name}{Style.RESET_ALL}")  # Output index/total and entry name
+    progress_bar = tqdm(
+        entries,
+        total=total,
+        desc=f"{BackgroundColors.GREEN}Processing directories{Style.RESET_ALL}",
+        unit="dir",
+        dynamic_ncols=True,
+        leave=True,
+        colour="green",
+        bar_format="{desc}: {percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}] {postfix}",
+    )  # Keep normal processing status on one continuously updated terminal line
+
+    for idx, (root_path, entry) in enumerate(progress_bar, start=1):  # Iterate with index and unpacked (root,entry)
+        progress_bar.set_postfix_str(
+            f"{BackgroundColors.GREEN}Directory: {BackgroundColors.CYAN}{entry.as_posix()}{Style.RESET_ALL}",
+            refresh=True,
+        )  # Update only the active progress line with the current top-level directory
         if not entry.is_dir():  # Skip non-directory entries such as files
             continue  # Continue to next entry when current one is not a directory
 
@@ -881,7 +918,8 @@ def rename_dirs():
                             corrected_name = f"{corrected_name} {existing_suffix}"  # Append the existing suffix
                         corrected_name = " ".join(corrected_name.split())  # Normalize whitespace
                         corrected_path = entry.parent / corrected_name  # Compute corrected path
-                        print(f"{BackgroundColors.GREEN}Correcting year: '{entry.name}' → '{corrected_name}'{Style.RESET_ALL}")  # Inform about correction
+                        change_desc = detect_changes(entry.name, corrected_name) or "Correct Year"  # Describe the exact rename before changing the filesystem
+                        output_rename_change(change_desc, entry.name, corrected_name)  # Persist only the actual change above the progress bar
                         entry.rename(corrected_path)  # Perform rename to corrected year
                         
                         if corrected_path.exists():  # Only record when filesystem shows the rename succeeded
@@ -943,7 +981,7 @@ def rename_dirs():
                 series_id = get_series_id(api_key, series_name)  # Fetch TMDb series id by name
                 year = get_season_year(api_key, series_id, season_num)  # Fetch season year using series id
             except Exception as e:  # Catch any exception from TMDb calls
-                print(f"{BackgroundColors.RED}Error fetching year for {series_name} S{season_str}: {e}{Style.RESET_ALL}")  # Print error message when lookup fails
+                verbose_output(true_string=f"{BackgroundColors.RED}Error fetching year for {series_name} S{season_str}: {e}{Style.RESET_ALL}")  # Keep lookup diagnostics hidden unless VERBOSE=True
                 year = None  # Mark year as unavailable after error
 
             valid_year = None  # Assume invalid until proven otherwise
@@ -1002,13 +1040,7 @@ def rename_dirs():
             lang_present = bool(append_str)  # Detect presence of language suffix
             name_color = BackgroundColors.CYAN if (res_present and lang_present) else BackgroundColors.YELLOW  # Choose color
             
-            print(
-                f"{BackgroundColors.GREEN}Renaming subdir "  # Start message
-                f"({change_desc}): "  # Show change tags
-                f"'{BackgroundColors.CYAN}{entry.name}{BackgroundColors.GREEN}' → "  # Old name
-                f"'{BackgroundColors.CYAN}{new_name}{BackgroundColors.GREEN}'"  # New name
-                f"{Style.RESET_ALL}"
-            )  # Formatted rename output
+            output_rename_change(change_desc, entry.name, new_name)  # Persist only the actual rename above the inline progress bar
             entry.rename(new_path)  # Perform the filesystem rename operation for the top-level directory
             if new_path.exists():  # Only record when filesystem shows the rename succeeded
                 root_key = str(root_path)  # Use string form of input root as dictionary key
@@ -1066,6 +1098,10 @@ def rename_dirs():
         else:  # Case 2: The directory likely contains season subdirectories, scan them here
             verbose_output(f"{BackgroundColors.YELLOW}No season info found for '{entry.name}'. Scanning subdirectories...{Style.RESET_ALL}")  # Inform user about scanning
             for subentry in entry.iterdir():  # Iterate over subentries inside the top-level directory
+                progress_bar.set_postfix_str(
+                    f"{BackgroundColors.GREEN}Directory: {BackgroundColors.CYAN}{subentry.as_posix()}{Style.RESET_ALL}",
+                    refresh=True,
+                )  # Reuse the same inline progress bar while inspecting nested season directories
                 if not subentry.is_dir():  # Skip non-directory subentries such as files
                     continue  # Continue to next subentry when current one is not a directory
 
@@ -1079,7 +1115,7 @@ def rename_dirs():
                 else:  # Fallback: detect 'Season <number>' pattern in subdirectory name and infer series from parent
                     season_match = re.search(r"Season\s+(?P<num>\d{1,2})", subentry.name, re.IGNORECASE)  # Match 'Season <number>' case-insensitively
                     if not season_match:  # If no season-style pattern found in subdirectory name
-                        print(f"{BackgroundColors.YELLOW}Skipping (no match in subdir): {subentry.name}{Style.RESET_ALL}")  # Inform about skipped subdirectory
+                        verbose_output(true_string=f"{BackgroundColors.YELLOW}Skipping (no match in subdir): {subentry.name}{Style.RESET_ALL}")  # Keep routine skip diagnostics hidden unless VERBOSE=True
                         continue  # Continue to next subentry when parsing fails
                     season_num_sub = int(season_match.group("num"))  # Convert extracted season number to integer
                     res_search = re.search(r"\b(?P<res>\d{3,4}p?)\b", subentry.name, re.IGNORECASE)  # Search for resolution token
@@ -1115,7 +1151,7 @@ def rename_dirs():
                             series_id_chk = get_series_id(api_key, series_lookup_name)  # Lookup series id for verification
                             api_year = get_season_year(api_key, series_id_chk, existing_season_int)  # Fetch year from API for existing season
                         except Exception as e:  # API lookup failed for subdir
-                            print(f"{BackgroundColors.RED}Error verifying year for {series_lookup_name} S{existing_season}: {e}{Style.RESET_ALL}")  # Inform about verification error
+                            verbose_output(true_string=f"{BackgroundColors.RED}Error verifying year for {series_lookup_name} S{existing_season}: {e}{Style.RESET_ALL}")  # Keep lookup diagnostics hidden unless VERBOSE=True
                             api_year = None  # Mark API year as unavailable
 
                         if api_year is not None and str(api_year) == str(existing_year_int):  # API year matches existing year
@@ -1131,13 +1167,7 @@ def rename_dirs():
                             
                             change_desc = detect_changes(subentry.name, prefixed_name)  # Compute tags
                             if change_desc:  # If tags present, print structured message and rename
-                                print(
-                                    f"{BackgroundColors.GREEN}Renaming subdir "  # Start message
-                                    f"({change_desc}): "  # Show change tags
-                                    f"'{BackgroundColors.CYAN}{subentry.name}{BackgroundColors.GREEN}' → "  # Old name
-                                    f"'{BackgroundColors.CYAN}{prefixed_name}{BackgroundColors.GREEN}'"  # New name
-                                    f"{Style.RESET_ALL}"
-                                )  # Formatted rename output
+                                output_rename_change(change_desc, subentry.name, prefixed_name)  # Persist only the actual rename above the inline progress bar
                                 subentry.rename(new_path)  # Perform rename to add prefix
                                 if new_path.exists():  # Only record when filesystem shows the rename succeeded
                                     root_key = str(root_path)  # Use string form of input root as dictionary key
@@ -1215,13 +1245,7 @@ def rename_dirs():
                             
                             change_desc = detect_changes(subentry.name, corrected_name)  # Compute tags
                             if change_desc:  # If tags present, print structured message and rename
-                                print(
-                                    f"{BackgroundColors.GREEN}Renaming subdir "  # Start message
-                                    f"({change_desc}): "  # Show change tags
-                                    f"'{BackgroundColors.CYAN}{subentry.name}{BackgroundColors.GREEN}' → "  # Old name
-                                    f"'{BackgroundColors.CYAN}{corrected_name}{BackgroundColors.GREEN}'"  # New name
-                                    f"{Style.RESET_ALL}"
-                                )  # Formatted rename output
+                                output_rename_change(change_desc, subentry.name, corrected_name)  # Persist only the actual rename above the inline progress bar
                                 subentry.rename(corrected_path)  # Perform the filesystem rename to corrected year for subdirectory
                             else:  # No meaningful tags found
                                 verbose_output(f"{BackgroundColors.YELLOW}Skipping (no detected meaningful change): {subentry.name}{Style.RESET_ALL}")  # Inform skip
@@ -1231,7 +1255,7 @@ def rename_dirs():
                     series_id = get_series_id(api_key, series_name_sub)  # Fetch TMDb series id by name for subdir
                     year = get_season_year(api_key, series_id, season_num_sub)  # Fetch season year for subdir
                 except Exception as e:  # Catch any exception from TMDb calls for subdir
-                    print(f"{BackgroundColors.RED}Error fetching year for {series_name_sub} S{season_str_sub}: {e}{Style.RESET_ALL}")  # Print error message when lookup fails for subdir
+                    verbose_output(true_string=f"{BackgroundColors.RED}Error fetching year for {series_name_sub} S{season_str_sub}: {e}{Style.RESET_ALL}")  # Keep lookup diagnostics hidden unless VERBOSE=True
                     year = None  # Mark year as unavailable after error
 
                 valid_year = None  # Assume invalid until proven otherwise
@@ -1303,16 +1327,10 @@ def rename_dirs():
                 lang_present = bool(append_str)  # Detect presence of language suffix
                 name_color = BackgroundColors.CYAN if (res_present and lang_present) else BackgroundColors.YELLOW  # Choose color
                 
-                print(
-                    f"{BackgroundColors.GREEN}Renaming subdir "  # Start message
-                    f"({change_desc}): "  # Show change tags
-                    f"'{BackgroundColors.CYAN}{subentry.name}{BackgroundColors.GREEN}' → "  # Old name
-                    f"'{BackgroundColors.CYAN}{new_name}{BackgroundColors.GREEN}'"  # New name
-                    f"{Style.RESET_ALL}"
-                )  # Formatted rename output
+                output_rename_change(change_desc, subentry.name, new_name)  # Persist only the actual rename above the inline progress bar
                 subentry.rename(new_path)  # Perform the filesystem rename operation for subdirectory
                 
-        print()  # Add single spacing after processing a top-level directory
+
 
 
 def to_seconds(obj):
@@ -1444,10 +1462,9 @@ def main():
     :return: None
     """
 
-    print(
-        f"{BackgroundColors.CLEAR_TERMINAL}{BackgroundColors.BOLD}{BackgroundColors.GREEN}Welcome to the {BackgroundColors.CYAN}Season Directory Renamer{BackgroundColors.GREEN} program!{Style.RESET_ALL}",
-        end="\n\n",
-    )  # Output the welcome message
+    verbose_output(
+        true_string=f"{BackgroundColors.CLEAR_TERMINAL}{BackgroundColors.BOLD}{BackgroundColors.GREEN}Welcome to the {BackgroundColors.CYAN}Season Directory Renamer{BackgroundColors.GREEN} program!{Style.RESET_ALL}"
+    )  # Keep non-change startup output hidden unless VERBOSE=True
     start_time = datetime.datetime.now()  # Get the start time of the program
     
     verify_ffmpeg_is_installed()  # Verify if ffmpeg is installed
@@ -1455,12 +1472,14 @@ def main():
     rename_dirs()  # Execute the directory renaming workflow
 
     finish_time = datetime.datetime.now()  # Get the finish time of the program
-    print(
-        f"{BackgroundColors.GREEN}Start time: {BackgroundColors.CYAN}{start_time.strftime('%d/%m/%Y - %H:%M:%S')}\n{BackgroundColors.GREEN}Finish time: {BackgroundColors.CYAN}{finish_time.strftime('%d/%m/%Y - %H:%M:%S')}\n{BackgroundColors.GREEN}Execution time: {BackgroundColors.CYAN}{calculate_execution_time(start_time, finish_time)}{Style.RESET_ALL}"
-    )  # Output the start and finish times
-    print(
-        f"\n{BackgroundColors.BOLD}{BackgroundColors.GREEN}Program finished.{Style.RESET_ALL}"
-    )  # Output the end of the program message
+    verbose_output(
+        true_string=(
+            f"{BackgroundColors.GREEN}Start time: {BackgroundColors.CYAN}{start_time.strftime('%d/%m/%Y - %H:%M:%S')}\n"
+            f"{BackgroundColors.GREEN}Finish time: {BackgroundColors.CYAN}{finish_time.strftime('%d/%m/%Y - %H:%M:%S')}\n"
+            f"{BackgroundColors.GREEN}Execution time: {BackgroundColors.CYAN}{calculate_execution_time(start_time, finish_time)}{Style.RESET_ALL}\n"
+            f"{BackgroundColors.BOLD}{BackgroundColors.GREEN}Program finished.{Style.RESET_ALL}"
+        )
+    )  # Keep non-change completion output hidden unless VERBOSE=True
     (
         atexit.register(play_sound) if RUN_FUNCTIONS["Play Sound"] else None
     )  # Register the play_sound function to be called when the program finishes
