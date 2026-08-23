@@ -68,7 +68,7 @@ class BackgroundColors:  # Colors for the terminal
 
 # Execution Constants:
 VERBOSE = False  # Set to True to output verbose messages
-INPUT_DIRECTORY = Path("./Input")  # Directory searched recursively for source SRT files
+INPUT_DIRS = [f"E:/Movies/", f"F:/Movies/", f"F:/Series/", f"G:/Series/"]  # Directories searched recursively for source SRT files
 SRT_TIMESTAMP_PATTERN = re.compile(r"^\d{2}:\d{2}:\d{2},\d{3}\s+-->\s+\d{2}:\d{2}:\d{2},\d{3}(?:\s+.*)?$")  # SRT timestamp validation pattern
 SUBTITLE_FORMATTING_TAG_PATTERN = re.compile(r"</?(?:i|b|u|font)(?:\s+[^<>]*)?>", re.IGNORECASE)  # Recognized SRT formatting tag pattern
 EMPTY_SUBTITLE_FORMATTING_TAG_PATTERN = re.compile(r"<(i|b|u|font)(?:\s+[^<>]*)?>\s*</\1>", re.IGNORECASE)  # Recognized empty SRT formatting tag pattern
@@ -709,9 +709,9 @@ def display_relative_path(filepath: Path, input_dir: Path) -> str:
     :return: Display path.
     """
 
-    try:  # Prefer paths relative to INPUT_DIRECTORY
+    try:  # Prefer paths relative to the current input directory
         return filepath.relative_to(input_dir).as_posix()  # Return relative display path
-    except ValueError:  # Fall back when path is outside INPUT_DIRECTORY
+    except ValueError:  # Fall back when path is outside the current input directory
         return filepath.as_posix()  # Return absolute display path
 
 
@@ -775,21 +775,24 @@ def main():
     
     start_time = datetime.datetime.now()  # Get the start time of the program
     
-    input_dir = Path(resolve_full_trailing_space_path(str(INPUT_DIRECTORY))).resolve()  # Resolve INPUT_DIRECTORY path safely
-    discovered_count = 0  # Count discovered SRT files
+    discovered_count = 0  # Count discovered SRT files across all input directories
     cleaned_count = 0  # Count files with generated outputs
     unchanged_count = 0  # Count files without SDH content
     failed_count = 0  # Count files that failed processing
     removed_entries_count = 0  # Count removed subtitle entries
     modified_entries_count = 0  # Count mixed entries modified
 
-    if not verify_filepath_exists(str(input_dir)) or not input_dir.is_dir():  # Validate input directory
-        print(f"{BackgroundColors.RED}Input directory not found: {BackgroundColors.CYAN}{input_dir}{Style.RESET_ALL}")  # Log missing input directory
-    else:  # Process source SRT files
-        srt_files = discover_srt_files(input_dir)  # Discover source SRT files recursively
-        discovered_count = len(srt_files)  # Store discovered file count
+    for configured_input_dir in INPUT_DIRS:  # Process every configured input directory
+        input_dir = Path(resolve_full_trailing_space_path(str(configured_input_dir))).resolve()  # Resolve configured input path safely
 
-        for srt_file in srt_files:  # Process every source SRT file
+        if not verify_filepath_exists(str(input_dir)) or not input_dir.is_dir():  # Validate current input directory
+            print(f"{BackgroundColors.RED}Input directory not found: {BackgroundColors.CYAN}{input_dir}{Style.RESET_ALL}")  # Log missing input directory
+            continue  # Continue with remaining configured input directories
+
+        srt_files = discover_srt_files(input_dir)  # Discover source SRT files recursively in current input directory
+        discovered_count += len(srt_files)  # Add current directory discovery count
+
+        for srt_file in srt_files:  # Process every source SRT file in current input directory
             file_cleaned, file_unchanged, file_failed, file_removed, file_modified = process_srt_file(srt_file, input_dir)  # Process one source file
             cleaned_count += file_cleaned  # Add cleaned file count
             unchanged_count += file_unchanged  # Add unchanged file count
