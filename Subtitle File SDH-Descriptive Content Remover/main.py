@@ -73,7 +73,7 @@ class BackgroundColors:  # Colors for the terminal
 
 # Execution Constants:
 VERBOSE = False  # Set to True to output verbose messages
-IN_PLACE_UPDATE = False  # Set to True to atomically update original SRT files instead of creating .cleaned.srt files
+IN_PLACE_UPDATE = True  # Set to True to atomically update original SRT files instead of creating .cleaned.srt files
 OUTPUT_DIR = Path("./Outputs")  # Directory used for per-input-directory JSON reports
 INPUT_DIRS = [f"E:/Movies/", f"F:/Movies/", f"F:/Series/", f"G:/Series/"]  # Directories searched recursively for source SRT files
 SRT_TEXT_ENCODINGS = ("utf-8-sig", "utf-8", "cp1252", "latin-1")  # Common UTF-8 and Western/Portuguese subtitle encodings
@@ -445,7 +445,63 @@ def repair_common_mojibake(value: str) -> str:
     return unicodedata.normalize("NFC", repaired_value)  # Return canonically normalized Unicode text
 
 
-def read_srt_file(filepath: Path) -> tuple[str, str, list[str]]:
+def build_unicode_repair_issues(original_text: str, repaired_text: str) -> list[dict[str, object]]:
+    """
+    Describe exact line-level Unicode/mojibake repairs.
+
+    :param original_text: Text immediately after source-byte decoding.
+    :param repaired_text: Text after Unicode/mojibake repair.
+    :return: Structured issue objects containing exact original/fixed text.
+    """
+
+    if original_text == repaired_text:  # Avoid work when no Unicode repair occurred
+        return []  # No issue objects are needed
+
+    original_lines = original_text.replace("\r\n", "\n").replace("\r", "\n").split("\n")  # Normalize original lines
+    repaired_lines = repaired_text.replace("\r\n", "\n").replace("\r", "\n").split("\n")  # Normalize repaired lines
+    issues = []  # Store exact line-level repairs
+    current_index = None  # Track surrounding SRT index
+    current_timestamp = None  # Track surrounding SRT timestamp
+
+    for line_number, (original_line, repaired_line) in enumerate(zip(original_lines, repaired_lines), start=1):  # Compare corresponding lines
+        stripped_original = original_line.strip()  # Normalize only for structural detection
+
+        if stripped_original.isdigit():  # Track SRT block index
+            current_index = int(stripped_original)  # Store original block index
+            current_timestamp = None  # Reset timestamp until encountered
+        elif "-->" in stripped_original:  # Track timestamp associated with current block
+            current_timestamp = stripped_original  # Preserve exact timestamp line
+
+        if original_line == repaired_line:  # Ignore unchanged lines
+            continue
+
+        issue = {
+            "issue_type": "unicode_or_mojibake_text_repair",
+            "line_number": line_number,
+            "original_text": original_line,
+            "fixed_text": repaired_line,
+        }  # Build exact repair record
+
+        if current_index is not None:  # Include block context when available
+            issue["original_index"] = current_index
+        if current_timestamp is not None:  # Include timestamp context when available
+            issue["timestamp"] = current_timestamp
+
+        issues.append(issue)  # Preserve exact before/after text
+
+    if len(original_lines) != len(repaired_lines):  # Defensive fallback if a future repair changes line count
+        issues.append(
+            {
+                "issue_type": "unicode_or_mojibake_structure_repair",
+                "original_text": original_text,
+                "fixed_text": repaired_text,
+            }
+        )  # Preserve complete before/after content when line mapping is no longer one-to-one
+
+    return issues  # Return specific Unicode repair objects
+
+
+def read_srt_file(filepath: Path) -> tuple[str, str, list[dict[str, object]]]:
     """
     Read an SRT file with PT-BR-friendly encoding fallbacks and mojibake repair.
 
@@ -458,14 +514,14 @@ def read_srt_file(filepath: Path) -> tuple[str, str, list[str]]:
     if data.startswith((b"\xff\xfe", b"\xfe\xff")):  # Detect UTF-16 BOM before trying single-byte encodings
         decoded_text = data.decode("utf-16")  # Decode UTF-16 using BOM byte order
         repaired_text = repair_common_mojibake(decoded_text)  # Normalize and repair decoded subtitle text
-        text_repairs = ["Repaired Unicode/mojibake subtitle text after UTF-16 decoding"] if repaired_text != decoded_text else []  # Record actual text repair
+        text_repairs = build_unicode_repair_issues(decoded_text, repaired_text)  # Record exact Unicode/mojibake changes with block context
         return repaired_text, "utf-16", text_repairs  # Return decoded subtitle text and repair metadata
 
     for encoding in SRT_TEXT_ENCODINGS:  # Try common UTF-8 and Western/Portuguese subtitle encodings
         try:
             decoded_text = data.decode(encoding)  # Decode source bytes using current candidate
             repaired_text = repair_common_mojibake(decoded_text)  # Repair common mojibake after successful decoding
-            text_repairs = [f"Repaired Unicode/mojibake subtitle text after {encoding} decoding"] if repaired_text != decoded_text else []  # Record actual text repair
+            text_repairs = build_unicode_repair_issues(decoded_text, repaired_text)  # Record exact Unicode/mojibake changes with block context
             return repaired_text, encoding, text_repairs  # Return decoded subtitle text and repair metadata
         except UnicodeDecodeError:
             continue  # Try next encoding after strict decode failure
@@ -482,7 +538,6 @@ def discover_srt_files(input_dir: Path) -> list[Path]:
     """
 
     return sorted(path for path in input_dir.rglob("*.srt") if not path.name.lower().endswith(".cleaned.srt"))  # Exclude generated cleaned files
-
 
 
 def normalize_srt_time_component(hours: str, minutes: str, seconds: str, milliseconds: str) -> str:
@@ -959,7 +1014,6 @@ def atomic_write_text(filepath: Path, content: str) -> None:
             temporary_filepath.unlink()  # Remove incomplete temporary file
 
 
-
 def build_report_filename_prefix(configured_input_dir: str) -> str:
     """
     Build a Windows-safe filename prefix from a configured input directory.
@@ -991,15 +1045,15 @@ def build_input_report_path(configured_input_dir: str) -> Path:
 
 def build_file_issue_report(
     filepath: Path,
-    fixed_issues: list[str] | None = None,
-    unresolved_issues: list[str] | None = None,
+    fixed_issues: list[dict[str, object]] | None = None,
+    unresolved_issues: list[dict[str, object]] | None = None,
 ) -> dict[str, object]:
     """
     Build one file-level issue report entry.
 
     :param filepath: Subtitle file associated with the issues.
-    :param fixed_issues: Issues successfully fixed and published.
-    :param unresolved_issues: Issues that could not be solved and caused failure.
+    :param fixed_issues: Structured issues successfully fixed and published.
+    :param unresolved_issues: Structured issues that could not be solved and caused failure.
     :return: JSON-serializable file report dictionary.
     """
 
@@ -1030,46 +1084,186 @@ def write_input_report(configured_input_dir: str, input_dir: Path, file_reports:
     return report_path  # Return generated report path
 
 
+def detect_specific_subtitle_issues(original_text: str, cleaned_text: str) -> list[dict[str, object]]:
+    """
+    Detect the exact cleanup reasons present in one changed subtitle entry.
+
+    :param original_text: Original subtitle block text.
+    :param cleaned_text: Cleaned subtitle block text.
+    :return: Specific issue descriptors supported by the actual original text.
+    """
+
+    specific_issues = []  # Store exact issue types/details for this block
+    descriptive_fragments = []  # Store removable bracketed/parenthesized SDH fragments
+
+    for match in re.finditer(r"\[[^\[\]\n]{1,80}\]|\([^\(\)\n]{1,80}\)", original_text):  # Inspect every candidate fragment
+        fragment = match.group(0)  # Capture exact original fragment
+        if is_descriptive_phrase(fragment[1:-1]):  # Match the same conservative rule used by the cleaner
+            descriptive_fragments.append(fragment)  # Record exact SDH fragment that caused cleanup
+
+    if descriptive_fragments:  # Report exact removable descriptive fragments
+        specific_issues.append(
+            {
+                "type": "sdh_descriptive_fragment",
+                "values": descriptive_fragments,
+            }
+        )
+
+    formatting_tags = SUBTITLE_FORMATTING_TAG_PATTERN.findall(original_text)  # Capture exact formatting tags removed by cleaner
+    if formatting_tags:
+        specific_issues.append(
+            {
+                "type": "subtitle_formatting_tags",
+                "values": formatting_tags,
+            }
+        )
+
+    music_only_lines = []  # Store exact music-only descriptive lines
+    repeated_whitespace_lines = []  # Store exact lines containing horizontal whitespace problems
+    punctuation_spacing_lines = []  # Store exact lines with whitespace before punctuation
+    outer_whitespace_lines = []  # Store exact lines with leading/trailing whitespace
+
+    for line_number, original_line in enumerate(original_text.split("\n"), start=1):  # Analyze each original subtitle text line
+        formatting_free_line = remove_subtitle_formatting_tags(original_line)  # Match cleaner's classification input
+        if is_music_only_line(formatting_free_line):
+            music_only_lines.append({"line_number": line_number, "text": original_line})
+
+        if re.search(r"[^\S\r\n]{2,}", original_line) or "\t" in original_line:
+            repeated_whitespace_lines.append({"line_number": line_number, "text": original_line})
+
+        if re.search(r"\s+[,.!?;:]", original_line):
+            punctuation_spacing_lines.append({"line_number": line_number, "text": original_line})
+
+        if original_line != original_line.strip():
+            outer_whitespace_lines.append({"line_number": line_number, "text": original_line})
+
+    if music_only_lines:
+        specific_issues.append({"type": "music_only_descriptive_line", "lines": music_only_lines})
+    if repeated_whitespace_lines:
+        specific_issues.append({"type": "repeated_horizontal_whitespace", "lines": repeated_whitespace_lines})
+    if punctuation_spacing_lines:
+        specific_issues.append({"type": "whitespace_before_punctuation", "lines": punctuation_spacing_lines})
+    if outer_whitespace_lines:
+        specific_issues.append({"type": "leading_or_trailing_whitespace", "lines": outer_whitespace_lines})
+
+    if not specific_issues and original_text != cleaned_text:  # Preserve an exact, non-generic record for any remaining deterministic change
+        specific_issues.append(
+            {
+                "type": "exact_text_difference",
+                "original_text": original_text,
+                "fixed_text": cleaned_text,
+            }
+        )
+
+    return specific_issues  # Return evidence-backed issue details
+
+
 def describe_fixed_issues(
-    text_repairs: list[str],
+    text_repairs: list[dict[str, object]],
     timestamp_repairs: list[tuple[int, str, str]],
     empty_block_repairs: list[tuple[int, str]],
     changes: list[tuple[int, str, str, str, bool]],
-) -> list[str]:
+) -> list[dict[str, object]]:
     """
-    Convert successful repair metadata into human-readable JSON issue strings.
+    Convert successful repair metadata into exact structured JSON issue objects.
 
-    :param text_repairs: Applied encoding/Unicode repair descriptions.
+    :param text_repairs: Exact Unicode/mojibake repairs.
     :param timestamp_repairs: Repaired timestamp records.
     :param empty_block_repairs: Removed empty block records.
     :param changes: Subtitle text changes/removals.
-    :return: Ordered fixed-issue descriptions.
+    :return: Ordered fixed-issue objects with block context and exact before/after data.
     """
 
-    fixed_issues = list(text_repairs)  # Preserve any encoding/Unicode repairs first
+    fixed_issues = list(text_repairs)  # Preserve exact Unicode/mojibake repair objects first
 
     for index, original_timestamp, repaired_timestamp in timestamp_repairs:  # Report every repaired malformed timestamp
         fixed_issues.append(
-            f"Repaired overlong millisecond timestamp at original index {index}: "
-            f"{original_timestamp} -> {repaired_timestamp}"
+            {
+                "issue_type": "overlong_millisecond_timestamp",
+                "original_index": index,
+                "original_timestamp": original_timestamp,
+                "fixed_timestamp": repaired_timestamp,
+            }
         )
 
     for index, timestamp in empty_block_repairs:  # Report every malformed empty subtitle block removal
         fixed_issues.append(
-            f"Removed empty SRT block at original index {index} ({timestamp})"
+            {
+                "issue_type": "empty_srt_block",
+                "original_index": index,
+                "timestamp": timestamp,
+                "original_text": "",
+                "action": "removed",
+            }
         )
 
-    for index, timestamp, _original_text, _cleaned_text, removed in changes:  # Report every successful subtitle cleanup
-        if removed:
-            fixed_issues.append(
-                f"Removed SDH/descriptive-only subtitle entry at original index {index} ({timestamp})"
-            )
-        else:
-            fixed_issues.append(
-                f"Cleaned subtitle text/formatting/whitespace at original index {index} ({timestamp})"
-            )
+    for index, timestamp, original_text, cleaned_text, removed in changes:  # Report exact per-block subtitle cleanup
+        fixed_issues.append(
+            {
+                "issue_type": "subtitle_entry_removed" if removed else "subtitle_entry_modified",
+                "original_index": index,
+                "timestamp": timestamp,
+                "specific_issues": detect_specific_subtitle_issues(original_text, cleaned_text),
+                "original_text": original_text,
+                "fixed_text": None if removed else cleaned_text,
+                "action": "removed" if removed else "modified",
+            }
+        )
 
-    return fixed_issues  # Return all successfully published fixes
+    return fixed_issues  # Return exact structured fixes
+
+
+def extract_failed_block_context(content: str, exc: Exception) -> dict[str, object]:
+    """
+    Extract the exact SRT block associated with a parse/validation exception when possible.
+
+    :param content: Latest available SRT content at failure time.
+    :param exc: Raised exception.
+    :return: Structured block context for unresolved issue reporting.
+    """
+
+    context = {}  # Store optional failure-block details
+    match = re.search(r"\bblock\s+(\d+)\b", str(exc), re.IGNORECASE)  # Parse block number from existing validation errors
+
+    if match is None or not content:
+        return context  # No reliable block context is available
+
+    block_number = int(match.group(1))  # Convert one-based logical block number
+    normalized_content = content.replace("\r\n", "\n").replace("\r", "\n").strip("\ufeff")  # Normalize line endings
+    blocks = [block for block in re.split(r"\n\s*\n", normalized_content.strip()) if block.strip()]  # Match parser block splitting
+
+    if not (1 <= block_number <= len(blocks)):
+        return context  # Avoid reporting unrelated content for an out-of-range block number
+
+    block_content = blocks[block_number - 1]  # Capture the exact block that failed
+    block_lines = block_content.split("\n")  # Split for optional index/timestamp fields
+    context["block_number"] = block_number
+    context["block_content"] = block_content
+
+    if block_lines and block_lines[0].strip().isdigit():
+        context["original_index"] = int(block_lines[0].strip())
+    if len(block_lines) >= 2:
+        context["timestamp_line"] = block_lines[1].strip()
+
+    return context  # Return exact failing-block context
+
+
+def build_unresolved_issue(exc: Exception, content: str) -> dict[str, object]:
+    """
+    Build one exact unresolved issue object.
+
+    :param exc: Exception that caused file processing to fail.
+    :param content: Latest available subtitle content when the failure occurred.
+    :return: Structured unresolved issue with exact block content when available.
+    """
+
+    issue = {
+        "issue_type": "unresolved_srt_error",
+        "error_type": type(exc).__name__,
+        "message": str(exc),
+    }  # Preserve exact failure details
+    issue.update(extract_failed_block_context(content, exc))  # Add block number/content when validation identified one
+    return issue  # Return specific unresolved issue object
 
 
 def display_input_directory(input_dir: Path) -> str:
@@ -1113,10 +1307,15 @@ def process_srt_file(filepath: Path, input_dir: Path, log_output: bool = True) -
     if log_output:  # Preserve direct-call processing log outside progress-bar mode
         print(f"Processing: {relative_path}")  # Log source being processed
 
+    failure_context_content = ""  # Keep the latest available subtitle content for exact unresolved block reporting
+
     try:  # Keep one file failure from stopping the batch
         content, _encoding, text_repairs = read_srt_file(filepath)  # Read/decode source SRT and capture applied Unicode repairs
+        failure_context_content = content  # Preserve decoded content if later repair/validation fails
         timestamp_repaired_content, timestamp_repairs = repair_srt_timestamps(content)  # Repair overlong millisecond fields before strict SRT validation
+        failure_context_content = timestamp_repaired_content  # Preserve timestamp-repaired content for failure context
         structurally_repaired_content, empty_block_repairs = remove_empty_srt_blocks(timestamp_repaired_content)  # Remove timestamped blocks that contain no subtitle text
+        failure_context_content = structurally_repaired_content  # Preserve structurally repaired content for strict parser failures
         entries = parse_srt_content(structurally_repaired_content, filepath)  # Parse and validate structurally repaired source SRT
         cleaned_entries, changes, removed_count, modified_count = clean_subtitle_entries(entries)  # Remove SDH content
 
@@ -1161,7 +1360,7 @@ def process_srt_file(filepath: Path, input_dir: Path, log_output: bool = True) -
             print(failure_message)  # Log failure directly
         else:  # Keep tqdm progress display intact while surfacing the error
             tqdm.write(failure_message, file=PROGRESS_OUTPUT)  # Print above the active progress bar and redraw it without routing carriage returns through Logger
-        unresolved_issue = f"{type(exc).__name__}: {exc}"  # Preserve exact exception type and message in JSON report
+        unresolved_issue = build_unresolved_issue(exc, failure_context_content)  # Preserve exact failure and failing-block content when available
         file_report = build_file_issue_report(filepath, unresolved_issues=[unresolved_issue])  # Build failed file issue report
         return 0, 0, 1, 0, 0, file_report  # Return failure count and unresolved issue report
 
