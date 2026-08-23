@@ -33,6 +33,8 @@ Description :
         - Displays one tqdm progress bar per input directory, logs terminal
           output to ./Logs/main.log, prints final processing/timing totals, and
           optionally plays a completion sound on supported non-Windows systems.
+        - Failed-file logs always show the complete source SRT path, including
+          the configured input root, using forward slashes.
         - Attempts to resolve path components with trailing spaces and may
           rename such directory entries to their stripped names when possible.
 
@@ -1489,10 +1491,35 @@ def build_unresolved_issue(exc: Exception, content: str) -> dict[str, object]:
     issue = {
         "issue_type": "unresolved_srt_error",
         "error_type": type(exc).__name__,
-        "message": str(exc),
+        "message": normalize_exception_path_separators(exc),
     }  # Preserve exact failure details
     issue.update(extract_failed_block_context(content, exc))  # Add block number/content when validation identified one
     return issue  # Return specific unresolved issue object
+
+
+def display_full_source_path(filepath: Path) -> str:
+    """
+    Format a source filepath as a complete, unambiguous forward-slash path.
+
+    :param filepath: Source SRT path.
+    :return: Absolute/full source path using forward slashes.
+    """
+
+    try:
+        return filepath.resolve().as_posix()  # Prefer fully resolved absolute source path
+    except (OSError, RuntimeError):
+        return filepath.absolute().as_posix()  # Fall back to absolute path without filesystem resolution
+
+
+def normalize_exception_path_separators(exc: Exception) -> str:
+    """
+    Normalize path separators inside an exception message for terminal/report output.
+
+    :param exc: Exception whose text may include Windows backslashes.
+    :return: Exception text using forward slashes.
+    """
+
+    return str(exc).replace("\\", "/")  # Keep the original error details while normalizing path separators
 
 
 def display_input_directory(input_dir: Path) -> str:
@@ -1531,7 +1558,8 @@ def process_srt_file(filepath: Path, input_dir: Path, log_output: bool = True) -
     :return: Cleaned files, unchanged files, failed files, removed entries, modified mixed entries, and optional file issue report.
     """
 
-    relative_path = display_relative_path(filepath, input_dir)  # Build concise log path
+    relative_path = display_relative_path(filepath, input_dir)  # Keep routine/progress output concise and relative to the active input root
+    full_source_path = display_full_source_path(filepath)  # Reserve the complete source path for failures so the originating input root is always visible
 
     if log_output:  # Preserve direct-call processing log outside progress-bar mode
         print(f"Processing: {relative_path}")  # Log source being processed
@@ -1589,7 +1617,8 @@ def process_srt_file(filepath: Path, input_dir: Path, log_output: bool = True) -
             print(f"Diff: {display_relative_path(diff_filepath, input_dir)}")  # Log diff output
         return 1, 0, 0, removed_count + len(empty_block_repairs), modified_count, file_report  # Return cleaned counts and successful issue report
     except Exception as exc:  # Report file-specific failure and continue
-        failure_message = f"{BackgroundColors.RED}Failed: {BackgroundColors.CYAN}{relative_path}{BackgroundColors.RED} - {exc}{Style.RESET_ALL}"  # Build concise failure log
+        normalized_error = normalize_exception_path_separators(exc)  # Normalize any path embedded in the parser/validation exception
+        failure_message = f"{BackgroundColors.RED}Failed: {BackgroundColors.CYAN}{full_source_path}{BackgroundColors.RED} - {normalized_error}{Style.RESET_ALL}"  # Always show the exact full source path, including its input root
         if log_output:  # Use normal output outside progress-bar mode
             print(failure_message)  # Log failure directly
         else:  # Keep tqdm progress display intact while surfacing the error
