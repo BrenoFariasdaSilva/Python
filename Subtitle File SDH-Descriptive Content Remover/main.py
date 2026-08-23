@@ -596,6 +596,64 @@ def build_timestamp_repair_report(repairs: list[tuple[int, str, str]]) -> str:
 
     return "\n\n---\n\n".join(sections) + ("\n" if sections else "")  # Return diff-compatible report text
 
+
+def remove_empty_srt_blocks(content: str) -> tuple[str, list[tuple[int, str]]]:
+    """
+    Remove SRT blocks that contain an index and timestamp but no subtitle text.
+
+    Example removed block:
+        162
+        00:19:13,471 --> 00:19:15,861
+
+    :param content: SRT text after timestamp repair.
+    :return: Repaired SRT text and records of removed empty blocks.
+    """
+
+    normalized_content = content.replace("\r\n", "\n").replace("\r", "\n").strip("\ufeff")  # Normalize line endings
+    raw_blocks = [block for block in re.split(r"\n\s*\n", normalized_content.strip()) if block.strip()]  # Split logical SRT blocks
+    kept_blocks = []  # Store valid/non-empty blocks for strict parsing
+    removed_blocks = []  # Store removed empty block index/timestamp pairs
+
+    for block in raw_blocks:  # Inspect every logical SRT block before strict validation
+        lines = block.split("\n")  # Split current block into index, timestamp, and possible text
+
+        if len(lines) >= 2:  # Require enough structure to identify an SRT block safely
+            index_text = lines[0].strip()  # Normalize possible subtitle index
+            timestamp = lines[1].strip()  # Normalize possible timestamp
+            text_lines = lines[2:]  # Capture any subtitle text lines, including whitespace-only lines
+
+            if index_text.isdigit() and SRT_TIMESTAMP_PATTERN.match(timestamp) and not any(line.strip() for line in text_lines):
+                removed_blocks.append((int(index_text), timestamp))  # Record empty subtitle block removal
+                continue  # Exclude empty block from repaired SRT content
+
+        kept_blocks.append(block)  # Preserve blocks that are not safely identified as empty subtitle entries
+
+    repaired_content = "\n\n".join(kept_blocks) + ("\n" if kept_blocks else "")  # Rebuild deterministic SRT structure
+    return repaired_content, removed_blocks  # Return repaired SRT text and removed block records
+
+
+def build_empty_block_repair_report(removed_blocks: list[tuple[int, str]]) -> str:
+    """
+    Build diff report sections for removed empty SRT blocks.
+
+    :param removed_blocks: Empty block index/timestamp pairs.
+    :return: Human-readable empty-block repair report text.
+    """
+
+    sections = []  # Store one report section per removed empty block
+
+    for index, timestamp in removed_blocks:  # Describe each malformed empty block removal
+        sections.append(
+            f"Original index: {index}\n"
+            f"Timestamp: {timestamp}\n"
+            f"Change: Empty block removed\n"
+            f"Original:\n<empty subtitle block>\n"
+            f"Cleaned:\n<removed>"
+        )  # Add deterministic repair section
+
+    return "\n\n---\n\n".join(sections) + ("\n" if sections else "")  # Return diff-compatible report text
+
+
 def parse_srt_content(content: str, filepath: Path) -> list[tuple[int, str, list[str]]]:
     """
     Parse and validate SRT content.
@@ -938,13 +996,14 @@ def process_srt_file(filepath: Path, input_dir: Path, log_output: bool = True) -
 
     try:  # Keep one file failure from stopping the batch
         content, _encoding = read_srt_file(filepath)  # Read and decode source SRT
-        repaired_content, timestamp_repairs = repair_srt_timestamps(content)  # Repair overlong millisecond fields before strict SRT validation
-        entries = parse_srt_content(repaired_content, filepath)  # Parse and validate repaired source SRT
+        timestamp_repaired_content, timestamp_repairs = repair_srt_timestamps(content)  # Repair overlong millisecond fields before strict SRT validation
+        structurally_repaired_content, empty_block_repairs = remove_empty_srt_blocks(timestamp_repaired_content)  # Remove timestamped blocks that contain no subtitle text
+        entries = parse_srt_content(structurally_repaired_content, filepath)  # Parse and validate structurally repaired source SRT
         cleaned_entries, changes, removed_count, modified_count = clean_subtitle_entries(entries)  # Remove SDH content
 
-        if not changes and not timestamp_repairs:  # Avoid output files when neither subtitle text nor timestamps changed
+        if not changes and not timestamp_repairs and not empty_block_repairs:  # Avoid output files when no subtitle cleanup or structural repair occurred
             if log_output:  # Preserve direct-call unchanged log outside progress-bar mode
-                print(f"No SDH/descriptive content or timestamp repairs found: {relative_path}")  # Log unchanged source
+                print(f"No SDH/descriptive content or SRT repairs found: {relative_path}")  # Log unchanged source
             return 0, 1, 0, 0, 0  # Return unchanged count
 
         cleaned_srt_filepath = filepath if IN_PLACE_UPDATE else filepath.with_name(f"{filepath.stem}.cleaned.srt")  # Select original file or separate cleaned output
@@ -959,8 +1018,9 @@ def process_srt_file(filepath: Path, input_dir: Path, log_output: bool = True) -
         validate_cleaned_srt(cleaned_content, cleaned_srt_filepath)  # Validate cleaned SRT before writing
         text_diff_content = build_diff_report(changes) if changes else ""  # Build readable subtitle-text diff report when needed
         timestamp_diff_content = build_timestamp_repair_report(timestamp_repairs)  # Build timestamp repair report when needed
-        diff_sections = [section.rstrip() for section in (timestamp_diff_content, text_diff_content) if section.strip()]  # Keep only populated report sections
-        diff_content = "\n\n---\n\n".join(diff_sections) + ("\n" if diff_sections else "")  # Merge timestamp and text changes into one diff report
+        empty_block_diff_content = build_empty_block_repair_report(empty_block_repairs)  # Build malformed empty-block repair report when needed
+        diff_sections = [section.rstrip() for section in (timestamp_diff_content, empty_block_diff_content, text_diff_content) if section.strip()]  # Keep only populated report sections
+        diff_content = "\n\n---\n\n".join(diff_sections) + ("\n" if diff_sections else "")  # Merge structural and text changes into one diff report
 
         if not diff_content.strip():  # Prevent empty diff output
             raise ValueError(f"Empty diff report for changed file: {filepath}")  # Report invalid diff state
@@ -972,7 +1032,7 @@ def process_srt_file(filepath: Path, input_dir: Path, log_output: bool = True) -
             output_label = "Updated in place" if IN_PLACE_UPDATE else "Cleaned"  # Describe how cleaned subtitle content was published
             print(f"{output_label}: {display_relative_path(cleaned_srt_filepath, input_dir)}")  # Log cleaned output destination
             print(f"Diff: {display_relative_path(diff_filepath, input_dir)}")  # Log diff output
-        return 1, 0, 0, removed_count, modified_count  # Return cleaned counts
+        return 1, 0, 0, removed_count + len(empty_block_repairs), modified_count  # Return cleaned counts including malformed empty-block removals
     except Exception as exc:  # Report file-specific failure and continue
         failure_message = f"{BackgroundColors.RED}Failed: {BackgroundColors.CYAN}{relative_path}{BackgroundColors.RED} - {exc}{Style.RESET_ALL}"  # Build concise failure log
         if log_output:  # Use normal output outside progress-bar mode
