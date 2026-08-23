@@ -1,49 +1,81 @@
 """
 ================================================================================
-<PROJECT OR SCRIPT TITLE>
+Subtitle File SDH-Descriptive Content Remover
 ================================================================================
 Author      : Breno Farias da Silva
-Created     : <YYYY-MM-DD>
+Created     : Not documented in this file
 Description :
-    <Provide a concise and complete overview of what this script does.>
-    <Mention its purpose, scope, and relevance to the larger project.>
+    Recursively processes SubRip (.srt) subtitle files from configured input
+    directories, repairs safely recoverable SRT/Unicode issues, removes
+    conservative SDH/descriptive content, normalizes subtitle text, validates
+    the resulting SRT structure, and publishes changes atomically.
 
     Key features include:
-        - <Feature 1 — e.g., automatic data loading and preprocessing>
-        - <Feature 2 — e.g., model training and evaluation>
-        - <Feature 3 — e.g., visualization or report generation>
-        - <Feature 4 — e.g., logging or notification system>
-        - <Feature 5 — e.g., integration with other modules or datasets>
+        - Recursively discovers .srt files while excluding generated
+          .cleaned.srt files.
+        - Decodes UTF-16 BOM, UTF-8, CP1252, and Latin-1 subtitle files and
+          conservatively repairs common mojibake/Unicode normalization issues.
+        - Repairs safely normalizable SRT timestamps, subtitle blocks split by
+          invalid blank lines, and valid timestamp blocks containing no text.
+        - Removes conservative bracketed/parenthesized SDH cues and music-only
+          descriptive lines while preserving ambiguous dialogue content.
+        - Removes recognized SRT formatting tags (<i>, <b>, <u>, and <font>),
+          collapses repeated horizontal whitespace, fixes spacing before
+          punctuation, and renumbers serialized subtitle entries sequentially.
+        - Validates cleaned SRT output before publishing and uses temporary
+          sibling files plus os.replace() for atomic writes.
+        - Supports in-place source updates or separate .cleaned.srt output via
+          IN_PLACE_UPDATE and writes a .cleaned.diff beside every changed SRT.
+        - Writes one JSON report per configured input directory containing
+          exact fixed issues and unresolved per-file errors with available
+          failing-block context.
+        - Displays one tqdm progress bar per input directory, logs terminal
+          output to ./Logs/main.log, prints final processing/timing totals, and
+          optionally plays a completion sound on supported non-Windows systems.
+        - Attempts to resolve path components with trailing spaces and may
+          rename such directory entries to their stripped names when possible.
 
 Usage:
-    1. <Explain any configuration steps before running, such as editing variables or paths.>
-    2. <Describe how to execute the script — typically via Makefile or Python.>
-        $ make <target>   or   $ python <script_name>.py
-    3. <List what outputs are expected or where results are saved.>
+    1. Configure INPUT_DIRS with the directory roots to scan recursively.
+    2. Set IN_PLACE_UPDATE to True to replace changed source SRT files
+       atomically, or False to create <stem>.cleaned.srt files beside them.
+    3. Optionally configure OUTPUT_DIR, VERBOSE, and RUN_FUNCTIONS.
+    4. Run the script from the project environment:
+        $ python main.py
+    5. Review terminal/log output, per-file .cleaned.diff files for changed
+       subtitles, and the per-input-directory JSON reports in OUTPUT_DIR.
 
 Outputs:
-    - <Output file or directory 1 — e.g., results.csv>
-    - <Output file or directory 2 — e.g., Feature_Analysis/plots/>
-    - <Output file or directory 3 — e.g., logs/output.txt>
+    - Updated source .srt files when IN_PLACE_UPDATE = True.
+    - <stem>.cleaned.srt files when IN_PLACE_UPDATE = False.
+    - <stem>.cleaned.diff beside every subtitle file that was repaired/cleaned.
+    - ./Outputs/<input-prefix>-report.json for each configured input directory.
+    - ./Logs/main.log containing redirected stdout/stderr output.
 
 TODOs:
-    - <Add a task or improvement — e.g., implement CLI argument parsing.>
-    - <Add another improvement — e.g., extend support to Parquet files.>
-    - <Add optimization — e.g., parallelize evaluation loop.>
-    - <Add robustness — e.g., error handling or data validation.>
+    - No implementation TODOs are documented in this file.
 
 Dependencies:
-    - Python >= <version>
-    - <Library 1 — e.g., pandas>
-    - <Library 2 — e.g., numpy>
-    - <Library 3 — e.g., scikit-learn>
-    - <Library 4 — e.g., matplotlib, seaborn, tqdm, colorama>
+    - Python >= 3.10
+    - colorama
+    - tqdm
+    - Local Logger module (Logger.py)
+    - Python standard library: atexit, datetime, json, os, platform, re, sys,
+      unicodedata, and pathlib
 
 Assumptions & Notes:
-    - <List any key assumptions — e.g., last column is the target variable.>
-    - <Mention data format — e.g., CSV files only.>
-    - <Mention platform or OS-specific notes — e.g., sound disabled on Windows.>
-    - <Note on output structure or reusability.>
+    - Input files are SubRip (.srt) subtitles discovered recursively beneath
+      INPUT_DIRS.
+    - SDH removal is intentionally conservative; only recognized short
+      descriptive phrases/fragments are removed automatically.
+    - Changed subtitles are serialized as UTF-8 with LF line endings and
+      sequential numeric indexes.
+    - Unchanged files are not rewritten and do not receive a per-file diff.
+    - The JSON report stores paths using forward slashes and includes only files
+      that had fixed or unresolved issues.
+    - In-place publishing and report/diff writes use atomic replacement on the
+      destination filesystem.
+    - play_sound() intentionally returns immediately on Windows.
 """
 
 import atexit  # For playing a sound when the program finishes
