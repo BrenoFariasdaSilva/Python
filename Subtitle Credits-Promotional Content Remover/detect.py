@@ -17,8 +17,11 @@ Description :
 
     Key features include:
         - Recursive SRT discovery across multiple configured input directories
-        - Conservative score-based credit/promotional-content detection
-        - Exact detection of websites, social handles, credit phrases, and promo text
+            - Precision-first evidence-gated credit/promotional-content detection
+        - Strict URL/domain validation that rejects numeric thousands, dotted initials,
+          sentence typos, and other text that only resembles a domain syntactically
+        - Context-aware handling of websites, emails, social handles, and creator identities
+        - Standalone social-platform names/follow-me dialogue never qualify by themselves
         - Grouped report strings with occurrence counters
         - Exact file/block metadata for report-driven removal
         - SHA-256 file and block fingerprints for safe removal verification
@@ -37,8 +40,8 @@ Outputs:
     - ./Logs/detect.log
 
 TODOs:
-    - Extend CREDIT_PATTERNS/PROMOTIONAL_PATTERNS when new real-world signatures are found.
-    - Add optional user-managed allow/deny lists if manual overrides become necessary.
+    - Extend only high-precision creator/distributor signatures when new verified real-world patterns are found.
+    - Keep reviewed-report editing as the final manual allow/deny control before removal.
 
 Dependencies:
     - Python >= 3.10
@@ -47,9 +50,11 @@ Dependencies:
     - Local Logger.py from the repository template
 
 Assumptions & Notes:
-    - Detection is intentionally conservative to reduce removal of real dialogue.
+    - Detection is precision-first: ambiguous dialogue is deliberately excluded even when
+      that means a low-confidence creator string may require manual review elsewhere.
     - The detector never edits SRT files.
-    - The remover consumes reviewed detector reports instead of re-detecting content.
+    - The remover consumes only the exact occurrences still present in reviewed detector
+      reports instead of re-detecting, inferring, or expanding targets.
     - Paths stored in JSON use forward slashes.
 """
 
@@ -61,6 +66,7 @@ import os  # For running a command in the terminal
 import platform  # For getting the operating system name
 import re  # For matching SRT structures and unwanted-content signals
 import sys  # For system-specific parameters and functions
+from collections import defaultdict  # For directory-level evidence/repetition grouping
 from colorama import Style  # For coloring the terminal
 from Logger import Logger  # For logging output to both terminal and file
 from pathlib import Path  # For handling file paths
@@ -82,9 +88,11 @@ class BackgroundColors:  # Colors for the terminal
 VERBOSE = False  # Set to True to output verbose messages
 INPUT_DIRS = [f"E:/Movies/", f"F:/Documentaries/", f"F:/Movies/", f"F:/Series/", f"G:/Animes/", f"G:/Series/"]  # Directories searched recursively for source SRT files
 OUTPUT_DIR = Path("./Outputs")  # Directory used for one grouped JSON report per input directory
-DETECTION_SCORE_THRESHOLD = 7  # Minimum conservative score required for a block to be reported
-EDGE_BLOCK_WINDOW = 20  # Number of first/last blocks considered likely credit/promo positions
-SHORT_BLOCK_CHARACTER_LIMIT = 220  # Maximum plain-text size rewarded as typical credit/promo text
+EDGE_BLOCK_WINDOW = 20  # Number of first/last blocks eligible for conservative edge-context rules
+CROSS_CONTENT_REPETITION_MIN = 2  # Minimum distinct titles required before an ambiguous endpoint can be trusted as repeated injected content
+MAX_CREATOR_CREDIT_CHARACTERS = 260  # Maximum compact text length accepted by creator-credit continuation heuristics
+REPORT_SCHEMA_VERSION = 2  # Detector report schema version consumed by the exact report-driven remover
+DETECTION_POLICY = "high_precision_context_v2"  # Human-readable detector policy identifier stored in generated reports
 SRT_TEXT_ENCODINGS = ("utf-8-sig", "utf-8", "cp1252", "latin-1")  # Common subtitle encodings
 
 KNOWN_SUBTITLE_SITES = (
@@ -99,45 +107,130 @@ KNOWN_SUBTITLE_SITES = (
     "legendas.tv",
     "legendas-zone.org",
     "subdivx.com",
-)  # Known subtitle-distribution sites that are strong non-dialogue indicators
+)  # Known subtitle-distribution sites that are direct creator/distributor evidence
 
-CREDIT_PATTERNS = (
-    re.compile(r"\blegendas?\b\s*(?:por|by|de|:)", re.IGNORECASE),
-    re.compile(r"\blegendad[oa]s?\b\s*(?:por|by|de|:)", re.IGNORECASE),
-    re.compile(r"\bsincroniza(?:ç|c)[aã]o\b\s*(?:por|by|de|:)", re.IGNORECASE),
-    re.compile(r"\bsincronizad[oa]s?\b\s*(?:por|by|de|:)", re.IGNORECASE),
-    re.compile(r"\btradu(?:ç|c)[aã]o\b\s*(?:por|by|de|:)", re.IGNORECASE),
-    re.compile(r"\btraduzid[oa]s?\b\s*(?:por|by|de|:)", re.IGNORECASE),
-    re.compile(r"\brevis(?:ã|a)o\b\s*(?:por|by|de|:)", re.IGNORECASE),
-    re.compile(r"\brevisad[oa]s?\b\s*(?:por|by|de|:)", re.IGNORECASE),
-    re.compile(r"\b(?:subtitle|subtitles|caption|captions)\s+by\b", re.IGNORECASE),
-    re.compile(r"\b(?:sync|resync|timing|translation|translated)\s+by\b", re.IGNORECASE),
-    re.compile(r"\b(?:rip|ripped)\s+by\b", re.IGNORECASE),
-)  # Strong creator/contributor credit phrases
+PUBLIC_WEB_TLDS = frozenset(
+    (
+        "app", "au", "biz", "blog", "br", "ca", "cc", "club", "co", "com", "de",
+        "dev", "digital", "email", "es", "film", "films", "fm", "fr", "gg", "info",
+        "io", "it", "link", "live", "ly", "me", "media", "movie", "movies", "net",
+        "news", "nl", "online", "one", "org", "page", "pro", "pt", "ru", "show",
+        "site", "social", "store", "stream", "tech", "to", "torrent", "tv", "uk",
+        "us", "video", "watch", "website", "world", "wtf", "xyz",
+    )
+)  # Conservative TLD allow-list used only for bare domains without http(s):// or www.
 
-PROMOTIONAL_PATTERNS = (
-    re.compile(r"\bsigam[- ]?me\b", re.IGNORECASE),
-    re.compile(r"\bsiga[- ]?me\b", re.IGNORECASE),
-    re.compile(r"\bfollow\s+me\b", re.IGNORECASE),
-    re.compile(r"\b(?:visite|acesse|confira)\b.*\b(?:site|p[aá]gina|canal)\b", re.IGNORECASE),
-    re.compile(r"\b(?:download|baixe)\b.*\b(?:legenda|legendas|subtitle|subtitles)\b", re.IGNORECASE),
-    re.compile(r"\bsugest(?:ão|ao|ões|oes)\b.*\blegend", re.IGNORECASE),
-    re.compile(r"\b(?:assista|assistam)\b.*\b(?:frente|antes)\b", re.IGNORECASE),
-    re.compile(r"\b(?:twitter|instagram|facebook|tiktok|telegram|youtube)\b", re.IGNORECASE),
-)  # Promotional/social-network language
+GENERIC_SERVICE_DOMAINS = frozenset(
+    (
+        "facebook.com", "fb.com", "gmail.com", "hotmail.com", "instagram.com",
+        "outlook.com", "t.me", "telegram.me", "tiktok.com", "twitter.com",
+        "x.com", "youtube.com", "youtu.be",
+    )
+)  # Common services that may legitimately appear in movie/series dialogue and therefore need creator context
 
-SUBTITLE_CONTEXT_PATTERN = re.compile(
-    r"\b(?:legenda|legendas|legendad[oa]s?|subtitle|subtitles|subs|traduzid[oa]s?|tradu(?:ç|c)[aã]o|sincroniza(?:ç|c)[aã]o)\b",
+CONTENT_CATEGORY_DIR_NAMES = frozenset(
+    ("dual", "dublado", "legendado", "nacional", "english", "portugues", "português")
+)  # Movie-library grouping directories ignored when deriving a distinct title/content scope
+
+CREATOR_IDENTITY_HINT_PATTERN = re.compile(
+    r"(?:subtitles?|legendas?|legendei|legseries|opensub|addic7ed|insubs?|"
+    r"wtfsubs?|creepysubs?|powersubs?|acesubs?|piratebay|"
+    r"[a-z0-9]{3,}subs(?:$|[._/@-]))",
     re.IGNORECASE,
-)  # Weak subtitle-creation context signal
+)  # Narrow creator/distributor identity tokens; avoids generic words such as "legend" or "substitute"
 
-WEBSITE_PATTERN = re.compile(
-    r"(?:(?:https?://)|(?:www\.))?[A-Za-z0-9](?:[A-Za-z0-9-]{0,62}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,62}[A-Za-z0-9])?)+(?:/[^\s<>]*)?",
+EXPLICIT_URL_PATTERN = re.compile(
+    r"(?<![\w@])(?:https?://|www\.)"
+    r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,62}[A-Za-z0-9])?"
+    r"(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,62}[A-Za-z0-9])?)+"
+    r"(?:/[^\s<>]*)?",
     re.IGNORECASE,
-)  # Generic website/domain pattern
+)  # Explicit URL marker; unlike the old regex this can never match 27.000, D.C, R.G, etc.
+
+EMAIL_ADDRESS_PATTERN = re.compile(
+    r"(?<![\w.+-])[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+\b",
+    re.IGNORECASE,
+)  # Full email address pattern; domains inside an email are not separately counted as websites
+
+BARE_DOMAIN_PATTERN = re.compile(
+    r"(?<![@\w.-])"
+    r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,62}[A-Za-z0-9])?"
+    r"(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,62}[A-Za-z0-9])?)+"
+    r"(?:/[^\s<>]*)?",
+    re.IGNORECASE,
+)  # Bare-domain candidate; accepted only after strict TLD and contextual validation
 
 SOCIAL_HANDLE_PATTERN = re.compile(r"(?<![\w@])@[A-Za-z0-9_][A-Za-z0-9_.-]{1,31}\b")  # Social-network handle pattern
-HTML_TAG_PATTERN = re.compile(r"<[^>]+>")  # Generic formatting tag pattern used only for detection normalization
+
+CREDIT_PATTERNS = (
+    re.compile(
+        r"^[\s\-=:.©*#|_]*(?:equipe\s+de\s+)?"
+        r"(?:legendas?|legendad[oa]s?|tradu(?:ç|c)[aã]o|traduzid[oa]s?|"
+        r"revis(?:ã|a)o|revisad[oa]s?|sincroniza(?:ç|c)[aã]o|sincronizad[oa]s?|"
+        r"sincronia|adapta(?:ç|c)[aã]o)"
+        r"(?:\s+(?:inicial|final|de\s+legendas?|portugu[eê]s(?:\s+brasil)?|ingl[eê]s))?"
+        r"\s*(?:por|by|de|:)(?=\s*\S)",
+        re.IGNORECASE | re.MULTILINE,
+    ),
+    re.compile(
+        r"^[\s\-=:.©*#|_]*(?:subrip|re-?syncs?|ressync|resyncs?|sync|bluray\s+sync|dvdrip\s+sync)"
+        r"\b[^\n]{0,55}?(?:por|by|:)(?=\s*\S)",
+        re.IGNORECASE | re.MULTILINE,
+    ),
+    re.compile(
+        r"\b(?:equipe|team|[\w.-]*subs?\b|subrip)\b.{0,60}\b"
+        r"(?:legendas?|tradu(?:ç|c)[aã]o|revis(?:ã|a)o|sincronia|sync|resync)\b"
+        r".{0,35}(?:por|by|:)(?=\s*\S)",
+        re.IGNORECASE,
+    ),
+    re.compile(r"\b(?:sync|resync|timing|translation|translated)\s+(?:and\s+corrected\s+)?by(?=\s+\S)", re.IGNORECASE),
+    re.compile(r"\bsincronizad[oa]\s+e\s+corrigid[oa]\s+por(?=\s+\S)", re.IGNORECASE),
+    re.compile(r"\bripad[oa]s?\s+e\s+sincronizad[oa]s?\s+por\s*:(?=\s*\S)", re.IGNORECASE),
+    re.compile(r"\btraduzid[oa]\s+do\s+subpack\s+por(?=\s+\S)", re.IGNORECASE),
+    re.compile(r"\btraduzid[oa]\s+e\s+revisad[oa]\s+por(?=\s+\S)", re.IGNORECASE),
+    re.compile(r"\bre-?sync\b.{0,30}\brevis(?:ã|a)o\b\s*:(?=\s*\S)", re.IGNORECASE),
+    re.compile(r"\bressync\b.{0,30}\brevis(?:ã|a)o\b\s*:(?=\s*\S)", re.IGNORECASE),
+)  # Specific subtitle-production credit syntax; deliberately excludes ordinary sentence uses of "tradução"/"revisão"
+
+SUBTITLE_WORKFLOW_PATTERN = re.compile(
+    r"\b(?:adapta(?:ç|c)[aã]o|revis(?:ã|a)o|sincronia|sincroniza(?:ç|c)[aã]o|"
+    r"tradu(?:ç|c)[aã]o|legendas?)\b",
+    re.IGNORECASE,
+)  # Production-workflow words used only as corroborating evidence
+
+SUBTITLE_PROMOTIONAL_PATTERNS = (
+    re.compile(r"\blegende\s+conosco\b", re.IGNORECASE),
+    re.compile(r"\b(?:quer(?:e|em)?|venha)\s+legendar\s+(?:conosco|com\s+a\s+gente)\b", re.IGNORECASE),
+    re.compile(r"\bsugest(?:ão|ao|ões|oes)\b.{0,100}\b(?:legendar|legendad[oa]s?|legendas?)\b", re.IGNORECASE),
+    re.compile(r"\b(?:download|baixe)\b.{0,100}\b(?:legenda|legendas|subtitle|subtitles)\b", re.IGNORECASE),
+    re.compile(r"\blegendas?\s+(?:liberad[oa]s?|dispon[ií]veis?)\b", re.IGNORECASE),
+    re.compile(
+        r"(?:\bfilmes?\b.{0,100}\bs[eé]ries?\b|\bs[eé]ries?\b.{0,100}\bfilmes?\b)"
+        r".{0,100}\b(?:torrent|download)\b",
+        re.IGNORECASE,
+    ),
+)  # Subtitle/distributor-specific promotional language; generic platform mentions are intentionally absent
+
+FOLLOW_CONTACT_PATTERN = re.compile(
+    r"\b(?:sigam?-me|siga-nos|sigam-nos|follow\s+me|follow\s+us|curta-nos|"
+    r"curta\s+nossa\s+p[aá]gina|acesse\s+nossa\s+p[aá]gina|visite\s+nosso\s+site|"
+    r"fale\s+conosco)\b",
+    re.IGNORECASE,
+)  # Weak call-to-action that requires an independently trusted creator endpoint
+
+SOCIAL_PLATFORM_PATTERN = re.compile(
+    r"\b(?:twitter|instagram|facebook|tiktok|telegram|youtube)\b",
+    re.IGNORECASE,
+)  # Weak platform reference; never sufficient on its own
+
+SUBTITLE_CONTEXT_PATTERN = re.compile(
+    r"\b(?:legenda|legendas|legendad[oa]s?|subtitle|subtitles|subs|traduzid[oa]s?|"
+    r"tradu(?:ç|c)[aã]o|sincroniza(?:ç|c)[aã]o|sincronia|resync|subrip)\b",
+    re.IGNORECASE,
+)  # Weak creator-context metadata retained for report transparency but never sufficient alone
+
+HTML_TAG_PATTERN = re.compile(r"<[^>]+>")  # Generic HTML-like formatting tags ignored for detection analysis
+ASS_OVERRIDE_TAG_PATTERN = re.compile(r"\{\\[^{}\r\n]+\}")  # ASS/SSA positioning/style tags ignored for detection analysis
 
 
 # Logger Setup:
@@ -436,7 +529,7 @@ def strip_formatting_tags(value: str) -> str:
     :return: Tag-free text.
     """
 
-    return HTML_TAG_PATTERN.sub("", value)
+    return ASS_OVERRIDE_TAG_PATTERN.sub("", HTML_TAG_PATTERN.sub("", value))  # Ignore formatting/positioning tags without altering stored source text
 
 
 def normalize_display_text(value: str) -> str:
@@ -461,9 +554,122 @@ def normalize_group_key(value: str) -> str:
     return normalize_display_text(value).casefold()
 
 
+def normalize_endpoint_identity(value: str) -> str:
+    """
+    Normalize a URL/domain/email-like endpoint for exact contextual comparison.
+
+    :param value: Endpoint text from one signal.
+    :return: Lowercase endpoint without scheme/www/trailing punctuation.
+    """
+
+    normalized = value.strip().strip(".,!?;:()[]{}<>\"'")
+    normalized = re.sub(r"^https?://", "", normalized, flags=re.IGNORECASE)
+
+    if normalized.casefold().startswith("www."):
+        normalized = normalized[4:]
+
+    return normalized.casefold().rstrip(".")
+
+
+def endpoint_host(value: str) -> str:
+    """
+    Extract a normalized host from a URL, bare domain, or email address.
+
+    :param value: Endpoint text.
+    :return: Lowercase host without scheme/www/path.
+    """
+
+    normalized = normalize_endpoint_identity(value)
+
+    if "@" in normalized:
+        normalized = normalized.rsplit("@", 1)[1]
+
+    return normalized.split("/", 1)[0].rstrip(".")
+
+
+def is_valid_web_host(host: str, require_known_tld: bool) -> bool:
+    """
+    Validate a host while preventing numeric/abbreviation false domains.
+
+    :param host: Normalized host.
+    :param require_known_tld: Require final suffix to be in PUBLIC_WEB_TLDS.
+    :return: True only for a syntactically credible hostname.
+    """
+
+    labels = host.split(".")
+
+    if len(labels) < 2:
+        return False
+
+    if any(
+        not label
+        or len(label) > 63
+        or label.startswith("-")
+        or label.endswith("-")
+        or re.fullmatch(r"[A-Za-z0-9-]+", label) is None
+        for label in labels
+    ):
+        return False
+
+    final_label = labels[-1].casefold()
+
+    if not final_label.isalpha() or len(final_label) < 2 or len(final_label) > 24:
+        return False  # Reject 27.000, 1.600km-style pseudo-domains and D.C/R.G initials
+
+    if require_known_tld and final_label not in PUBLIC_WEB_TLDS:
+        return False  # Reject sentence typos such as "for.te" and "Espere.Segure"
+
+    return True
+
+
+def ranges_overlap(first: tuple[int, int], second: tuple[int, int]) -> bool:
+    """
+    Return whether two half-open string spans overlap.
+
+    :param first: First start/end span.
+    :param second: Second start/end span.
+    :return: True when spans overlap.
+    """
+
+    return first[0] < second[1] and second[0] < first[1]
+
+
+def build_content_scope_key(filepath: Path, input_dir: Path) -> str:
+    """
+    Build a stable title/series scope used to distinguish cross-title injected text.
+
+    Movie roots may contain language folders such as Dual/Legendado, which are
+    skipped so two different movies count as different scopes. Series roots use
+    their top-level series directory.
+
+    :param filepath: Current subtitle file.
+    :param input_dir: Active configured input root.
+    :return: Casefolded content-title scope key.
+    """
+
+    try:
+        relative_parts = filepath.resolve().relative_to(input_dir.resolve()).parts[:-1]
+    except ValueError:
+        relative_parts = filepath.parts[:-1]
+
+    if not relative_parts:
+        return filepath.parent.as_posix().casefold()
+
+    first_part = relative_parts[0]
+
+    if first_part.casefold() in CONTENT_CATEGORY_DIR_NAMES and len(relative_parts) >= 2:
+        return relative_parts[1].casefold()
+
+    return first_part.casefold()
+
+
 def extract_detection_signals(text: str) -> list[dict[str, object]]:
     """
-    Extract exact evidence strings indicating creator/distributor-added content.
+    Extract exact high-precision creator/distributor evidence from subtitle text.
+
+    Numeric values, initials/abbreviations, ordinary sentence dots, platform-name
+    mentions, and generic "follow me" dialogue are intentionally not strong
+    creator evidence.
 
     :param text: Plain subtitle block text without formatting tags.
     :return: Structured signal dictionaries.
@@ -475,6 +681,7 @@ def extract_detection_signals(text: str) -> list[dict[str, object]]:
     def add_signal(category: str, string: str, weight: int) -> None:
         cleaned_string = normalize_display_text(string)
         key = (category, cleaned_string.casefold())
+
         if cleaned_string and key not in seen:
             seen.add(key)
             signals.append({"category": category, "string": cleaned_string, "weight": weight})
@@ -483,87 +690,289 @@ def extract_detection_signals(text: str) -> list[dict[str, object]]:
 
     for site in KNOWN_SUBTITLE_SITES:
         if site.casefold() in lowered_text:
-            add_signal("known_subtitle_site", site, 10)
+            add_signal("known_subtitle_site", site, 100)
 
-    for match in WEBSITE_PATTERN.finditer(text):
-        add_signal("website", match.group(0), 6)
+    occupied_endpoint_spans = []
+
+    for match in EMAIL_ADDRESS_PATTERN.finditer(text):
+        email_value = match.group(0)
+        host = endpoint_host(email_value)
+
+        if is_valid_web_host(host, require_known_tld=False):
+            occupied_endpoint_spans.append(match.span())
+            add_signal("email_address", email_value, 30)
+
+    for match in EXPLICIT_URL_PATTERN.finditer(text):
+        url_value = match.group(0)
+        host = endpoint_host(url_value)
+
+        if is_valid_web_host(host, require_known_tld=False):
+            occupied_endpoint_spans.append(match.span())
+            add_signal("explicit_url", url_value, 35)
+
+    for match in BARE_DOMAIN_PATTERN.finditer(text):
+        if any(ranges_overlap(match.span(), occupied_span) for occupied_span in occupied_endpoint_spans):
+            continue  # Do not misreport the domain inside an already captured email/explicit URL
+
+        domain_value = match.group(0)
+        host = endpoint_host(domain_value)
+
+        if is_valid_web_host(host, require_known_tld=True):
+            add_signal("bare_domain", domain_value, 20)
 
     for match in SOCIAL_HANDLE_PATTERN.finditer(text):
-        add_signal("social_handle", match.group(0), 4)
+        add_signal("social_handle", match.group(0), 20)
 
     for pattern in CREDIT_PATTERNS:
         for match in pattern.finditer(text):
-            add_signal("subtitle_credit_phrase", match.group(0), 8)
+            add_signal("subtitle_credit_phrase", match.group(0), 90)
 
-    for pattern in PROMOTIONAL_PATTERNS:
+    workflow_matches = list(SUBTITLE_WORKFLOW_PATTERN.finditer(text))
+    unique_workflow_terms = {match.group(0).casefold() for match in workflow_matches}
+
+    if (
+        len(unique_workflow_terms) >= 2
+        and len(normalize_display_text(text)) <= MAX_CREATOR_CREDIT_CHARACTERS
+        and re.search(r"[:|]", text)
+    ):
+        add_signal(
+            "subtitle_workflow_credit",
+            " | ".join(match.group(0) for match in workflow_matches[:4]),
+            85,
+        )  # Multiple production labels in a compact credit-style block are strong evidence
+
+    for pattern in SUBTITLE_PROMOTIONAL_PATTERNS:
         for match in pattern.finditer(text):
-            add_signal("promotional_phrase", match.group(0), 5)
+            add_signal("subtitle_promotion_phrase", match.group(0), 90)
+
+    for match in FOLLOW_CONTACT_PATTERN.finditer(text):
+        add_signal("follow_contact_call", match.group(0), 10)
+
+    for match in SOCIAL_PLATFORM_PATTERN.finditer(text):
+        add_signal("social_platform_reference", match.group(0), 5)
 
     for match in SUBTITLE_CONTEXT_PATTERN.finditer(text):
-        add_signal("subtitle_creation_context", match.group(0), 2)
+        add_signal("subtitle_creation_context", match.group(0), 5)
 
     return signals
 
 
-def score_unwanted_block(block: dict[str, object], total_blocks: int) -> tuple[int, list[dict[str, object]]]:
+def signal_categories(signals: list[dict[str, object]]) -> set[str]:
     """
-    Score one SRT block for likely subtitle-author/distributor-added content.
+    Return unique signal category names.
 
-    :param block: Parsed SRT block.
-    :param total_blocks: Number of blocks in current file.
-    :return: Detection score and evidence signals.
+    :param signals: Candidate signal dictionaries.
+    :return: Category-name set.
     """
 
-    plain_text = strip_formatting_tags(str(block["text"]))
-    signals = extract_detection_signals(plain_text)
-    score = sum(int(signal["weight"]) for signal in signals)
-    block_number = int(block["block_number"])
-    original_index = int(block["original_index"])
-    compact_text = normalize_display_text(plain_text)
-
-    if compact_text and len(compact_text) <= SHORT_BLOCK_CHARACTER_LIMIT:
-        score += 1
-
-    if block_number <= EDGE_BLOCK_WINDOW or block_number > max(0, total_blocks - EDGE_BLOCK_WINDOW):
-        score += 1
-
-    if original_index > max(total_blocks + 100, 2000):
-        score += 2
-
-    return score, signals
+    return {str(signal["category"]) for signal in signals}
 
 
-def classify_confidence(score: int) -> str:
+def candidate_has_intrinsic_strong_evidence(candidate: dict[str, object]) -> bool:
     """
-    Convert numeric score into report confidence.
+    Identify candidates that are independently creator/distributor-specific.
 
-    :param score: Detection score.
+    :param candidate: Internal detection candidate.
+    :return: True when no recurrence/identity inference is needed.
+    """
+
+    categories = signal_categories(candidate["matched_strings"])
+    return bool(
+        categories
+        & {
+            "known_subtitle_site",
+            "subtitle_credit_phrase",
+            "subtitle_workflow_credit",
+            "subtitle_promotion_phrase",
+        }
+    )
+
+
+def creator_identity_hint(value: str) -> bool:
+    """
+    Identify an endpoint/handle whose own text strongly suggests subtitle distribution.
+
+    :param value: URL/domain/email/handle identity.
+    :return: True when it contains a creator/distributor-specific token.
+    """
+
+    return CREATOR_IDENTITY_HINT_PATTERN.search(value) is not None
+
+
+def signal_identity_keys(signals: list[dict[str, object]]) -> set[tuple[str, str]]:
+    """
+    Extract exact reusable endpoint/contact identities from signals.
+
+    :param signals: Candidate signal dictionaries.
+    :return: Identity tuples used by directory-level contextual validation.
+    """
+
+    identities = set()
+
+    for signal in signals:
+        category = str(signal["category"])
+        value = str(signal["string"])
+
+        if category == "email_address":
+            normalized_email = normalize_endpoint_identity(value)
+            identities.add(("email", normalized_email))
+
+            host = endpoint_host(value)
+            if host and host not in GENERIC_SERVICE_DOMAINS:
+                identities.add(("domain", host))
+
+            local_part = normalized_email.split("@", 1)[0]
+            if len(local_part) >= 4:
+                identities.add(("contact_token", local_part))
+
+        elif category in {"explicit_url", "bare_domain"}:
+            normalized_endpoint = normalize_endpoint_identity(value)
+            host = endpoint_host(value)
+
+            identities.add(("endpoint", normalized_endpoint))
+
+            if host:
+                identities.add(("domain", host))
+
+            if "/" in normalized_endpoint:
+                for token in re.split(r"[^A-Za-z0-9_.-]+", normalized_endpoint.split("/", 1)[1]):
+                    normalized_token = token.casefold().strip("._-")
+                    if len(normalized_token) >= 4:
+                        identities.add(("contact_token", normalized_token))
+
+        elif category == "social_handle":
+            normalized_handle = value.casefold()
+            identities.add(("handle", normalized_handle))
+            identities.add(("contact_token", normalized_handle.lstrip("@")))
+
+    return identities
+
+
+def candidate_endpoint_categories(candidate: dict[str, object]) -> set[str]:
+    """
+    Return endpoint/contact categories present in a candidate.
+
+    :param candidate: Internal detection candidate.
+    :return: Endpoint category set.
+    """
+
+    return signal_categories(candidate["matched_strings"]) & {
+        "explicit_url",
+        "bare_domain",
+        "email_address",
+        "social_handle",
+    }
+
+
+def candidate_has_creator_identity_hint(candidate: dict[str, object]) -> bool:
+    """
+    Determine whether any endpoint/contact identity is inherently creator-specific.
+
+    :param candidate: Internal detection candidate.
+    :return: True when creator-specific identity text is present.
+    """
+
+    for identity_type, identity_value in signal_identity_keys(candidate["matched_strings"]):
+        if identity_type in {"email", "endpoint", "domain", "handle", "contact_token"} and creator_identity_hint(identity_value):
+            return True
+
+    return False
+
+
+def looks_like_credit_continuation(text: str) -> bool:
+    """
+    Conservatively identify a likely names/handles continuation line.
+
+    This helper is only used next to an already strong creator-credit block and
+    only when both blocks are at the beginning/end edge of the subtitle.
+
+    :param text: Neighbor block plain text.
+    :return: True when the block looks like a contributor list rather than dialogue.
+    """
+
+    compact = normalize_display_text(strip_formatting_tags(text))
+
+    if not compact or len(compact) > 100 or "?" in compact or "!" in compact:
+        return False
+
+    if len(SOCIAL_HANDLE_PATTERN.findall(compact)) >= 2:
+        return True
+
+    if "|" in compact and len(compact.split()) <= 12:
+        return True
+
+    if compact.count(",") >= 1 and len(compact.split()) <= 12:
+        return True
+
+    return (
+        re.fullmatch(
+            r"[A-Za-zÀ-ÖØ-öø-ÿ0-9_.-]{2,30}\s+e\s+"
+            r"[A-Za-zÀ-ÖØ-öø-ÿ0-9_.-]{2,30}\.?",
+            compact,
+            re.IGNORECASE,
+        )
+        is not None
+    )
+
+
+def calculate_candidate_score(candidate: dict[str, object], decision_reasons: list[str]) -> int:
+    """
+    Calculate an audit score after the candidate has passed precision gates.
+
+    :param candidate: Accepted candidate.
+    :param decision_reasons: High-precision reasons that authorized reporting.
+    :return: Integer evidence score capped at 100.
+    """
+
+    base_score = sum(int(signal["weight"]) for signal in candidate["matched_strings"])
+
+    if bool(candidate.get("_edge_block")):
+        base_score += 5
+    if "trusted_creator_identity" in decision_reasons:
+        base_score += 20
+    if "cross_content_repetition" in decision_reasons:
+        base_score += 15
+    if "adjacent_credit_continuation" in decision_reasons:
+        base_score += 20
+
+    return min(100, base_score)
+
+
+def classify_confidence(decision_reasons: list[str]) -> str:
+    """
+    Convert accepted decision reasons into report confidence.
+
+    :param decision_reasons: High-precision acceptance reasons.
     :return: high or medium.
     """
 
-    return "high" if score >= 10 else "medium"
+    high_reasons = {
+        "direct_creator_evidence",
+        "creator_identity_hint",
+        "trusted_creator_identity",
+        "adjacent_credit_continuation",
+    }
+
+    return "high" if high_reasons.intersection(decision_reasons) else "medium"
 
 
-def build_detection_occurrence(
+def build_detection_candidate(
     filepath: Path,
+    input_dir: Path,
     current_file_sha256: str,
     block: dict[str, object],
     total_blocks: int,
 ) -> dict[str, object] | None:
     """
-    Build one exact report occurrence when a block passes detection threshold.
+    Build an internal candidate containing raw evidence but make no removal decision yet.
 
     :param filepath: Source SRT path.
+    :param input_dir: Active configured root.
     :param current_file_sha256: SHA-256 of source file.
     :param block: Parsed block.
     :param total_blocks: Number of parsed blocks.
-    :return: Occurrence dictionary or None.
+    :return: Internal candidate or None when no relevant evidence exists.
     """
-
-    score, signals = score_unwanted_block(block, total_blocks)
-
-    if score < DETECTION_SCORE_THRESHOLD or not signals:
-        return None
 
     text = str(block["text"])
     plain_text = strip_formatting_tags(text)
@@ -572,40 +981,280 @@ def build_detection_occurrence(
     if not display_string:
         return None
 
+    signals = extract_detection_signals(plain_text)
+
+    if not signals:
+        return None
+
+    block_number = int(block["block_number"])
+    edge_block = (
+        block_number <= EDGE_BLOCK_WINDOW
+        or block_number > max(0, total_blocks - EDGE_BLOCK_WINDOW)
+    )
+
     return {
         "file_path": filepath.resolve().as_posix(),
         "file_sha256": current_file_sha256,
         "block_sha256": block_sha256(int(block["original_index"]), str(block["timestamp"]), text),
-        "block_number": int(block["block_number"]),
+        "block_number": block_number,
         "original_index": int(block["original_index"]),
         "timestamp": str(block["timestamp"]),
         "text": text,
         "plain_text": display_string,
         "matched_strings": signals,
-        "score": score,
-        "confidence": classify_confidence(score),
+        "_edge_block": edge_block,
+        "_content_scope": build_content_scope_key(filepath, input_dir),
     }
 
 
-def detect_file_findings(filepath: Path) -> list[dict[str, object]]:
+def detect_file_candidates(filepath: Path, input_dir: Path) -> list[dict[str, object]]:
     """
-    Detect unwanted creator/distributor-added blocks in one SRT file.
+    Extract high-precision evidence candidates from one SRT without finalizing weak endpoints.
 
     :param filepath: Source SRT path.
-    :return: Detected occurrence dictionaries.
+    :param input_dir: Active configured root.
+    :return: Candidate occurrence dictionaries.
     """
 
     content = read_srt_file(filepath)
     blocks = parse_srt_blocks(content)
     current_file_sha256 = file_sha256(filepath)
-    occurrences = []
+    total_blocks = len(blocks)
+    candidates = []
+    candidate_by_block_number = {}
 
     for block in blocks:
-        occurrence = build_detection_occurrence(filepath, current_file_sha256, block, len(blocks))
-        if occurrence is not None:
-            occurrences.append(occurrence)
+        candidate = build_detection_candidate(
+            filepath,
+            input_dir,
+            current_file_sha256,
+            block,
+            total_blocks,
+        )
 
-    return occurrences
+        if candidate is not None:
+            candidates.append(candidate)
+            candidate_by_block_number[int(block["block_number"])] = candidate
+
+    # Conservatively recover a names-only continuation immediately beside an
+    # intrinsically strong edge credit. This covers split creator lists without
+    # allowing ordinary mid-dialogue neighbors to become report targets.
+    strong_edge_blocks = {
+        int(candidate["block_number"])
+        for candidate in candidates
+        if candidate_has_intrinsic_strong_evidence(candidate) and bool(candidate["_edge_block"])
+    }
+
+    if strong_edge_blocks:
+        for block in blocks:
+            block_number = int(block["block_number"])
+
+            if block_number in candidate_by_block_number:
+                continue
+
+            edge_block = (
+                block_number <= EDGE_BLOCK_WINDOW
+                or block_number > max(0, total_blocks - EDGE_BLOCK_WINDOW)
+            )
+
+            if not edge_block:
+                continue
+
+            if not ({block_number - 1, block_number + 1} & strong_edge_blocks):
+                continue
+
+            if not looks_like_credit_continuation(str(block["text"])):
+                continue
+
+            text = str(block["text"])
+            plain_text = strip_formatting_tags(text)
+            display_string = normalize_display_text(plain_text)
+
+            if not display_string:
+                continue
+
+            continuation_candidate = {
+                "file_path": filepath.resolve().as_posix(),
+                "file_sha256": current_file_sha256,
+                "block_sha256": block_sha256(int(block["original_index"]), str(block["timestamp"]), text),
+                "block_number": block_number,
+                "original_index": int(block["original_index"]),
+                "timestamp": str(block["timestamp"]),
+                "text": text,
+                "plain_text": display_string,
+                "matched_strings": [
+                    {
+                        "category": "credit_continuation",
+                        "string": display_string,
+                        "weight": 75,
+                    }
+                ],
+                "_edge_block": True,
+                "_content_scope": build_content_scope_key(filepath, input_dir),
+                "_adjacent_credit_continuation": True,
+            }
+            candidates.append(continuation_candidate)
+
+    return candidates
+
+
+def build_directory_detection_context(
+    candidates: list[dict[str, object]],
+) -> dict[str, object]:
+    """
+    Build directory-level identity/repetition context before weak endpoints are accepted.
+
+    :param candidates: Preliminary candidates from every SRT in one configured root.
+    :return: Context dictionaries/sets used by final classification.
+    """
+
+    display_scopes: dict[str, set[str]] = defaultdict(set)
+    identity_scopes: dict[tuple[str, str], set[str]] = defaultdict(set)
+    trusted_identities = set()
+
+    for candidate in candidates:
+        content_scope = str(candidate["_content_scope"])
+        display_key = normalize_group_key(str(candidate["plain_text"]))
+        display_scopes[display_key].add(content_scope)
+        identities = signal_identity_keys(candidate["matched_strings"])
+
+        for identity in identities:
+            identity_scopes[identity].add(content_scope)
+
+        if candidate_has_intrinsic_strong_evidence(candidate):
+            for identity_type, identity_value in identities:
+                if identity_type == "domain" and identity_value in GENERIC_SERVICE_DOMAINS:
+                    continue  # Never globally trust gmail/facebook/twitter merely because one strong block used them
+                trusted_identities.add((identity_type, identity_value))
+
+    return {
+        "display_scopes": display_scopes,
+        "identity_scopes": identity_scopes,
+        "trusted_identities": trusted_identities,
+    }
+
+
+def classify_detection_candidate(
+    candidate: dict[str, object],
+    context: dict[str, object],
+) -> tuple[bool, list[str]]:
+    """
+    Apply precision gates to one candidate.
+
+    :param candidate: Preliminary candidate.
+    :param context: Directory-level trust/repetition context.
+    :return: Acceptance boolean and exact decision reasons.
+    """
+
+    reasons = []
+
+    if bool(candidate.get("_adjacent_credit_continuation")):
+        return True, ["adjacent_credit_continuation"]
+
+    if candidate_has_intrinsic_strong_evidence(candidate):
+        reasons.append("direct_creator_evidence")
+        return True, reasons
+
+    endpoint_categories = candidate_endpoint_categories(candidate)
+
+    if not endpoint_categories:
+        return False, []  # Weak platform/context/follow-call evidence can never qualify alone
+
+    identities = signal_identity_keys(candidate["matched_strings"])
+
+    if candidate_has_creator_identity_hint(candidate):
+        return True, ["creator_identity_hint"]
+
+    trusted_identities = context["trusted_identities"]
+
+    if any(identity in trusted_identities for identity in identities):
+        return True, ["trusted_creator_identity"]
+
+    # Also allow a URL path/contact token to inherit trust from a creator handle/email
+    # observed in a direct creator block elsewhere in the same input root.
+    candidate_contact_tokens = {
+        identity
+        for identity in identities
+        if identity[0] == "contact_token"
+    }
+
+    if candidate_contact_tokens.intersection(trusted_identities):
+        return True, ["trusted_creator_identity"]
+
+    categories = signal_categories(candidate["matched_strings"])
+    handle_count = sum(
+        1 for signal in candidate["matched_strings"] if signal["category"] == "social_handle"
+    )
+
+    if bool(candidate["_edge_block"]) and handle_count >= 2:
+        return True, ["edge_multiple_creator_handles"]
+
+    display_key = normalize_group_key(str(candidate["plain_text"]))
+    display_scopes = context["display_scopes"]
+
+    if len(display_scopes.get(display_key, set())) >= CROSS_CONTENT_REPETITION_MIN:
+        non_generic_endpoint = False
+
+        for identity_type, identity_value in identities:
+            if identity_type == "domain" and identity_value in GENERIC_SERVICE_DOMAINS:
+                continue
+            if identity_type in {"endpoint", "email", "handle", "domain"}:
+                non_generic_endpoint = True
+                break
+
+        if non_generic_endpoint:
+            return True, ["cross_content_repetition"]
+
+    identity_scopes = context["identity_scopes"]
+
+    if bool(candidate["_edge_block"]):
+        for identity_type, identity_value in identities:
+            if identity_type == "domain" and identity_value in GENERIC_SERVICE_DOMAINS:
+                continue
+            if identity_type not in {"endpoint", "email", "handle", "domain"}:
+                continue
+            if len(identity_scopes.get((identity_type, identity_value), set())) >= CROSS_CONTENT_REPETITION_MIN:
+                return True, ["cross_content_repetition"]
+
+    # A generic follow/contact call is intentionally rejected here unless the
+    # endpoint itself was creator-specific/trusted above. "Siga-me" dialogue,
+    # "follow me on Instagram", etc. remain untouched.
+    if "follow_contact_call" in categories:
+        return False, []
+
+    return False, []
+
+
+def finalize_detection_candidates(
+    candidates: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    """
+    Convert preliminary candidates into reportable high-precision occurrences.
+
+    :param candidates: Candidates collected across one configured input directory.
+    :return: Accepted occurrence dictionaries with internal context removed.
+    """
+
+    context = build_directory_detection_context(candidates)
+    accepted_occurrences = []
+
+    for candidate in candidates:
+        accepted, decision_reasons = classify_detection_candidate(candidate, context)
+
+        if not accepted:
+            continue
+
+        occurrence = {
+            key: value
+            for key, value in candidate.items()
+            if not key.startswith("_")
+        }
+        occurrence["score"] = calculate_candidate_score(candidate, decision_reasons)
+        occurrence["confidence"] = classify_confidence(decision_reasons)
+        occurrence["decision_reasons"] = decision_reasons
+        accepted_occurrences.append(occurrence)
+
+    return accepted_occurrences
 
 
 def group_findings(occurrences: list[dict[str, object]]) -> list[dict[str, object]]:
@@ -699,6 +1348,8 @@ def write_detection_report(
     findings = group_findings(occurrences)
     affected_files = {occurrence["file_path"] for occurrence in occurrences}
     report_payload = {
+        "schema_version": REPORT_SCHEMA_VERSION,
+        "detection_policy": DETECTION_POLICY,
         "input_dir": input_dir.as_posix().rstrip("/") + "/",
         "generated_at": datetime.datetime.now().astimezone().isoformat(timespec="seconds"),
         "summary": {
@@ -765,8 +1416,7 @@ def main():
             continue
 
         srt_files = discover_srt_files(input_dir)
-        directory_occurrences = []
-        affected_files = set()
+        directory_candidates = []
         directory_display = display_input_directory(input_dir)
 
         with tqdm(
@@ -788,17 +1438,16 @@ def main():
                 )
 
                 try:
-                    file_occurrences = detect_file_findings(srt_file)
-                    directory_occurrences.extend(file_occurrences)
-
-                    if file_occurrences:
-                        affected_files.add(srt_file.resolve().as_posix())
+                    file_candidates = detect_file_candidates(srt_file, input_dir)
+                    directory_candidates.extend(file_candidates)
                 except Exception as exc:
                     tqdm.write(
-                        f"{BackgroundColors.RED}Failed: {BackgroundColors.CYAN}{relative_path}{BackgroundColors.RED} - {exc}{Style.RESET_ALL}",
+                        f"{BackgroundColors.RED}Failed: {BackgroundColors.CYAN}{srt_file.resolve().as_posix()}{BackgroundColors.RED} - {str(exc).replace(chr(92), '/')}{Style.RESET_ALL}",
                         file=PROGRESS_OUTPUT,
                     )
 
+        directory_occurrences = finalize_detection_candidates(directory_candidates)  # Apply directory-wide trust/repetition gates only after scanning every file
+        affected_files = {occurrence["file_path"] for occurrence in directory_occurrences}  # Count only accepted report findings
         report_path = write_detection_report(
             str(configured_input_dir),
             input_dir,
