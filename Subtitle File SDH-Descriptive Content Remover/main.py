@@ -106,7 +106,7 @@ class BackgroundColors:  # Colors for the terminal
 
 # Execution Constants:
 VERBOSE = False  # Set to True to output verbose messages
-IN_PLACE_UPDATE = True  # Set to True to atomically update original SRT files instead of creating .cleaned.srt files
+IN_PLACE_UPDATE = False  # Set to True to atomically update original SRT files instead of creating .cleaned.srt files
 OUTPUT_DIR = Path("./Outputs")  # Directory used for per-input-directory JSON reports
 INPUT_DIRS = [f"E:/Movies/", f"F:/Documentaries/", f"F:/Movies/", f"F:/Series/", f"G:/Animes/", f"G:/Series/"]  # Directories searched recursively for source SRT files
 SRT_TEXT_ENCODINGS = ("utf-8-sig", "utf-8", "cp1252", "latin-1")  # Common UTF-8 and Western/Portuguese subtitle encodings
