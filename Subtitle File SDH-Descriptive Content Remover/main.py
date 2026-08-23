@@ -51,6 +51,7 @@ import datetime  # For getting the current date and time
 import os  # For running a command in the terminal
 import platform  # For getting the operating system name
 import re  # For matching SRT timestamps and SDH fragments
+import unicodedata  # For normalizing Unicode subtitle text
 from colorama import Style  # For coloring the terminal
 from pathlib import Path  # For handling file paths
 
@@ -69,6 +70,8 @@ class BackgroundColors:  # Colors for the terminal
 # Execution Constants:
 VERBOSE = False  # Set to True to output verbose messages
 INPUT_DIRS = [f"E:/Movies/", f"F:/Movies/", f"F:/Series/", f"G:/Series/"]  # Directories searched recursively for source SRT files
+SRT_TEXT_ENCODINGS = ("utf-8-sig", "utf-8", "cp1252", "latin-1")  # Common UTF-8 and Western/Portuguese subtitle encodings
+MOJIBAKE_MARKERS = ("Ã", "Â", "â€", "ðŸ", "ï»¿", "�")  # Strong indicators of UTF-8 text decoded through a Western single-byte encoding
 SRT_TIMESTAMP_PATTERN = re.compile(r"^\d{2}:\d{2}:\d{2},\d{3}\s+-->\s+\d{2}:\d{2}:\d{2},\d{3}(?:\s+.*)?$")  # SRT timestamp validation pattern
 SUBTITLE_FORMATTING_TAG_PATTERN = re.compile(r"</?(?:i|b|u|font)(?:\s+[^<>]*)?>", re.IGNORECASE)  # Recognized SRT formatting tag pattern
 EMPTY_SUBTITLE_FORMATTING_TAG_PATTERN = re.compile(r"<(i|b|u|font)(?:\s+[^<>]*)?>\s*</\1>", re.IGNORECASE)  # Recognized empty SRT formatting tag pattern
@@ -371,21 +374,84 @@ def play_sound():
         )
 
 
+def mojibake_score(value: str) -> int:
+    """
+    Score text for strong mojibake indicators.
+
+    :param value: Decoded subtitle text.
+    :return: Number of suspicious mojibake markers.
+    """
+
+    score = sum(value.count(marker) for marker in MOJIBAKE_MARKERS)  # Count strong UTF-8/Western decoding artifacts
+    score += sum(1 for character in value if 0x80 <= ord(character) <= 0x9F)  # Penalize embedded C1 control characters
+    return score  # Return lower-is-better mojibake score
+
+
+def repair_common_mojibake(value: str) -> str:
+    """
+    Conservatively repair common UTF-8-as-CP1252/Latin-1 mojibake.
+
+    Valid Portuguese characters are preserved unless a reversible repair
+    produces text with fewer strong mojibake indicators.
+
+    :param value: Decoded subtitle text.
+    :return: Unicode-normalized subtitle text with safe mojibake repairs.
+    """
+
+    repaired_value = unicodedata.normalize("NFC", value)  # Normalize decomposed accents such as a + combining acute
+
+    for _ in range(2):  # Repair at most two layers of accidental re-encoding
+        current_score = mojibake_score(repaired_value)  # Measure current text corruption indicators
+
+        if current_score == 0:  # Avoid touching already clean text
+            break  # Preserve valid Portuguese and foreign characters exactly
+
+        best_value = repaired_value  # Default to current text
+        best_score = current_score  # Keep current score as the threshold to beat
+
+        for source_encoding in ("cp1252", "latin-1"):  # Try common incorrect Western decoding layers
+            try:
+                candidate = repaired_value.encode(source_encoding).decode("utf-8")  # Reverse UTF-8 bytes misread as Western text
+            except (UnicodeEncodeError, UnicodeDecodeError):
+                continue  # This repair path is not reversible for the current text
+
+            candidate = unicodedata.normalize("NFC", candidate)  # Normalize repaired Unicode accents
+            candidate_score = mojibake_score(candidate)  # Score repaired candidate
+
+            if candidate_score < best_score:  # Accept only a strict reduction in corruption markers
+                best_value = candidate  # Store safer repaired text
+                best_score = candidate_score  # Store improved score
+
+        if best_value == repaired_value:  # Stop when no safe repair improved the text
+            break
+
+        repaired_value = best_value  # Continue in case the subtitle was double-encoded
+
+    repaired_value = repaired_value.replace("\ufeff", "")  # Remove stray BOM characters embedded inside subtitle text
+    repaired_value = repaired_value.replace("\u200b", "")  # Remove zero-width spaces that can appear from subtitle conversions
+    return unicodedata.normalize("NFC", repaired_value)  # Return canonically normalized Unicode text
+
+
 def read_srt_file(filepath: Path) -> tuple[str, str]:
     """
-    Read an SRT file with safe encoding fallbacks.
+    Read an SRT file with PT-BR-friendly encoding fallbacks and mojibake repair.
 
     :param filepath: Source SRT path.
-    :return: Decoded text and encoding name.
+    :return: Decoded/repaired text and detected encoding name.
     """
 
     data = filepath.read_bytes()  # Read raw bytes without altering source file
 
-    for encoding in ("utf-8-sig", "utf-8", "cp1252"):  # Try common subtitle encodings
-        try:  # Attempt decode with current encoding
-            return data.decode(encoding), encoding  # Return decoded subtitle text
-        except UnicodeDecodeError:  # Continue after decode failure
-            continue  # Try next encoding
+    if data.startswith((b"\xff\xfe", b"\xfe\xff")):  # Detect UTF-16 BOM before trying single-byte encodings
+        decoded_text = data.decode("utf-16")  # Decode UTF-16 using BOM byte order
+        return repair_common_mojibake(decoded_text), "utf-16"  # Normalize and repair decoded subtitle text
+
+    for encoding in SRT_TEXT_ENCODINGS:  # Try common UTF-8 and Western/Portuguese subtitle encodings
+        try:
+            decoded_text = data.decode(encoding)  # Decode source bytes using current candidate
+            return repair_common_mojibake(decoded_text), encoding  # Repair common mojibake after successful decoding
+        except UnicodeDecodeError:
+            continue  # Try next encoding after strict decode failure
 
     raise UnicodeDecodeError("utf-8", data, 0, 1, "Unable to decode subtitle file")  # Report unsupported encoding
 
