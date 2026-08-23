@@ -75,6 +75,7 @@ class BackgroundColors:  # Colors for the terminal
 
 # Execution Constants:
 VERBOSE = False  # Set to True to output verbose messages
+VERIFY_YEAR = False  # Set to True to verify/add season years through TMDb; False preserves existing years and requires no TMDB_API_KEY
 INPUT_DIRS = [Path("./Input"), Path("./Inputs"), Path(f"F:/Series/"), Path(f"G:/Animes/"), Path(f"G:/Series/")]  # The input directory or list of input directories
 LANGUAGE_OPTIONS = ["Dual", "Dublado", "English", "Legendado", "Nacional"]  # User-defined suffixes for renaming
 TMDB_BASE_URL = "https://api.themoviedb.org/3"  # Base URL for TMDb API
@@ -1113,8 +1114,11 @@ def discover_processable_series_dirs(root_path: Path) -> list[Path]:
 
 def rename_dirs():
     """
-    Iterates through the INPUT_DIRS, extracts metadata, fetches the release year from TMDb,
-    and renames each directory according to the defined pattern.
+    Iterates through the INPUT_DIRS, extracts metadata, optionally verifies/fetches
+    season years through TMDb, and renames each directory according to the defined pattern.
+
+    When VERIFY_YEAR=False, no TMDb API key or request is used; existing years are
+    preserved and missing years remain absent while all other normalization continues.
 
     If a directory does not match the regex pattern (i.e., missing season/resolution info),
     the script assumes it contains season subdirectories and processes those instead.
@@ -1122,7 +1126,7 @@ def rename_dirs():
     :return: None
     """
 
-    api_key = load_api_key()  # Load TMDb API key from environment before processing directories
+    api_key = load_api_key() if VERIFY_YEAR else None  # Require/load TMDb credentials only when year verification is enabled
     
     report_data = {  # Initialize the report data structure before processing
         "generated_at": None,  # Placeholder for ISO timestamp to be set by generate_report
@@ -1213,7 +1217,7 @@ def rename_dirs():
                     except Exception:  # Conversion failed, treat as invalid format
                         existing_season_int = None  # Mark as invalid
 
-                    if existing_year_int is not None and existing_season_int is not None:  # Only proceed when both parse as integers
+                    if VERIFY_YEAR and existing_year_int is not None and existing_season_int is not None:  # Verify/correct an existing year only when TMDb year verification is enabled
                         series_lookup_name = series_name or entry.parent.name  # Prefer parsed series_name, fallback to parent directory name
                         try:  # Attempt to verify year with TMDb API
                             series_id_chk = get_series_id(api_key, series_lookup_name)  # Lookup series id for verification
@@ -1303,14 +1307,17 @@ def rename_dirs():
                                 })  # End append directory record
                             continue  # Continue to next entry after correction
 
-                try:  # Attempt TMDb lookups which may raise exceptions
-                    series_id = get_series_id(api_key, series_name)  # Fetch TMDb series id by name
-                    year = get_season_year(api_key, series_id, season_num)  # Fetch season year using series id
-                except Exception as e:  # Catch any exception from TMDb calls
-                    verbose_output(true_string=f"{BackgroundColors.RED}Error fetching year for {series_name} S{season_str}: {e}{Style.RESET_ALL}")  # Keep lookup diagnostics hidden unless VERBOSE=True
-                    year = None  # Mark year as unavailable after error
+                year = None  # Default to no externally verified year
 
-                valid_year = None  # Assume invalid until proven otherwise
+                if VERIFY_YEAR:  # Query TMDb only when year verification/addition is explicitly enabled
+                    try:  # Attempt TMDb lookups which may raise exceptions
+                        series_id = get_series_id(api_key, series_name)  # Fetch TMDb series id by name
+                        year = get_season_year(api_key, series_id, season_num)  # Fetch season year using series id
+                    except Exception as e:  # Catch any exception from TMDb calls
+                        verbose_output(true_string=f"{BackgroundColors.RED}Error fetching year for {series_name} S{season_str}: {e}{Style.RESET_ALL}")  # Keep lookup diagnostics hidden unless VERBOSE=True
+                        year = None  # Preserve existing/local year behavior when TMDb lookup fails
+
+                valid_year = None  # Assume unavailable until verified or recovered from the existing directory
                 if year is not None:  # Only attempt conversion when year is not None
                     try:  # Attempt to coerce year to int
                         valid_year = int(year)  # Convert year to integer
@@ -1318,8 +1325,8 @@ def rename_dirs():
                         valid_year = None  # Ensure invalid status
 
                 # existing_year_int is initialized explicitly for this entry above; never recover it from locals().
-                if valid_year is None and existing_year_int is not None:  # If TMDb didn't provide a year but folder had one
-                    valid_year = existing_year_int  # Use the existing year instead of aborting
+                if valid_year is None and existing_year_int is not None:  # Preserve the directory's existing year when verification is disabled/unavailable
+                    valid_year = existing_year_int  # Never remove an existing year merely because TMDb was skipped or unavailable
 
                 res_token = determine_resolution(entry, entry.name)  # Determine resolution for this season folder
                 fps_token = detect_60fps_token(entry.name)  # Detect 60 FPS metadata anywhere in the original directory name
@@ -1476,7 +1483,7 @@ def rename_dirs():
 
                 series_id = None
 
-                if required_seasons:
+                if VERIFY_YEAR and required_seasons:  # Resolve a TMDb series only when year verification is enabled
                     try:
                         series_id = get_series_id(
                             api_key,
@@ -1498,7 +1505,7 @@ def rename_dirs():
 
                     year = None
 
-                    if series_id is not None:
+                    if VERIFY_YEAR and series_id is not None:  # Query a season year only when verification is enabled
                         try:
                             year = get_season_year(api_key, series_id, season_num_sub)
                         except Exception as e:
@@ -1506,7 +1513,7 @@ def rename_dirs():
                                 true_string=f"{BackgroundColors.RED}Error fetching year for {series_prefix} S{season_str_sub}: {e}{Style.RESET_ALL}"
                             )
 
-                    valid_year = existing_year_int
+                    valid_year = existing_year_int  # Preserve the existing folder year when TMDb verification is disabled/unavailable
 
                     if year is not None:
                         try:
