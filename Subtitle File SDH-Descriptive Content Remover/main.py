@@ -30,7 +30,8 @@ Description :
         - Validates cleaned SRT output before publishing and uses temporary
           sibling files plus os.replace() for atomic writes.
         - Supports in-place source updates or separate .cleaned.srt output via
-          IN_PLACE_UPDATE and writes a .cleaned.diff beside every changed SRT.
+          IN_PLACE_UPDATE and optional per-changed-file .cleaned.diff generation
+          via GENERATE_DIFF.
         - Writes one JSON report per configured input directory containing
           exact fixed issues and unresolved per-file errors with available
           failing-block context.
@@ -48,16 +49,18 @@ Usage:
     1. Configure INPUT_DIRS with the directory roots to scan recursively.
     2. Set IN_PLACE_UPDATE to True to replace changed source SRT files
        atomically, or False to create <stem>.cleaned.srt files beside them.
-    3. Optionally configure OUTPUT_DIR, VERBOSE, and RUN_FUNCTIONS.
-    4. Run the script from the project environment:
+    3. Set GENERATE_DIFF to True to create <stem>.cleaned.diff files for changed
+       subtitles, or False to skip diff generation entirely.
+    4. Optionally configure OUTPUT_DIR, VERBOSE, and RUN_FUNCTIONS.
+    5. Run the script from the project environment:
         $ python main.py
-    5. Review terminal/log output, per-file .cleaned.diff files for changed
-       subtitles, and the per-input-directory JSON reports in OUTPUT_DIR.
+    6. Review terminal/log output, optional per-file .cleaned.diff files for
+       changed subtitles, and the per-input-directory JSON reports in OUTPUT_DIR.
 
 Outputs:
     - Updated source .srt files when IN_PLACE_UPDATE = True.
     - <stem>.cleaned.srt files when IN_PLACE_UPDATE = False.
-    - <stem>.cleaned.diff beside every subtitle file that was repaired/cleaned.
+    - <stem>.cleaned.diff beside every repaired/cleaned subtitle only when GENERATE_DIFF = True.
     - ./Outputs/<input-prefix>-report.json for each configured input directory.
     - ./Logs/main.log containing redirected stdout/stderr output.
 
@@ -79,11 +82,13 @@ Assumptions & Notes:
       descriptive phrases/fragments are removed automatically.
     - Changed or misnumbered subtitles are serialized as UTF-8 with LF line
       endings and strictly sequential numeric indexes from 1 through N.
-    - Unchanged files are not rewritten and do not receive a per-file diff.
+    - Unchanged files are not rewritten and never receive a per-file diff.
+    - GENERATE_DIFF=False skips new diff generation without deleting any existing
+      .cleaned.diff files left from earlier runs.
     - The JSON report stores paths using forward slashes and includes only files
       that had fixed or unresolved issues.
-    - In-place publishing and report/diff writes use atomic replacement on the
-      destination filesystem.
+    - In-place publishing, JSON reports, and enabled diff writes use atomic
+      replacement on the destination filesystem.
     - play_sound() intentionally returns immediately on Windows.
 """
 
@@ -115,6 +120,7 @@ class BackgroundColors:  # Colors for the terminal
 # Execution Constants:
 VERBOSE = False  # Set to True to output verbose messages
 IN_PLACE_UPDATE = False  # Set to True to atomically update original SRT files instead of creating .cleaned.srt files
+GENERATE_DIFF = True  # Set to True to generate a .cleaned.diff only for changed SRT files; False skips diff generation
 OUTPUT_DIR = Path("./Outputs")  # Directory used for per-input-directory JSON reports
 INPUT_DIRS = [f"E:/Movies/", f"F:/Documentaries/", f"F:/Movies/", f"F:/Series/", f"G:/Animes/", f"G:/Series/"]  # Directories searched recursively for source SRT files
 SRT_TEXT_ENCODINGS = ("utf-8-sig", "utf-8", "cp1252", "latin-1")  # Common UTF-8 and Western/Portuguese subtitle encodings
@@ -1967,37 +1973,45 @@ def process_srt_file(filepath: Path, input_dir: Path, log_output: bool = True) -
             return 0, 1, 0, 0, 0, None  # Return unchanged count without a report entry
 
         cleaned_srt_filepath = filepath if IN_PLACE_UPDATE else filepath.with_name(f"{filepath.stem}.cleaned.srt")  # Select original file or separate cleaned output
-        diff_filepath = filepath.with_name(f"{filepath.stem}.cleaned.diff")  # Build per-source diff path
+        diff_filepath = filepath.with_name(f"{filepath.stem}.cleaned.diff") if GENERATE_DIFF else None  # Build a diff destination only when diff generation is enabled
 
-        if diff_filepath == filepath:  # Prevent diff report from overwriting source subtitle
+        if diff_filepath is not None and diff_filepath == filepath:  # Prevent an enabled diff report from overwriting the source subtitle
             raise ValueError(f"Refusing to overwrite source file with diff report: {filepath}")  # Report unsafe output path
         if not IN_PLACE_UPDATE and cleaned_srt_filepath == filepath:  # Prevent accidental source overwrite outside explicit in-place mode
             raise ValueError(f"Refusing to overwrite source file: {filepath}")  # Report unsafe output path
 
         cleaned_content = serialize_srt_entries(cleaned_entries)  # Serialize cleaned SRT with sequential numbering
         validate_cleaned_srt(cleaned_content, cleaned_srt_filepath)  # Validate cleaned SRT before writing
-        unicode_diff_content = build_unicode_repair_report(text_repairs)  # Build exact Unicode/mojibake repair report when needed
-        text_diff_content = build_diff_report(changes) if changes else ""  # Build readable subtitle-text diff report when needed
-        timestamp_diff_content = build_timestamp_repair_report(timestamp_repairs)  # Build timestamp repair report when needed
-        split_block_diff_content = build_split_block_repair_report(split_block_repairs)  # Build invalid blank-line split-block repair report
-        empty_block_diff_content = build_empty_block_repair_report(empty_block_repairs)  # Build malformed empty-block repair report when needed
-        index_diff_content = build_index_repair_report(index_repairs)  # Build exact source-to-sequential block-index repair report
-        diff_sections = [section.rstrip() for section in (unicode_diff_content, timestamp_diff_content, split_block_diff_content, empty_block_diff_content, index_diff_content, text_diff_content) if section.strip()]  # Keep only populated report sections for every change type considered by the changed-file gate
-        diff_content = "\n\n---\n\n".join(diff_sections) + ("\n" if diff_sections else "")  # Merge structural and text changes into one diff report
 
-        if not diff_content.strip():  # Every change type accepted by the changed-file gate must have a corresponding diff section
-            raise ValueError(f"Internal error: changed file produced no diff sections: {filepath}")  # Preserve invariant instead of silently publishing an unreported change
+        diff_content = ""  # Keep diff state empty when generation is disabled
 
-        atomic_write_text(cleaned_srt_filepath, cleaned_content)  # Write cleaned SRT beside source
-        atomic_write_text(diff_filepath, diff_content)  # Write diff report beside source
+        if GENERATE_DIFF:  # Build and validate diff content only when explicitly enabled
+            unicode_diff_content = build_unicode_repair_report(text_repairs)  # Build exact Unicode/mojibake repair report when needed
+            text_diff_content = build_diff_report(changes) if changes else ""  # Build readable subtitle-text diff report when needed
+            timestamp_diff_content = build_timestamp_repair_report(timestamp_repairs)  # Build timestamp repair report when needed
+            split_block_diff_content = build_split_block_repair_report(split_block_repairs)  # Build invalid blank-line split-block repair report
+            empty_block_diff_content = build_empty_block_repair_report(empty_block_repairs)  # Build malformed empty-block repair report when needed
+            index_diff_content = build_index_repair_report(index_repairs)  # Build exact source-to-sequential block-index repair report
+            diff_sections = [section.rstrip() for section in (unicode_diff_content, timestamp_diff_content, split_block_diff_content, empty_block_diff_content, index_diff_content, text_diff_content) if section.strip()]  # Keep only populated report sections for every change type considered by the changed-file gate
+            diff_content = "\n\n---\n\n".join(diff_sections) + ("\n" if diff_sections else "")  # Merge structural and text changes into one diff report
 
-        fixed_issues = describe_fixed_issues(text_repairs, timestamp_repairs, split_block_repairs, empty_block_repairs, index_repairs, changes)  # Describe only fixes that were successfully published
+            if not diff_content.strip():  # Every changed file must have at least one diff section when diff generation is enabled
+                raise ValueError(f"Internal error: changed file produced no diff sections: {filepath}")  # Preserve enabled-diff invariant instead of silently publishing an empty diff
+
+        atomic_write_text(cleaned_srt_filepath, cleaned_content)  # Publish the changed SRT regardless of whether diff generation is enabled
+
+        if GENERATE_DIFF and diff_filepath is not None:  # Publish a diff only for changed files when explicitly enabled
+            atomic_write_text(diff_filepath, diff_content)  # Write diff report beside source
+
+        fixed_issues = describe_fixed_issues(text_repairs, timestamp_repairs, split_block_repairs, empty_block_repairs, index_repairs, changes)  # Describe successfully published SRT fixes independently of optional diff generation
         file_report = build_file_issue_report(filepath, fixed_issues=fixed_issues)  # Build successful file issue report
 
         if log_output:  # Preserve direct-call output logs outside progress-bar mode
             output_label = "Updated in place" if IN_PLACE_UPDATE else "Cleaned"  # Describe how cleaned subtitle content was published
             print(f"{output_label}: {display_relative_path(cleaned_srt_filepath, input_dir)}")  # Log cleaned output destination
-            print(f"Diff: {display_relative_path(diff_filepath, input_dir)}")  # Log diff output
+
+            if GENERATE_DIFF and diff_filepath is not None:  # Log diff destination only when one was actually generated
+                print(f"Diff: {display_relative_path(diff_filepath, input_dir)}")  # Log generated diff output
         return 1, 0, 0, removed_count + len(empty_block_repairs), modified_count, file_report  # Return cleaned counts and successful issue report
     except Exception as exc:  # Report file-specific failure and continue
         normalized_error = normalize_exception_path_separators(exc)  # Normalize any path embedded in the parser/validation exception
