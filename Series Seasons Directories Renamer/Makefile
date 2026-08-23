@@ -21,21 +21,21 @@ endif
 all: run
 
 # Main Scripts:
-run: $(VENV)
+run: dependencies
 	$(CLEAR_CMD)
 	$(TIME_CMD) $(PYTHON) ./main.py
 
-# Setup Virtual Environment and Install Dependencies
+# Setup Virtual Environment if Missing
 $(VENV):
 	$(PYTHON_CMD) -m venv $(VENV)
-	$(PIP) install -r requirements.txt
 
-# Install the project dependencies
+# Install/Update the Project Dependencies
 dependencies: $(VENV)
+	$(PYTHON) -m pip install -r requirements.txt
 
 # Generate requirements.txt from the current venv
-generate_requirements: $(VENV)
-	$(PIP) freeze > requirements.txt
+generate_requirements: dependencies
+	$(PYTHON) -m pip freeze > requirements.txt
 
 # Utility rule for cleaning the project
 clean:
@@ -43,4 +43,4 @@ clean:
 	find . -type f -name '*.pyc' -delete || del /S /Q *.pyc 2>nul
 	find . -type d -name '__pycache__' -delete || rmdir /S /Q __pycache__ 2>nul
 
-.PHONY: run clean dependencies generate_requirements
+.PHONY: all run clean dependencies generate_requirements
