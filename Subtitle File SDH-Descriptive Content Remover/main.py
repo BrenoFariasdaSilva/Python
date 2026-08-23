@@ -77,6 +77,7 @@ INPUT_DIRS = [f"E:/Movies/", f"F:/Movies/", f"F:/Series/", f"G:/Series/"]  # Dir
 SRT_TEXT_ENCODINGS = ("utf-8-sig", "utf-8", "cp1252", "latin-1")  # Common UTF-8 and Western/Portuguese subtitle encodings
 MOJIBAKE_MARKERS = ("Ã", "Â", "â€", "ðŸ", "ï»¿", "�")  # Strong indicators of UTF-8 text decoded through a Western single-byte encoding
 SRT_TIMESTAMP_PATTERN = re.compile(r"^\d{2}:\d{2}:\d{2},\d{3}\s+-->\s+\d{2}:\d{2}:\d{2},\d{3}(?:\s+.*)?$")  # SRT timestamp validation pattern
+SRT_REPAIRABLE_TIMESTAMP_PATTERN = re.compile(r"^(?P<start_h>\d{2}):(?P<start_m>\d{2}):(?P<start_s>\d{2}),(?P<start_ms>\d{3,})\s+-->\s+(?P<end_h>\d{2}):(?P<end_m>\d{2}):(?P<end_s>\d{2}),(?P<end_ms>\d{3,})(?P<suffix>(?:\s+.*)?)$")  # Timestamp pattern that also accepts overlong millisecond fields for repair
 SUBTITLE_FORMATTING_TAG_PATTERN = re.compile(r"</?(?:i|b|u|font)(?:\s+[^<>]*)?>", re.IGNORECASE)  # Recognized SRT formatting tag pattern
 EMPTY_SUBTITLE_FORMATTING_TAG_PATTERN = re.compile(r"<(i|b|u|font)(?:\s+[^<>]*)?>\s*</\1>", re.IGNORECASE)  # Recognized empty SRT formatting tag pattern
 DESCRIPTIVE_PHRASES = frozenset(("music", "door closes", "applause", "speaking indistinctly", "laughing", "laughs", "sighs", "sigh", "whispers", "whispering", "inaudible", "indistinct chatter", "chuckles", "gasps", "coughs", "sobs", "crying", "screaming", "phone ringing", "knocking", "footsteps", "thunder", "alarm", "silence"))  # Conservative complete SDH fragments
@@ -477,6 +478,124 @@ def discover_srt_files(input_dir: Path) -> list[Path]:
     return sorted(path for path in input_dir.rglob("*.srt") if not path.name.lower().endswith(".cleaned.srt"))  # Exclude generated cleaned files
 
 
+
+def normalize_srt_time_component(hours: str, minutes: str, seconds: str, milliseconds: str) -> str:
+    """
+    Normalize one SRT time component whose millisecond field may overflow three digits.
+
+    Values such as 00:20:08,1000 are interpreted as 1000 milliseconds and
+    normalized to 00:20:09,000 instead of being truncated to 00:20:08,100.
+
+    :param hours: Two-digit hour component.
+    :param minutes: Two-digit minute component.
+    :param seconds: Two-digit second component.
+    :param milliseconds: Millisecond component containing at least three digits.
+    :return: Strict HH:MM:SS,mmm SRT time component.
+    """
+
+    millisecond_value = int(milliseconds)  # Parse the full millisecond value without discarding overflow digits
+    carry_seconds, normalized_milliseconds = divmod(millisecond_value, 1000)  # Carry every complete 1000 ms into seconds
+    total_seconds = (int(hours) * 3600) + (int(minutes) * 60) + int(seconds) + carry_seconds  # Build normalized whole-second value
+    normalized_hours, remaining_seconds = divmod(total_seconds, 3600)  # Carry second/minute overflow into hours
+    normalized_minutes, normalized_seconds = divmod(remaining_seconds, 60)  # Carry second overflow into minutes
+    return f"{normalized_hours:02d}:{normalized_minutes:02d}:{normalized_seconds:02d},{normalized_milliseconds:03d}"  # Return strict SRT timestamp component
+
+
+def repair_srt_timestamp_line(timestamp: str) -> tuple[str, bool]:
+    """
+    Repair overlong SRT millisecond fields while preserving valid timestamps.
+
+    :param timestamp: Original SRT timestamp line.
+    :return: Repaired timestamp and whether a repair was applied.
+    """
+
+    if SRT_TIMESTAMP_PATTERN.match(timestamp):  # Preserve already-valid timestamps exactly
+        return timestamp, False  # No repair needed
+
+    match = SRT_REPAIRABLE_TIMESTAMP_PATTERN.match(timestamp)  # Match timestamps whose millisecond fields contain three or more digits
+
+    if match is None:  # Leave unrelated malformed timestamp formats for normal validation to reject
+        return timestamp, False  # Not safely repairable by this rule
+
+    start_ms = match.group("start_ms")  # Capture starting millisecond field
+    end_ms = match.group("end_ms")  # Capture ending millisecond field
+
+    if len(start_ms) == 3 and len(end_ms) == 3:  # Require at least one actual overlong millisecond field
+        return timestamp, False  # Nothing to repair
+
+    repaired_start = normalize_srt_time_component(
+        match.group("start_h"),
+        match.group("start_m"),
+        match.group("start_s"),
+        start_ms,
+    )  # Normalize starting timestamp
+    repaired_end = normalize_srt_time_component(
+        match.group("end_h"),
+        match.group("end_m"),
+        match.group("end_s"),
+        end_ms,
+    )  # Normalize ending timestamp
+    repaired_timestamp = f"{repaired_start} --> {repaired_end}{match.group('suffix')}"  # Rebuild strict SRT timestamp line
+    return repaired_timestamp, repaired_timestamp != timestamp  # Report whether timestamp changed
+
+
+def repair_srt_timestamps(content: str) -> tuple[str, list[tuple[int, str, str]]]:
+    """
+    Repair overlong millisecond fields in SRT timestamp lines before strict parsing.
+
+    :param content: Decoded SRT text.
+    :return: Repaired SRT text and timestamp repair records.
+    """
+
+    normalized_content = content.replace("\r\n", "\n").replace("\r", "\n")  # Normalize line endings for deterministic scanning
+    lines = normalized_content.split("\n")  # Split content while preserving SRT structure
+    repairs = []  # Store block number and original/repaired timestamp values
+    block_number = 0  # Track logical SRT block number
+
+    for line_index, line in enumerate(lines):  # Inspect every line for timestamp candidates
+        if line.strip().isdigit():  # Detect an SRT block index line
+            try:
+                block_number = int(line.strip())  # Use the actual subtitle index for repair reporting
+            except ValueError:
+                block_number = 0  # Fall back safely if an unexpected numeric conversion issue occurs
+            continue
+
+        stripped_line = line.strip()  # Ignore only outer whitespace while matching timestamp syntax
+
+        if "-->" not in stripped_line:  # Skip ordinary subtitle dialogue lines
+            continue
+
+        repaired_timestamp, changed = repair_srt_timestamp_line(stripped_line)  # Repair safe millisecond overflow
+
+        if not changed:  # Preserve lines that do not require this specific repair
+            continue
+
+        lines[line_index] = repaired_timestamp  # Replace malformed timestamp with strict normalized value
+        repairs.append((block_number, stripped_line, repaired_timestamp))  # Record repair for diff reporting
+
+    return "\n".join(lines), repairs  # Return repaired content and deterministic repair records
+
+
+def build_timestamp_repair_report(repairs: list[tuple[int, str, str]]) -> str:
+    """
+    Build diff report sections for repaired SRT timestamps.
+
+    :param repairs: Timestamp repair records.
+    :return: Human-readable timestamp repair report text.
+    """
+
+    sections = []  # Store one report section per repaired timestamp
+
+    for block_number, original_timestamp, repaired_timestamp in repairs:  # Describe each timestamp correction
+        sections.append(
+            f"Original index: {block_number}\n"
+            f"Change: Timestamp repaired\n"
+            f"Original timestamp:\n{original_timestamp}\n"
+            f"Cleaned timestamp:\n{repaired_timestamp}"
+        )  # Add deterministic repair section
+
+    return "\n\n---\n\n".join(sections) + ("\n" if sections else "")  # Return diff-compatible report text
+
 def parse_srt_content(content: str, filepath: Path) -> list[tuple[int, str, list[str]]]:
     """
     Parse and validate SRT content.
@@ -819,12 +938,13 @@ def process_srt_file(filepath: Path, input_dir: Path, log_output: bool = True) -
 
     try:  # Keep one file failure from stopping the batch
         content, _encoding = read_srt_file(filepath)  # Read and decode source SRT
-        entries = parse_srt_content(content, filepath)  # Parse and validate source SRT
+        repaired_content, timestamp_repairs = repair_srt_timestamps(content)  # Repair overlong millisecond fields before strict SRT validation
+        entries = parse_srt_content(repaired_content, filepath)  # Parse and validate repaired source SRT
         cleaned_entries, changes, removed_count, modified_count = clean_subtitle_entries(entries)  # Remove SDH content
 
-        if not changes:  # Avoid output files when nothing changed
+        if not changes and not timestamp_repairs:  # Avoid output files when neither subtitle text nor timestamps changed
             if log_output:  # Preserve direct-call unchanged log outside progress-bar mode
-                print(f"No SDH/descriptive content found: {relative_path}")  # Log unchanged source
+                print(f"No SDH/descriptive content or timestamp repairs found: {relative_path}")  # Log unchanged source
             return 0, 1, 0, 0, 0  # Return unchanged count
 
         cleaned_srt_filepath = filepath if IN_PLACE_UPDATE else filepath.with_name(f"{filepath.stem}.cleaned.srt")  # Select original file or separate cleaned output
@@ -837,7 +957,10 @@ def process_srt_file(filepath: Path, input_dir: Path, log_output: bool = True) -
 
         cleaned_content = serialize_srt_entries(cleaned_entries)  # Serialize cleaned SRT with sequential numbering
         validate_cleaned_srt(cleaned_content, cleaned_srt_filepath)  # Validate cleaned SRT before writing
-        diff_content = build_diff_report(changes)  # Build readable diff report
+        text_diff_content = build_diff_report(changes) if changes else ""  # Build readable subtitle-text diff report when needed
+        timestamp_diff_content = build_timestamp_repair_report(timestamp_repairs)  # Build timestamp repair report when needed
+        diff_sections = [section.rstrip() for section in (timestamp_diff_content, text_diff_content) if section.strip()]  # Keep only populated report sections
+        diff_content = "\n\n---\n\n".join(diff_sections) + ("\n" if diff_sections else "")  # Merge timestamp and text changes into one diff report
 
         if not diff_content.strip():  # Prevent empty diff output
             raise ValueError(f"Empty diff report for changed file: {filepath}")  # Report invalid diff state
