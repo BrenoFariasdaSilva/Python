@@ -74,7 +74,7 @@ class BackgroundColors:  # Colors for the terminal
 
 # Execution Constants:
 VERBOSE = False  # Set to True to output verbose messages
-INPUT_DIRECTORY = [Path("./Input"), Path("./Inputs"), Path("E:/Animes"), Path("E:/Series")]  # The input directory or list of input directories
+INPUT_DIRS = [Path("./Input"), Path("./Inputs"), Path(f"F:/Series/"), Path(f"G:/Series/"), Path("G:/Animes")]  # The input directory or list of input directories
 LANGUAGE_OPTIONS = ["Dual", "Dublado", "English", "Legendado", "Nacional"]  # User-defined suffixes for renaming
 TMDB_BASE_URL = "https://api.themoviedb.org/3"  # Base URL for TMDb API
 IGNORE_DIR_REGEX = re.compile(r'^(featurettes|extras|making[-_\s]?of|behind[ _-]?the[ _-]?scenes|specials)$', re.IGNORECASE)  # Regex for ignore dirs
@@ -779,7 +779,7 @@ def format_season_num(season):
 
 def rename_dirs():
     """
-    Iterates through the INPUT_DIRECTORY, extracts metadata, fetches the release year from TMDb,
+    Iterates through the INPUT_DIRS, extracts metadata, fetches the release year from TMDb,
     and renames each directory according to the defined pattern.
 
     If a directory does not match the regex pattern (i.e., missing season/resolution info),
@@ -798,7 +798,7 @@ def rename_dirs():
     suffix_group = "|".join([re.escape(s) for s in LANGUAGE_OPTIONS])  # Build alternation group from LANGUAGE_OPTIONS
     formatted_pattern = rf"^Season\s(?P<season>\d{{2}})\s(?P<year>\d{{4}})(?:\s(?P<resolution>\d{{3,4}}p|4k))?(?:\s(?P<suffix>{suffix_group}))?$"  # Strict formatted folder regex
 
-    roots = INPUT_DIRECTORY if isinstance(INPUT_DIRECTORY, (list, tuple)) else [INPUT_DIRECTORY]  # Normalize INPUT_DIRECTORY to a list of paths
+    roots = INPUT_DIRS if isinstance(INPUT_DIRS, (list, tuple)) else [INPUT_DIRS]  # Normalize INPUT_DIRS to a list of paths
     
     entries = []  # Build list of (root_path, directory) entries across all configured roots
     
