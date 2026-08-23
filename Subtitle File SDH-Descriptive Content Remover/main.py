@@ -48,6 +48,7 @@ Assumptions & Notes:
 
 import atexit  # For playing a sound when the program finishes
 import datetime  # For getting the current date and time
+import json  # For writing structured per-input-directory processing reports
 import os  # For running a command in the terminal
 import platform  # For getting the operating system name
 import re  # For matching SRT timestamps and SDH fragments
@@ -73,6 +74,7 @@ class BackgroundColors:  # Colors for the terminal
 # Execution Constants:
 VERBOSE = False  # Set to True to output verbose messages
 IN_PLACE_UPDATE = False  # Set to True to atomically update original SRT files instead of creating .cleaned.srt files
+OUTPUT_DIR = Path("./Outputs")  # Directory used for per-input-directory JSON reports
 INPUT_DIRS = [f"E:/Movies/", f"F:/Movies/", f"F:/Series/", f"G:/Series/"]  # Directories searched recursively for source SRT files
 SRT_TEXT_ENCODINGS = ("utf-8-sig", "utf-8", "cp1252", "latin-1")  # Common UTF-8 and Western/Portuguese subtitle encodings
 MOJIBAKE_MARKERS = ("Ã", "Â", "â€", "ðŸ", "ï»¿", "�")  # Strong indicators of UTF-8 text decoded through a Western single-byte encoding
@@ -443,24 +445,28 @@ def repair_common_mojibake(value: str) -> str:
     return unicodedata.normalize("NFC", repaired_value)  # Return canonically normalized Unicode text
 
 
-def read_srt_file(filepath: Path) -> tuple[str, str]:
+def read_srt_file(filepath: Path) -> tuple[str, str, list[str]]:
     """
     Read an SRT file with PT-BR-friendly encoding fallbacks and mojibake repair.
 
     :param filepath: Source SRT path.
-    :return: Decoded/repaired text and detected encoding name.
+    :return: Decoded/repaired text, detected encoding name, and applied text-repair descriptions.
     """
 
     data = filepath.read_bytes()  # Read raw bytes without altering source file
 
     if data.startswith((b"\xff\xfe", b"\xfe\xff")):  # Detect UTF-16 BOM before trying single-byte encodings
         decoded_text = data.decode("utf-16")  # Decode UTF-16 using BOM byte order
-        return repair_common_mojibake(decoded_text), "utf-16"  # Normalize and repair decoded subtitle text
+        repaired_text = repair_common_mojibake(decoded_text)  # Normalize and repair decoded subtitle text
+        text_repairs = ["Repaired Unicode/mojibake subtitle text after UTF-16 decoding"] if repaired_text != decoded_text else []  # Record actual text repair
+        return repaired_text, "utf-16", text_repairs  # Return decoded subtitle text and repair metadata
 
     for encoding in SRT_TEXT_ENCODINGS:  # Try common UTF-8 and Western/Portuguese subtitle encodings
         try:
             decoded_text = data.decode(encoding)  # Decode source bytes using current candidate
-            return repair_common_mojibake(decoded_text), encoding  # Repair common mojibake after successful decoding
+            repaired_text = repair_common_mojibake(decoded_text)  # Repair common mojibake after successful decoding
+            text_repairs = [f"Repaired Unicode/mojibake subtitle text after {encoding} decoding"] if repaired_text != decoded_text else []  # Record actual text repair
+            return repaired_text, encoding, text_repairs  # Return decoded subtitle text and repair metadata
         except UnicodeDecodeError:
             continue  # Try next encoding after strict decode failure
 
@@ -953,6 +959,119 @@ def atomic_write_text(filepath: Path, content: str) -> None:
             temporary_filepath.unlink()  # Remove incomplete temporary file
 
 
+
+def build_report_filename_prefix(configured_input_dir: str) -> str:
+    """
+    Build a Windows-safe filename prefix from a configured input directory.
+
+    Slash and backslash separators become hyphens as requested. Characters
+    that Windows forbids in filenames are also converted to hyphens.
+
+    :param configured_input_dir: Original configured input directory string.
+    :return: Safe deterministic filename prefix.
+    """
+
+    normalized = re.sub(r"[\\/]+", "-", str(configured_input_dir).strip())  # Replace every slash type with a hyphen
+    normalized = re.sub(r'[<>:"|?*]+', "-", normalized)  # Replace Windows-invalid filename characters such as the drive colon
+    normalized = re.sub(r"-{2,}", "-", normalized).strip("-. ")  # Collapse repeated separators and trim unsafe trailing characters
+    return normalized or "input"  # Guarantee a non-empty report filename prefix
+
+
+def build_input_report_path(configured_input_dir: str) -> Path:
+    """
+    Build the per-input-directory report path.
+
+    :param configured_input_dir: Original configured input directory string.
+    :return: ./Outputs/<input-prefix>-report.json path.
+    """
+
+    prefix = build_report_filename_prefix(configured_input_dir)  # Derive deterministic input-directory prefix
+    return OUTPUT_DIR / f"{prefix}-report.json"  # Keep one report file per configured input directory
+
+
+def build_file_issue_report(
+    filepath: Path,
+    fixed_issues: list[str] | None = None,
+    unresolved_issues: list[str] | None = None,
+) -> dict[str, object]:
+    """
+    Build one file-level issue report entry.
+
+    :param filepath: Subtitle file associated with the issues.
+    :param fixed_issues: Issues successfully fixed and published.
+    :param unresolved_issues: Issues that could not be solved and caused failure.
+    :return: JSON-serializable file report dictionary.
+    """
+
+    return {
+        "file_path": filepath.resolve().as_posix(),  # Store normalized absolute file path with forward slashes
+        "fixed_issues": list(fixed_issues or []),  # Store successful fixes
+        "unresolved_issues": list(unresolved_issues or []),  # Store failures the code could not repair
+    }
+
+
+def write_input_report(configured_input_dir: str, input_dir: Path, file_reports: list[dict[str, object]]) -> Path:
+    """
+    Write one deterministic JSON report for a processed input directory.
+
+    :param configured_input_dir: Original configured input directory string.
+    :param input_dir: Resolved processed input directory.
+    :param file_reports: Files that had fixed or unresolved issues.
+    :return: Written report path.
+    """
+
+    report_path = build_input_report_path(configured_input_dir)  # Build per-input-root output path
+    report_payload = {
+        "input_dir": input_dir.as_posix().rstrip("/") + "/",  # Record the processed root using Unix-like separators
+        "files": file_reports,  # Include only files that had fixed or unresolved issues
+    }  # Build compact report schema
+    report_content = json.dumps(report_payload, ensure_ascii=False, indent=2) + "\n"  # Preserve PT-BR characters in readable JSON
+    atomic_write_text(report_path, report_content)  # Publish report atomically
+    return report_path  # Return generated report path
+
+
+def describe_fixed_issues(
+    text_repairs: list[str],
+    timestamp_repairs: list[tuple[int, str, str]],
+    empty_block_repairs: list[tuple[int, str]],
+    changes: list[tuple[int, str, str, str, bool]],
+) -> list[str]:
+    """
+    Convert successful repair metadata into human-readable JSON issue strings.
+
+    :param text_repairs: Applied encoding/Unicode repair descriptions.
+    :param timestamp_repairs: Repaired timestamp records.
+    :param empty_block_repairs: Removed empty block records.
+    :param changes: Subtitle text changes/removals.
+    :return: Ordered fixed-issue descriptions.
+    """
+
+    fixed_issues = list(text_repairs)  # Preserve any encoding/Unicode repairs first
+
+    for index, original_timestamp, repaired_timestamp in timestamp_repairs:  # Report every repaired malformed timestamp
+        fixed_issues.append(
+            f"Repaired overlong millisecond timestamp at original index {index}: "
+            f"{original_timestamp} -> {repaired_timestamp}"
+        )
+
+    for index, timestamp in empty_block_repairs:  # Report every malformed empty subtitle block removal
+        fixed_issues.append(
+            f"Removed empty SRT block at original index {index} ({timestamp})"
+        )
+
+    for index, timestamp, _original_text, _cleaned_text, removed in changes:  # Report every successful subtitle cleanup
+        if removed:
+            fixed_issues.append(
+                f"Removed SDH/descriptive-only subtitle entry at original index {index} ({timestamp})"
+            )
+        else:
+            fixed_issues.append(
+                f"Cleaned subtitle text/formatting/whitespace at original index {index} ({timestamp})"
+            )
+
+    return fixed_issues  # Return all successfully published fixes
+
+
 def display_input_directory(input_dir: Path) -> str:
     """
     Format an input directory using forward slashes for progress display.
@@ -979,14 +1098,14 @@ def display_relative_path(filepath: Path, input_dir: Path) -> str:
         return filepath.as_posix()  # Return absolute display path
 
 
-def process_srt_file(filepath: Path, input_dir: Path, log_output: bool = True) -> tuple[int, int, int, int, int]:
+def process_srt_file(filepath: Path, input_dir: Path, log_output: bool = True) -> tuple[int, int, int, int, int, dict[str, object] | None]:
     """
     Process one SRT file and write cleaned output when content changed.
 
     :param filepath: Source SRT path.
     :param input_dir: Input root path.
     :param log_output: Set to False when an external progress bar owns per-file terminal output.
-    :return: Cleaned files, unchanged files, failed files, removed entries, and modified mixed entries.
+    :return: Cleaned files, unchanged files, failed files, removed entries, modified mixed entries, and optional file issue report.
     """
 
     relative_path = display_relative_path(filepath, input_dir)  # Build concise log path
@@ -995,16 +1114,16 @@ def process_srt_file(filepath: Path, input_dir: Path, log_output: bool = True) -
         print(f"Processing: {relative_path}")  # Log source being processed
 
     try:  # Keep one file failure from stopping the batch
-        content, _encoding = read_srt_file(filepath)  # Read and decode source SRT
+        content, _encoding, text_repairs = read_srt_file(filepath)  # Read/decode source SRT and capture applied Unicode repairs
         timestamp_repaired_content, timestamp_repairs = repair_srt_timestamps(content)  # Repair overlong millisecond fields before strict SRT validation
         structurally_repaired_content, empty_block_repairs = remove_empty_srt_blocks(timestamp_repaired_content)  # Remove timestamped blocks that contain no subtitle text
         entries = parse_srt_content(structurally_repaired_content, filepath)  # Parse and validate structurally repaired source SRT
         cleaned_entries, changes, removed_count, modified_count = clean_subtitle_entries(entries)  # Remove SDH content
 
-        if not changes and not timestamp_repairs and not empty_block_repairs:  # Avoid output files when no subtitle cleanup or structural repair occurred
+        if not changes and not timestamp_repairs and not empty_block_repairs and not text_repairs:  # Avoid output files when no subtitle cleanup or repair occurred
             if log_output:  # Preserve direct-call unchanged log outside progress-bar mode
                 print(f"No SDH/descriptive content or SRT repairs found: {relative_path}")  # Log unchanged source
-            return 0, 1, 0, 0, 0  # Return unchanged count
+            return 0, 1, 0, 0, 0, None  # Return unchanged count without a report entry
 
         cleaned_srt_filepath = filepath if IN_PLACE_UPDATE else filepath.with_name(f"{filepath.stem}.cleaned.srt")  # Select original file or separate cleaned output
         diff_filepath = filepath.with_name(f"{filepath.stem}.cleaned.diff")  # Build per-source diff path
@@ -1028,18 +1147,23 @@ def process_srt_file(filepath: Path, input_dir: Path, log_output: bool = True) -
         atomic_write_text(cleaned_srt_filepath, cleaned_content)  # Write cleaned SRT beside source
         atomic_write_text(diff_filepath, diff_content)  # Write diff report beside source
 
+        fixed_issues = describe_fixed_issues(text_repairs, timestamp_repairs, empty_block_repairs, changes)  # Describe only fixes that were successfully published
+        file_report = build_file_issue_report(filepath, fixed_issues=fixed_issues)  # Build successful file issue report
+
         if log_output:  # Preserve direct-call output logs outside progress-bar mode
             output_label = "Updated in place" if IN_PLACE_UPDATE else "Cleaned"  # Describe how cleaned subtitle content was published
             print(f"{output_label}: {display_relative_path(cleaned_srt_filepath, input_dir)}")  # Log cleaned output destination
             print(f"Diff: {display_relative_path(diff_filepath, input_dir)}")  # Log diff output
-        return 1, 0, 0, removed_count + len(empty_block_repairs), modified_count  # Return cleaned counts including malformed empty-block removals
+        return 1, 0, 0, removed_count + len(empty_block_repairs), modified_count, file_report  # Return cleaned counts and successful issue report
     except Exception as exc:  # Report file-specific failure and continue
         failure_message = f"{BackgroundColors.RED}Failed: {BackgroundColors.CYAN}{relative_path}{BackgroundColors.RED} - {exc}{Style.RESET_ALL}"  # Build concise failure log
         if log_output:  # Use normal output outside progress-bar mode
             print(failure_message)  # Log failure directly
         else:  # Keep tqdm progress display intact while surfacing the error
             tqdm.write(failure_message, file=PROGRESS_OUTPUT)  # Print above the active progress bar and redraw it without routing carriage returns through Logger
-        return 0, 0, 1, 0, 0  # Return failure count
+        unresolved_issue = f"{type(exc).__name__}: {exc}"  # Preserve exact exception type and message in JSON report
+        file_report = build_file_issue_report(filepath, unresolved_issues=[unresolved_issue])  # Build failed file issue report
+        return 0, 0, 1, 0, 0, file_report  # Return failure count and unresolved issue report
 
 
 def main():
@@ -1074,6 +1198,7 @@ def main():
         srt_files = discover_srt_files(input_dir)  # Discover source SRT files recursively in current input directory
         discovered_count += len(srt_files)  # Add current directory discovery count
         directory_display = display_input_directory(input_dir)  # Build Unix-like directory label for progress output
+        directory_file_reports = []  # Collect issue-bearing files only for the current input directory
 
         with tqdm(
             srt_files,
@@ -1089,12 +1214,20 @@ def main():
             for srt_file in progress_bar:  # Process every source SRT file while reusing the same progress line
                 relative_path = display_relative_path(srt_file, input_dir)  # Build current file path for progress display
                 progress_bar.set_postfix_str(f"{BackgroundColors.GREEN}File: {BackgroundColors.CYAN}{relative_path}{Style.RESET_ALL}", refresh=True)  # Show current file without creating a new progress bar
-                file_cleaned, file_unchanged, file_failed, file_removed, file_modified = process_srt_file(srt_file, input_dir, log_output=False)  # Process one source file without per-file scrolling logs
+                file_cleaned, file_unchanged, file_failed, file_removed, file_modified, file_report = process_srt_file(srt_file, input_dir, log_output=False)  # Process one source file without per-file scrolling logs
                 cleaned_count += file_cleaned  # Add cleaned file count
                 unchanged_count += file_unchanged  # Add unchanged file count
                 failed_count += file_failed  # Add failed file count
                 removed_entries_count += file_removed  # Add removed entry count
                 modified_entries_count += file_modified  # Add modified entry count
+
+                if file_report is not None:  # Include only files with fixed or unresolved issues
+                    directory_file_reports.append(file_report)  # Add current file to this input directory's report
+
+        report_path = write_input_report(str(configured_input_dir), input_dir, directory_file_reports)  # Write one JSON report for the completed input directory
+        print(
+            f"{BackgroundColors.GREEN}Report: {BackgroundColors.CYAN}{report_path.as_posix()}{Style.RESET_ALL}"
+        )  # Log generated per-input-directory report
 
     print(
         f"{BackgroundColors.GREEN}Summary:{Style.RESET_ALL}\n"
