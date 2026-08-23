@@ -483,14 +483,36 @@ def parse_dir_name(dir_name):
     return series, season, resolution  # Return parsed tuple inferred from season-style directory
 
 
-def get_series_id(api_key, series_name):
-
+def normalize_series_lookup_name(series_name: str) -> str:
     """
-    Query TMDb search endpoint to find series ID by name.
+    Normalize a series title for conservative TMDb candidate comparison.
 
-    :param api_key: TMDb API key string
-    :param series_name: Series name to search for on TMDb
-    :return: Integer TMDb series id
+    :param series_name: Series title from the directory or TMDb result.
+    :return: Lowercase alphanumeric comparison string.
+    """
+
+    return re.sub(r"[^a-z0-9]+", "", series_name.casefold())  # Remove punctuation/spacing differences for title comparison
+
+
+def get_series_id(
+    api_key,
+    series_name,
+    required_seasons: set[int] | None = None,
+    expected_years: dict[int, int] | None = None,
+):
+    """
+    Query TMDb and resolve the most appropriate series ID.
+
+    When required seasons are provided, candidates are validated against those
+    actual season numbers instead of blindly returning the first search result.
+    Candidate selection prioritizes season coverage, then title similarity, then
+    proximity to already-known season years.
+
+    :param api_key: TMDb API key string.
+    :param series_name: Series name to search for on TMDb.
+    :param required_seasons: Optional set of season numbers that must be considered.
+    :param expected_years: Optional mapping of season number to existing folder year.
+    :return: Integer TMDb series ID.
     """
 
     url = f"{TMDB_BASE_URL}/search/tv"  # Build search URL for TMDb TV search endpoint
@@ -498,14 +520,71 @@ def get_series_id(api_key, series_name):
     response = requests.get(url, params=params)  # Perform HTTP GET request to TMDb search endpoint
     response.raise_for_status()  # Raise exception for HTTP error responses
     data = response.json()  # Parse JSON body from response
-    
     results = data.get("results", [])  # Extract results array from TMDb response
-    
-    if not results:  # If no results were returned from TMDb
-        raise ValueError(f"No TMDb series found for '{series_name}'")  # Raise descriptive error when not found
-    
-    return results[0]["id"]  # Return the id of the first search result
 
+    if not results:  # If no results were returned from TMDb
+        raise ValueError(f"No TMDb series found for '{series_name}'")
+
+    if not required_seasons:  # Preserve simple behavior when no season context is available
+        return results[0]["id"]
+
+    required_seasons = {int(season) for season in required_seasons}  # Normalize required season numbers
+    expected_years = expected_years or {}  # Normalize optional expected-year mapping
+    normalized_query = normalize_series_lookup_name(series_name)  # Normalize requested title
+    candidate_scores = []  # Store sortable candidate scores
+
+    for search_position, result in enumerate(results[:10]):  # Inspect a bounded set of top TMDb candidates
+        series_id = result.get("id")
+
+        if series_id is None:
+            continue
+
+        candidate_name = str(result.get("name") or result.get("original_name") or "")
+        normalized_candidate = normalize_series_lookup_name(candidate_name)
+        matched_seasons = 0
+        year_distance = 0
+
+        for season_number in sorted(required_seasons):  # Validate every season present locally
+            try:
+                candidate_year = int(get_season_year(api_key, int(series_id), season_number))
+            except Exception:
+                continue
+
+            matched_seasons += 1
+
+            if season_number in expected_years:
+                year_distance += abs(candidate_year - int(expected_years[season_number]))
+
+        if matched_seasons == 0:
+            continue
+
+        if normalized_candidate == normalized_query:
+            title_penalty = 0
+        elif normalized_query and normalized_query in normalized_candidate:
+            title_penalty = 1
+        elif normalized_candidate and normalized_candidate in normalized_query:
+            title_penalty = 1
+        else:
+            title_penalty = 2
+
+        candidate_scores.append(
+            (
+                -matched_seasons,  # Prefer candidates containing the greatest number of local seasons
+                title_penalty,  # Then prefer the closest title match
+                year_distance,  # Then prefer plausible season-year proximity
+                search_position,  # Preserve TMDb ordering as deterministic tie-breaker
+                int(series_id),
+            )
+        )
+
+    if not candidate_scores:
+        raise ValueError(
+            f"No TMDb series candidate for '{series_name}' contains the requested seasons: "
+            f"{', '.join(str(season) for season in sorted(required_seasons))}"
+        )
+
+    candidate_scores.sort()
+    return candidate_scores[0][4]
 
 def get_season_year(api_key, series_id, season_number):
 
@@ -801,6 +880,135 @@ def format_season_num(season):
         return season
 
 
+def strip_expected_series_prefix(directory_name: str, series_name: str) -> str:
+    """
+    Remove the current parent-series prefix from one season directory name.
+
+    :param directory_name: Current season directory name.
+    :param series_name: Parent series directory name.
+    :return: Season-specific portion without the parent-series prefix.
+    """
+
+    series_name = series_name.strip()
+    directory_name = directory_name.strip()
+    expected_prefix = f"{series_name} - "
+
+    if directory_name.casefold().startswith(expected_prefix.casefold()):
+        return directory_name[len(expected_prefix):].strip()
+
+    malformed_prefix_pattern = rf"^{re.escape(series_name)}\s*-?\s*"
+    stripped_name = re.sub(malformed_prefix_pattern, "", directory_name, count=1, flags=re.IGNORECASE).strip()
+    return stripped_name or directory_name
+
+
+def build_change_labels(change_desc: str) -> list[str]:
+    """
+    Convert detect_changes() tags into report labels.
+
+    :param change_desc: Combined human-readable change tags.
+    :return: Ordered unique report labels.
+    """
+
+    tags = [tag.strip() for tag in change_desc.split("+")] if change_desc else []
+    labels = []
+
+    mappings = (
+        ("Add Prefix", "Prefix Added"),
+        ("Add Year", "Year Added"),
+        ("Correct Year", "Year Corrected"),
+        ("Add Resolution", "Resolution Added"),
+        ("Correct Resolution", "Resolution Corrected"),
+        ("Remove Duplicate Tokens", "Duplicate Tokens Removed"),
+        ("Reorder Tokens", "Format Reordered"),
+        ("Normalize Format", "Whitespace Normalized"),
+        ("Standardize Casing", "Whitespace Normalized"),
+    )
+
+    for tag_fragment, report_label in mappings:
+        if any(tag_fragment in tag for tag in tags) and report_label not in labels:
+            labels.append(report_label)
+
+    return labels
+
+
+def record_directory_change(
+    report_data: dict,
+    root_path: Path,
+    old_name: str,
+    new_name: str,
+    change_desc: str,
+) -> None:
+    """
+    Record one successful directory rename in report_data.
+
+    :param report_data: Mutable report dictionary for the current execution.
+    :param root_path: Configured input root containing the renamed series.
+    :param old_name: Directory name before the rename.
+    :param new_name: Directory name after the rename.
+    :param change_desc: Human-readable change description.
+    :return: None
+    """
+
+    root_key = str(root_path)
+
+    if root_key not in report_data["input_dirs"]:
+        report_data["input_dirs"][root_key] = {
+            "directories_modified": [],
+            "video_files_renamed": [],
+        }
+
+    report_data["input_dirs"][root_key]["directories_modified"].append(
+        {
+            "old_name": old_name,
+            "new_name": new_name,
+            "changes": build_change_labels(change_desc),
+        }
+    )
+
+
+def ensure_nested_season_prefix(
+    subentry: Path,
+    series_name: str,
+    root_path: Path,
+    report_data: dict,
+) -> Path:
+    """
+    Ensure a nested season directory has exactly one canonical parent-series prefix.
+
+    This prefix rename is physically performed before any TMDb year validation or
+    other metadata-based normalization, and the updated Path is returned.
+
+    :param subentry: Current nested season directory path.
+    :param series_name: Parent series directory name.
+    :param root_path: Configured input root for reporting.
+    :param report_data: Mutable report dictionary.
+    :return: Updated Path after prefix normalization.
+    """
+
+    series_name = series_name.strip()
+    season_name = strip_expected_series_prefix(subentry.name, series_name)
+    expected_name = " ".join(f"{series_name} - {season_name}".split())
+
+    if subentry.name == expected_name:
+        return subentry
+
+    target_path = subentry.parent / expected_name
+
+    if target_path.exists() and target_path != subentry:
+        raise FileExistsError(f"Cannot add series prefix because destination already exists: {target_path}")
+
+    old_name = subentry.name
+    change_desc = detect_changes(old_name, expected_name) or "Add Prefix"
+    output_rename_change(change_desc, old_name, expected_name)
+    subentry.rename(target_path)
+
+    if not target_path.exists():
+        raise RuntimeError(f"Prefix rename did not create expected directory: {target_path}")
+
+    record_directory_change(report_data, root_path, old_name, expected_name, change_desc)
+    return target_path
+
+
 def rename_dirs():
     """
     Iterates through the INPUT_DIRS, extracts metadata, fetches the release year from TMDb,
@@ -870,6 +1078,7 @@ def rename_dirs():
             series_name, season_num, resolution = parsed  # Unpack parsed metadata tuple
             season_str = f"{season_num:02d}"  # Format season number as two digits
             append_str = None  # Default to no suffix (safe default for earlier checks)
+            existing_year_int = None  # Reset existing year so prior loop iterations can never leak state
 
             formatted_match = re.match(formatted_pattern, entry.name, re.IGNORECASE)  # Match strict formatted pattern against folder name (case-insensitive)
             if formatted_match:  # If folder already matches strict format
@@ -991,7 +1200,7 @@ def rename_dirs():
                 except Exception:  # Conversion failed, mark as invalid
                     valid_year = None  # Ensure invalid status
 
-            existing_year_int = locals().get('existing_year_int', None)  # Safely fetch existing year int if present
+            # existing_year_int is initialized explicitly for this entry above; never recover it from locals().
             if valid_year is None and existing_year_int is not None:  # If TMDb didn't provide a year but folder had one
                 valid_year = existing_year_int  # Use the existing year instead of aborting
 
@@ -1096,241 +1305,162 @@ def rename_dirs():
                 })  # End append directory record
 
         else:  # Case 2: The directory likely contains season subdirectories, scan them here
-            verbose_output(f"{BackgroundColors.YELLOW}No season info found for '{entry.name}'. Scanning subdirectories...{Style.RESET_ALL}")  # Inform user about scanning
-            for subentry in entry.iterdir():  # Iterate over subentries inside the top-level directory
+            verbose_output(f"{BackgroundColors.YELLOW}No season info found for '{entry.name}'. Scanning subdirectories...{Style.RESET_ALL}")
+            series_prefix = entry.name.strip()  # Parent directory is authoritative series name
+            season_infos = []  # Store prefix-normalized season metadata for second-pass validation
+
+            for raw_subentry in sorted(entry.iterdir(), key=lambda path: path.name.casefold()):  # Pass 1: discover and prefix every season directory first
+                progress_bar.set_postfix_str(
+                    f"{BackgroundColors.GREEN}Directory: {BackgroundColors.CYAN}{raw_subentry.as_posix()}{Style.RESET_ALL}",
+                    refresh=True,
+                )
+
+                if not raw_subentry.is_dir():
+                    continue
+
+                if re.match(IGNORE_DIR_REGEX, raw_subentry.name.strip()):
+                    verbose_output(f"{BackgroundColors.YELLOW}Ignoring subdirectory: {raw_subentry.name}{Style.RESET_ALL}")
+                    continue
+
+                season_specific_name = strip_expected_series_prefix(raw_subentry.name, series_prefix)
+                parsed_sub = parse_dir_name(season_specific_name)
+
+                if parsed_sub:
+                    _, season_num_sub, resolution_sub = parsed_sub
+                else:
+                    season_match = re.search(r"\bSeason\s+(?P<num>\d{1,2})\b", season_specific_name, re.IGNORECASE)
+
+                    if not season_match:
+                        verbose_output(true_string=f"{BackgroundColors.YELLOW}Skipping (no season match in subdir): {raw_subentry.name}{Style.RESET_ALL}")
+                        continue
+
+                    season_num_sub = int(season_match.group("num"))
+                    resolution_search = re.search(r"\b(?P<res>\d{3,4}p|4k)\b", season_specific_name, re.IGNORECASE)
+                    resolution_sub = resolution_search.group("res") if resolution_search else None
+
+                subentry = ensure_nested_season_prefix(raw_subentry, series_prefix, root_path, report_data)  # PREFIX FIRST
                 progress_bar.set_postfix_str(
                     f"{BackgroundColors.GREEN}Directory: {BackgroundColors.CYAN}{subentry.as_posix()}{Style.RESET_ALL}",
                     refresh=True,
-                )  # Reuse the same inline progress bar while inspecting nested season directories
-                if not subentry.is_dir():  # Skip non-directory subentries such as files
-                    continue  # Continue to next subentry when current one is not a directory
+                )
 
-                if re.match(IGNORE_DIR_REGEX, subentry.name.strip()):  # Skip configured ignore subdirectories inside series folders
-                    verbose_output(f"{BackgroundColors.YELLOW}Ignoring subdirectory: {subentry.name}{Style.RESET_ALL}")  # Verbose notification when skipping
-                    continue  # Continue to next subentry when current one is an ignored directory
+                normalized_season_name = strip_expected_series_prefix(subentry.name, series_prefix)
+                existing_year_match = re.search(r"\b(?P<year>(?:19|20)\d{2})\b", normalized_season_name)
+                existing_year_int = int(existing_year_match.group("year")) if existing_year_match else None
 
-                parsed_sub = parse_dir_name(subentry.name)  # Attempt to parse subdirectory name using generic parser
-                if parsed_sub:  # If parser returned a tuple, use it directly
-                    series_name_sub, season_num_sub, resolution_sub = parsed_sub  # Unpack parsed metadata for subdirectory
-                else:  # Fallback: detect 'Season <number>' pattern in subdirectory name and infer series from parent
-                    season_match = re.search(r"Season\s+(?P<num>\d{1,2})", subentry.name, re.IGNORECASE)  # Match 'Season <number>' case-insensitively
-                    if not season_match:  # If no season-style pattern found in subdirectory name
-                        verbose_output(true_string=f"{BackgroundColors.YELLOW}Skipping (no match in subdir): {subentry.name}{Style.RESET_ALL}")  # Keep routine skip diagnostics hidden unless VERBOSE=True
-                        continue  # Continue to next subentry when parsing fails
-                    season_num_sub = int(season_match.group("num"))  # Convert extracted season number to integer
-                    res_search = re.search(r"\b(?P<res>\d{3,4}p?)\b", subentry.name, re.IGNORECASE)  # Search for resolution token
-                    if res_search:  # If resolution token found
-                        res_digits = re.sub(r"\D", "", res_search.group("res"))  # Strip non-digits to leave digits only
-                        resolution_sub = f"{res_digits}p"  # Normalize to '<digits>p' format
-                    else:  # No resolution token found for this subdirectory
-                        resolution_sub = None  # Use None when no resolution is present
-                    series_name_sub = entry.name  # Infer series name from parent directory name
+                season_infos.append(
+                    {
+                        "path": subentry,
+                        "season_number": int(season_num_sub),
+                        "existing_year": existing_year_int,
+                        "resolution_hint": resolution_sub,
+                    }
+                )
 
-                season_str_sub = f"{season_num_sub:02d}"  # Format season number as two digits for subdirectory
-                append_str = None  # Default to no suffix for subdirectory checks
+            required_seasons = {info["season_number"] for info in season_infos}
+            expected_years = {
+                info["season_number"]: info["existing_year"]
+                for info in season_infos
+                if info["existing_year"] is not None
+            }
 
-                formatted_match_sub = re.match(formatted_pattern, subentry.name, re.IGNORECASE)  # Match strict formatted pattern against subdirectory name (case-insensitive)
-                if formatted_match_sub:  # If the subdirectory already matches strict format
-                    existing_season = formatted_match_sub.group("season")  # Extract existing season string from subdir
-                    existing_season = format_season_num(existing_season)  # Normalize to two digits
-                    existing_year = formatted_match_sub.group("year")  # Extract existing year string from subdir
-                    existing_resolution = formatted_match_sub.group("resolution")  # Extract existing optional resolution string from subdir
-                    existing_suffix = formatted_match_sub.group("suffix")  # Extract existing optional suffix string from subdir
-                    try:  # Try convert existing year to int
-                        existing_year_int = int(existing_year)  # Convert to integer
-                    except Exception:  # Conversion failed
-                        existing_year_int = None  # Mark invalid
-                    try:  # Try convert existing season to int
-                        existing_season_int = int(existing_season)  # Convert to integer
-                    except Exception:  # Conversion failed
-                        existing_season_int = None  # Mark invalid
+            series_id = None
 
-                    if existing_year_int is not None and existing_season_int is not None:  # Only when both valid integers
-                        series_lookup_name = series_name_sub or entry.name  # Prefer parsed series_name_sub, fallback to parent directory name for subdir
-                        try:  # Attempt to verify year with TMDb API for subdir
-                            series_id_chk = get_series_id(api_key, series_lookup_name)  # Lookup series id for verification
-                            api_year = get_season_year(api_key, series_id_chk, existing_season_int)  # Fetch year from API for existing season
-                        except Exception as e:  # API lookup failed for subdir
-                            verbose_output(true_string=f"{BackgroundColors.RED}Error verifying year for {series_lookup_name} S{existing_season}: {e}{Style.RESET_ALL}")  # Keep lookup diagnostics hidden unless VERBOSE=True
-                            api_year = None  # Mark API year as unavailable
+            if required_seasons:
+                try:
+                    series_id = get_series_id(
+                        api_key,
+                        series_prefix,
+                        required_seasons=required_seasons,
+                        expected_years=expected_years,
+                    )  # Resolve one series only after every local season has been prefixed
+                except Exception as e:
+                    verbose_output(
+                        true_string=f"{BackgroundColors.RED}Error resolving TMDb series for {series_prefix}: {e}{Style.RESET_ALL}"
+                    )
 
-                        if api_year is not None and str(api_year) == str(existing_year_int):  # API year matches existing year
-                            series_prefix = entry.name.strip()  # Series name from parent for Case 2
-                            expected_prefix = f"{series_prefix} - "  # Exact prefix pattern required
-                            if subentry.name.startswith(expected_prefix):  # If subdir already has correct prefix
-                                verbose_output(f"{BackgroundColors.YELLOW}Skipping (already correctly formatted): {subentry.name}{Style.RESET_ALL}")  # Inform that subdir is already correct
-                                continue  # Skip renaming for this subdirectory
-                            stripped = re.sub(rf"^{re.escape(series_prefix)}\s*-?\s*", "", subentry.name).strip()  # Remove any malformed leading series tokens
-                            prefixed_name = f"{expected_prefix}{stripped}"  # Build new name with exact separator
-                            prefixed_name = " ".join(prefixed_name.split())  # Normalize whitespace to avoid double spaces
-                            new_path = subentry.parent / prefixed_name  # Compute final path for prefixed rename
-                            
-                            change_desc = detect_changes(subentry.name, prefixed_name)  # Compute tags
-                            if change_desc:  # If tags present, print structured message and rename
-                                output_rename_change(change_desc, subentry.name, prefixed_name)  # Persist only the actual rename above the inline progress bar
-                                subentry.rename(new_path)  # Perform rename to add prefix
-                                if new_path.exists():  # Only record when filesystem shows the rename succeeded
-                                    root_key = str(root_path)  # Use string form of input root as dictionary key
-                                    if root_key not in report_data["input_dirs"]:  # Lazily create per-root entry when first change occurs
-                                        report_data["input_dirs"][root_key] = {  # Initialize per-root structure
-                                            "directories_modified": [],  # List to hold directory modifications
-                                            "video_files_renamed": [],  # List to hold video rename records (unused here but preserved)
-                                        }  # End initialization
-                                    tags = [t.strip() for t in change_desc.split("+")] if change_desc else []  # Split tags from detect_changes
-                                    labels = []  # Collect mapped labels for the report
-                                    if any("Add Year" in t for t in tags):  # Map to Year Added
-                                        labels.append("Year Added")  # Append label
-                                    if any("Correct Year" in t for t in tags):  # Map to Year Corrected
-                                        labels.append("Year Corrected")  # Append label
-                                    if any("Add Resolution" in t for t in tags):  # Map to Resolution Added
-                                        labels.append("Resolution Added")  # Append label
-                                    if any("Correct Resolution" in t for t in tags):  # Map to Resolution Corrected
-                                        labels.append("Resolution Corrected")  # Append label
-                                    if any("Remove Duplicate Tokens" in t for t in tags):  # Map to Duplicate Tokens Removed
-                                        labels.append("Duplicate Tokens Removed")  # Append label
-                                    if any("Reorder Tokens" in t for t in tags):  # Map to Format Reordered
-                                        labels.append("Format Reordered")  # Append label
-                                    if any("Normalize Format" in t or "Standardize Casing" in t for t in tags):  # Map spacing/casing changes
-                                        labels.append("Whitespace Normalized")  # Append label
-                                    try:  # Detect parentheses removal (guard regex)
-                                        if re.search(r"\(\d{4}\)", subentry.name) and not re.search(r"\(\d{4}\)", prefixed_name):  # Parentheses removed
-                                            labels.append("Parentheses Removed")  # Append label
-                                    except Exception:  # If regex fails
-                                        pass  # Ignore detection errors
-                                    try:  # Detect 4K -> 2160p conversion (guard regex)
-                                        if re.search(r"\b4k\b", subentry.name, re.IGNORECASE) and "2160p" in prefixed_name.lower():  # 4K converted
-                                            labels.append("4K Converted to 2160p")  # Append label
-                                    except Exception:  # If detection fails
-                                        pass  # Ignore detection errors
-                                    try:  # Detect language normalization differences (guard regex)
-                                        old_lang_match = re.search(r"\b(Dual|Dublado|English|Legendado|Nacional)\b", subentry.name, re.IGNORECASE)  # Find old lang token
-                                        if old_lang_match:  # If an old language token existed
-                                            old_lang_raw = old_lang_match.group(0)  # Extract raw matched token
-                                            if append_str and old_lang_raw != append_str:  # If canonical differs from raw
-                                                labels.append("Language Normalized")  # Append label
-                                    except Exception:  # On detection errors
-                                        pass  # Ignore
-                                    seen = set()  # Deduplicate labels while preserving order
-                                    final_labels = []  # Ordered unique labels
-                                    for L in labels:  # Iterate computed labels
-                                        if L not in seen:  # If label not yet recorded
-                                            seen.add(L)  # Mark seen
-                                            final_labels.append(L)  # Append to final list
-                                    report_data["input_dirs"][root_key]["directories_modified"].append({  # Append directory modification record
-                                        "old_name": subentry.name,  # Record old directory name
-                                        "new_name": prefixed_name,  # Record new directory name
-                                        "changes": final_labels,  # Record detected change labels
-                                    })  # End append directory record
-                            else:  # No meaningful tags found, verbose skip
-                                verbose_output(f"{BackgroundColors.YELLOW}Skipping (no detected meaningful change): {subentry.name}{Style.RESET_ALL}")  # Inform skip
-                            continue  # Continue to next subentry after prefixing
+            for season_info in season_infos:  # Pass 2: only now verify/correct year and the rest
+                subentry = season_info["path"]
+                season_num_sub = int(season_info["season_number"])
+                season_str_sub = f"{season_num_sub:02d}"
+                existing_year_int = season_info["existing_year"]
+                normalized_season_name = strip_expected_series_prefix(subentry.name, series_prefix)
 
-                        if api_year is not None and str(api_year) != str(existing_year_int):  # API year differs from folder year
-                            part_match_existing = re.search(r"\b(?P<label>part|pt|volume|vol|cour|arc)\b\.?\s*(?P<num>[A-Za-z0-9]+)\b", subentry.name, re.IGNORECASE)  # Detect existing part token in subdir
-                            if part_match_existing:  # If an existing part token exists in subdir
-                                part_label_existing = part_match_existing.group("label")  # Extract existing label
-                                part_num_existing = part_match_existing.group("num")  # Extract existing number/alpha
-                                existing_part_token = f"{part_label_existing.capitalize()} {part_num_existing}"  # Standardize existing part token
-                            else:  # No existing part token in subdir
-                                existing_part_token = None  # Ensure None when absent
-                            corrected_name = f"Season {existing_season} {int(api_year)}"  # Build corrected name with new year
-                            if existing_part_token:  # If a part token should be preserved
-                                corrected_name = f"{corrected_name} {existing_part_token}"  # Append part token after year
-                            if existing_resolution:  # Preserve existing resolution when present
-                                corrected_name = f"{corrected_name} {existing_resolution}"  # Append resolution after year/part
-                            if existing_suffix:  # Preserve existing suffix when present
-                                corrected_name = f"{corrected_name} {existing_suffix}"  # Append suffix
-                            corrected_name = " ".join(corrected_name.split())  # Normalize whitespace
-                            corrected_path = subentry.parent / corrected_name  # Compute corrected path
-                            
-                            change_desc = detect_changes(subentry.name, corrected_name)  # Compute tags
-                            if change_desc:  # If tags present, print structured message and rename
-                                output_rename_change(change_desc, subentry.name, corrected_name)  # Persist only the actual rename above the inline progress bar
-                                subentry.rename(corrected_path)  # Perform the filesystem rename to corrected year for subdirectory
-                            else:  # No meaningful tags found
-                                verbose_output(f"{BackgroundColors.YELLOW}Skipping (no detected meaningful change): {subentry.name}{Style.RESET_ALL}")  # Inform skip
-                            continue  # Continue to next subentry after correction
+                year = None
 
-                try:  # Attempt TMDb lookups for the subdirectory using resolved series_name_sub and season_num_sub
-                    series_id = get_series_id(api_key, series_name_sub)  # Fetch TMDb series id by name for subdir
-                    year = get_season_year(api_key, series_id, season_num_sub)  # Fetch season year for subdir
-                except Exception as e:  # Catch any exception from TMDb calls for subdir
-                    verbose_output(true_string=f"{BackgroundColors.RED}Error fetching year for {series_name_sub} S{season_str_sub}: {e}{Style.RESET_ALL}")  # Keep lookup diagnostics hidden unless VERBOSE=True
-                    year = None  # Mark year as unavailable after error
+                if series_id is not None:
+                    try:
+                        year = get_season_year(api_key, series_id, season_num_sub)
+                    except Exception as e:
+                        verbose_output(
+                            true_string=f"{BackgroundColors.RED}Error fetching year for {series_prefix} S{season_str_sub}: {e}{Style.RESET_ALL}"
+                        )
 
-                valid_year = None  # Assume invalid until proven otherwise
-                if year is not None:  # Only attempt conversion when year is not None
-                    try:  # Attempt to coerce year to int
-                        valid_year = int(year)  # Convert year to integer
-                    except Exception:  # Conversion failed, mark as invalid
-                        valid_year = None  # Ensure invalid status
+                valid_year = existing_year_int
 
-                existing_year_int = locals().get('existing_year_int', None)  # Safely fetch existing year int if present for subdir
-                if valid_year is None and existing_year_int is not None:  # If TMDb didn't provide a year but folder had one
-                    valid_year = existing_year_int  # Use the existing year instead of aborting
+                if year is not None:
+                    try:
+                        valid_year = int(year)
+                    except Exception:
+                        valid_year = existing_year_int
 
-                res_token_sub = determine_resolution(subentry, subentry.name)  # Determine resolution for this season subfolder
+                res_token_sub = determine_resolution(subentry, normalized_season_name)
 
-                part_match_sub = re.search(r"\b(?P<label>part|pt|volume|vol|cour|arc)\b\.?\s*(?P<num>[A-Za-z0-9]+)\b", subentry.name, re.IGNORECASE)  # Detect part/segment tokens in subdir
-                if part_match_sub:  # If a part token was found in subdir
-                    part_label_sub = part_match_sub.group("label")  # Extract matched label token
-                    part_num_sub = part_match_sub.group("num")  # Extract matched numeric/alpha part token
-                    part_token_sub = f"{part_label_sub.capitalize()} {part_num_sub}"  # Standardize casing and build token
-                else:  # No part token found in subdir
-                    part_token_sub = None  # Ensure part_token_sub is None when absent
+                part_match_sub = re.search(
+                    r"\b(?P<label>part|pt|volume|vol|cour|arc)\b\.?\s*(?P<num>[A-Za-z0-9]+)\b",
+                    normalized_season_name,
+                    re.IGNORECASE,
+                )
+                part_token_sub = (
+                    f"{part_match_sub.group('label').capitalize()} {part_match_sub.group('num')}"
+                    if part_match_sub
+                    else None
+                )
 
-                append_str = None  # Default to no suffix
-                for s in LANGUAGE_OPTIONS:  # Iterate in configured order
-                    if re.search(rf"\b{s}\b", subentry.name, re.IGNORECASE):  # Case-insensitive whole-word match
-                        append_str = s  # Select the first matching configured suffix
-                        break  # Stop after the first match
+                append_str = None
 
-                name_parts = ["Season", season_str_sub]  # Base parts (year optional)
-                if valid_year is not None:  # Append year only when available
-                    name_parts.append(str(valid_year))  # Add year token when present
-                if part_token_sub:  # Insert part token after year when present in subdir
-                    name_parts.append(part_token_sub)  # Preserve standardized part token for subdir
-                if res_token_sub:  # Insert resolution if present in original
-                    name_parts.append(res_token_sub)  # Preserve original casing for resolution
-                if append_str:  # Append suffix only when present
-                    name_parts.append(append_str)  # Append selected suffix
+                for language_option in LANGUAGE_OPTIONS:
+                    if re.search(rf"\b{re.escape(language_option)}\b", normalized_season_name, re.IGNORECASE):
+                        append_str = language_option
+                        break
 
-                new_name = " ".join(name_parts).strip()  # Join parts and trim edges
-                new_name = " ".join(new_name.split())  # Collapse multiple internal spaces
-                new_name = standardize_final_name(new_name)  # Apply capitalization rules for subdir name
-                new_name = " ".join(new_name.split())  # Normalize whitespace again after standardization
-                series_prefix = entry.name.strip()  # Extract and trim series name from parent directory
-                expected_prefix = f"{series_prefix} - "  # Build the expected prefix pattern with exact separator
+                name_parts = ["Season", season_str_sub]
 
-                if subentry.name.startswith(expected_prefix):  # Already has correct prefix
-                    if not new_name.startswith(expected_prefix):  # If generated name lacks the prefix
-                        stripped = re.sub(rf"^{re.escape(series_prefix)}\s*-?\s*", "", new_name).strip()  # Strip any leading series tokens
-                        new_name = f"{expected_prefix}{stripped}"  # Rebuild with single correct prefix
-                else:  # Prefix not present, prepend it now for Case 2
-                    stripped = re.sub(rf"^{re.escape(series_prefix)}\s*-?\s*", "", new_name).strip()  # Strip any leading series tokens
-                    new_name = f"{expected_prefix}{stripped}"  # Prepend correct prefix
+                if valid_year is not None:
+                    name_parts.append(str(valid_year))
+                if part_token_sub:
+                    name_parts.append(part_token_sub)
+                if res_token_sub:
+                    name_parts.append(res_token_sub)
+                if append_str:
+                    name_parts.append(append_str)
 
-                new_name = " ".join(new_name.split())  # Normalize internal whitespace to avoid double spaces
-                new_path = subentry.parent / new_name  # Compute final rename path
+                canonical_season_name = standardize_final_name(" ".join(name_parts))
+                canonical_season_name = " ".join(canonical_season_name.split())
+                new_name = " ".join(f"{series_prefix} - {canonical_season_name}".split())
+                new_path = subentry.parent / new_name
 
-                if new_name == subentry.name:  # If new name equals current, skip renaming
-                    verbose_output(f"{BackgroundColors.YELLOW}Skipping (already named): {subentry.name}{Style.RESET_ALL}")  # Inform skip
-                    continue  # Continue to next subentry
+                if new_name == subentry.name:
+                    verbose_output(f"{BackgroundColors.YELLOW}Skipping (already named): {subentry.name}{Style.RESET_ALL}")
+                    continue
 
-                
-                change_desc = detect_changes(subentry.name, new_name)  # Compute tags for final rename
-                if not change_desc:  # If no meaningful changes detected
-                    verbose_output(f"{BackgroundColors.YELLOW}Skipping (no detected meaningful change): {subentry.name}{Style.RESET_ALL}")  # Inform skip
-                    continue  # Continue to next subentry
+                if new_path.exists() and new_path != subentry:
+                    raise FileExistsError(f"Cannot rename season directory because destination already exists: {new_path}")
 
-                res_present = bool(res_token_sub)  # Detect presence of resolution token
-                lang_present = bool(append_str)  # Detect presence of language suffix
-                name_color = BackgroundColors.CYAN if (res_present and lang_present) else BackgroundColors.YELLOW  # Choose color
-                
-                output_rename_change(change_desc, subentry.name, new_name)  # Persist only the actual rename above the inline progress bar
-                subentry.rename(new_path)  # Perform the filesystem rename operation for subdirectory
-                
+                old_name = subentry.name
+                change_desc = detect_changes(old_name, new_name)
 
+                if not change_desc:
+                    verbose_output(f"{BackgroundColors.YELLOW}Skipping (no detected meaningful change): {subentry.name}{Style.RESET_ALL}")
+                    continue
+
+                output_rename_change(change_desc, old_name, new_name)
+                subentry.rename(new_path)
+
+                if not new_path.exists():
+                    raise RuntimeError(f"Season rename did not create expected directory: {new_path}")
+
+                record_directory_change(report_data, root_path, old_name, new_name, change_desc)
 
 
 def to_seconds(obj):
