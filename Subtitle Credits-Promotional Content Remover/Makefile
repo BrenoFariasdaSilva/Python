@@ -31,8 +31,7 @@ ENSURE_LOG_DIR := @mkdir -p $(LOG_DIR) 2>/dev/null || $(PYTHON_CMD) -c "import o
 ifeq ($(OS), Windows) # Windows
 RUN_AND_LOG = $(PYTHON) $(1)
 else
-RUN_AND_LOG = \ # Unix-like
-if [ -z "$(DETACH)" ]; then \
+RUN_AND_LOG = if [ -z "$(DETACH)" ]; then \
 	$(PYTHON) $(1); \
 else \
 	LOG_FILE=$(LOG_DIR)/$$(basename $(1) .py).log; \
@@ -45,10 +44,20 @@ endif
 all: run
 
 # Make Rules
-run: dependencies
+# Run the complete workflow in order: generate reports first, then remove reported blocks
+run: report remove
+
+# Detect subtitle credits/promotional content and generate reports
+report: dependencies
 	$(ENSURE_LOG_DIR)
 	$(CLEAR_CMD)
-	$(call RUN_AND_LOG, ./main.py)
+	$(call RUN_AND_LOG, ./detect.py)
+
+# Consume generated reports and remove the exact reported subtitle blocks
+remove: dependencies
+	$(ENSURE_LOG_DIR)
+	$(CLEAR_CMD)
+	$(call RUN_AND_LOG, ./remove.py)
 
 # Create virtual environment if missing
 $(VENV):
@@ -70,4 +79,4 @@ clean:
 	find . -type f -name '*.pyc' -delete || del /S /Q *.pyc 2>nul
 	find . -type d -name '__pycache__' -delete || rmdir /S /Q __pycache__ 2>nul
 
-.PHONY: all run clean dependencies generate_requirements
+.PHONY: all run report remove clean dependencies generate_requirements
