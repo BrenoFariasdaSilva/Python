@@ -21,7 +21,8 @@ Description :
           descriptive lines while preserving ambiguous dialogue content.
         - Removes recognized SRT formatting tags (<i>, <b>, <u>, and <font>),
           collapses repeated horizontal whitespace, fixes spacing before
-          punctuation, and renumbers serialized subtitle entries sequentially.
+          punctuation, detects non-sequential/duplicate/out-of-order indexes,
+          and strictly renumbers every published subtitle entry as 1..N.
         - Validates cleaned SRT output before publishing and uses temporary
           sibling files plus os.replace() for atomic writes.
         - Supports in-place source updates or separate .cleaned.srt output via
@@ -68,8 +69,8 @@ Assumptions & Notes:
       INPUT_DIRS.
     - SDH removal is intentionally conservative; only recognized short
       descriptive phrases/fragments are removed automatically.
-    - Changed subtitles are serialized as UTF-8 with LF line endings and
-      sequential numeric indexes.
+    - Changed or misnumbered subtitles are serialized as UTF-8 with LF line
+      endings and strictly sequential numeric indexes from 1 through N.
     - Unchanged files are not rewritten and do not receive a per-file diff.
     - The JSON report stores paths using forward slashes and includes only files
       that had fixed or unresolved issues.
@@ -912,6 +913,72 @@ def serialize_srt_entries(entries: list[tuple[int, str, list[str]]]) -> str:
     return "\n\n".join(blocks) + ("\n" if blocks else "")  # Return valid SRT text
 
 
+def detect_srt_index_repairs(entries: list[tuple[int, str, list[str]]]) -> list[tuple[int, int, str]]:
+    """
+    Detect retained SRT entries whose source indexes are not sequential after all removals/repairs.
+
+    The expected final index is based on the entry's final position after structural
+    repairs and SDH/descriptive-entry removals. This catches gaps, duplicates,
+    out-of-order indexes, and artificial indexes such as 9999.
+
+    :param entries: Final retained subtitle entries before serialization.
+    :return: Original index, corrected sequential index, and timestamp records.
+    """
+
+    repairs = []  # Store every index that must change in the final serialized SRT
+
+    for expected_index, entry in enumerate(entries, start=1):  # Compare final position against source index
+        original_index = int(entry[0])  # Read source index retained by parsing/cleaning
+
+        if original_index != expected_index:  # Detect any gap, duplicate, out-of-order, or artificial index
+            repairs.append((original_index, expected_index, entry[1]))  # Preserve exact source/corrected mapping and timestamp
+
+    return repairs  # Return deterministic index-repair records
+
+
+def build_index_repair_report(repairs: list[tuple[int, int, str]]) -> str:
+    """
+    Build diff report sections for corrected SRT block indexes.
+
+    :param repairs: Original index, corrected index, and timestamp records.
+    :return: Human-readable index-repair report text.
+    """
+
+    sections = []  # Store one section per corrected block index
+
+    for original_index, corrected_index, timestamp in repairs:  # Describe each exact index correction
+        sections.append(
+            f"Original index: {original_index}\n"
+            f"Timestamp: {timestamp}\n"
+            f"Change: SRT block index renumbered sequentially\n"
+            f"Corrected index: {corrected_index}"
+        )  # Add exact before/after index mapping
+
+    return "\n\n---\n\n".join(sections) + ("\n" if sections else "")  # Return diff-compatible report text
+
+
+def validate_sequential_srt_indexes(
+    entries: list[tuple[int, str, list[str]]],
+    filepath: Path,
+) -> None:
+    """
+    Strictly validate that parsed SRT indexes are exactly 1..N with no gaps or duplicates.
+
+    :param entries: Parsed SRT entries in file order.
+    :param filepath: SRT path used for error context.
+    :return: None
+    """
+
+    for expected_index, entry in enumerate(entries, start=1):  # Validate every serialized block position
+        actual_index = int(entry[0])  # Read parsed index from output
+
+        if actual_index != expected_index:  # Reject gaps, duplicates, out-of-order IDs, or artificial numbers
+            raise ValueError(
+                f"Non-sequential SRT index in block {expected_index} in {filepath}: "
+                f"expected {expected_index}, found {actual_index}"
+            )  # Prevent publishing structurally inconsistent numbering
+
+
 def normalize_phrase(value: str) -> str:
     """
     Normalize a possible SDH phrase for conservative matching.
@@ -1125,7 +1192,8 @@ def validate_cleaned_srt(content: str, filepath: Path) -> None:
     if not content.strip():  # Allow an empty cleaned file when every entry was removed
         return  # Empty output is valid for all-descriptor sources
 
-    parse_srt_content(content, filepath)  # Validate serialized SRT structure
+    parsed_entries = parse_srt_content(content, filepath)  # Validate serialized SRT structure
+    validate_sequential_srt_indexes(parsed_entries, filepath)  # Require exact 1..N block numbering after every repair/change
 
 
 def atomic_write_text(filepath: Path, content: str) -> None:
@@ -1298,6 +1366,7 @@ def describe_fixed_issues(
     timestamp_repairs: list[tuple[int, str, str]],
     split_block_repairs: list[tuple[int, str, str]],
     empty_block_repairs: list[tuple[int, str]],
+    index_repairs: list[tuple[int, int, str]],
     changes: list[tuple[int, str, str, str, bool]],
 ) -> list[dict[str, object]]:
     """
@@ -1307,6 +1376,7 @@ def describe_fixed_issues(
     :param timestamp_repairs: Repaired timestamp records.
     :param split_block_repairs: Reattached text from SRT blocks split by invalid blank lines.
     :param empty_block_repairs: Removed empty block records.
+    :param index_repairs: Original-to-corrected sequential SRT index mappings.
     :param changes: Subtitle text changes/removals.
     :return: Ordered fixed-issue objects with block context and exact before/after data.
     """
@@ -1342,6 +1412,17 @@ def describe_fixed_issues(
                 "timestamp": timestamp,
                 "original_text": "",
                 "action": "removed",
+            }
+        )
+
+    for original_index, corrected_index, timestamp in index_repairs:  # Report every corrected non-sequential SRT index
+        fixed_issues.append(
+            {
+                "issue_type": "non_sequential_srt_index_repaired",
+                "original_index": original_index,
+                "corrected_index": corrected_index,
+                "timestamp": timestamp,
+                "action": "renumbered_sequentially",
             }
         )
 
@@ -1468,8 +1549,9 @@ def process_srt_file(filepath: Path, input_dir: Path, log_output: bool = True) -
         failure_context_content = structurally_repaired_content  # Preserve structurally repaired content for strict parser failures
         entries = parse_srt_content(structurally_repaired_content, filepath)  # Parse and validate structurally repaired source SRT
         cleaned_entries, changes, removed_count, modified_count = clean_subtitle_entries(entries)  # Remove SDH content
+        index_repairs = detect_srt_index_repairs(cleaned_entries)  # Detect final gaps, duplicates, out-of-order IDs, and artificial indexes after all removals
 
-        if not changes and not timestamp_repairs and not split_block_repairs and not empty_block_repairs and not text_repairs:  # Avoid output files when no subtitle cleanup or repair occurred
+        if not changes and not timestamp_repairs and not split_block_repairs and not empty_block_repairs and not index_repairs and not text_repairs:  # Avoid output files only when no cleanup, repair, or renumbering is required
             if log_output:  # Preserve direct-call unchanged log outside progress-bar mode
                 print(f"No SDH/descriptive content or SRT repairs found: {relative_path}")  # Log unchanged source
             return 0, 1, 0, 0, 0, None  # Return unchanged count without a report entry
@@ -1488,7 +1570,8 @@ def process_srt_file(filepath: Path, input_dir: Path, log_output: bool = True) -
         timestamp_diff_content = build_timestamp_repair_report(timestamp_repairs)  # Build timestamp repair report when needed
         split_block_diff_content = build_split_block_repair_report(split_block_repairs)  # Build invalid blank-line split-block repair report
         empty_block_diff_content = build_empty_block_repair_report(empty_block_repairs)  # Build malformed empty-block repair report when needed
-        diff_sections = [section.rstrip() for section in (timestamp_diff_content, split_block_diff_content, empty_block_diff_content, text_diff_content) if section.strip()]  # Keep only populated report sections
+        index_diff_content = build_index_repair_report(index_repairs)  # Build exact source-to-sequential block-index repair report
+        diff_sections = [section.rstrip() for section in (timestamp_diff_content, split_block_diff_content, empty_block_diff_content, index_diff_content, text_diff_content) if section.strip()]  # Keep only populated report sections
         diff_content = "\n\n---\n\n".join(diff_sections) + ("\n" if diff_sections else "")  # Merge structural and text changes into one diff report
 
         if not diff_content.strip():  # Prevent empty diff output
@@ -1497,7 +1580,7 @@ def process_srt_file(filepath: Path, input_dir: Path, log_output: bool = True) -
         atomic_write_text(cleaned_srt_filepath, cleaned_content)  # Write cleaned SRT beside source
         atomic_write_text(diff_filepath, diff_content)  # Write diff report beside source
 
-        fixed_issues = describe_fixed_issues(text_repairs, timestamp_repairs, split_block_repairs, empty_block_repairs, changes)  # Describe only fixes that were successfully published
+        fixed_issues = describe_fixed_issues(text_repairs, timestamp_repairs, split_block_repairs, empty_block_repairs, index_repairs, changes)  # Describe only fixes that were successfully published
         file_report = build_file_issue_report(filepath, fixed_issues=fixed_issues)  # Build successful file issue report
 
         if log_output:  # Preserve direct-call output logs outside progress-bar mode
