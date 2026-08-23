@@ -550,6 +550,17 @@ def remove_empty_html_tags(value: str) -> str:
     return value  # Return cleaned line
 
 
+def normalize_subtitle_whitespace(value: str) -> str:
+    """
+    Normalize repeated horizontal whitespace without merging subtitle lines.
+
+    :param value: Subtitle text to normalize.
+    :return: Text with horizontal whitespace runs collapsed to one regular space.
+    """
+
+    return re.sub(r"[^\S\r\n]+", " ", value).strip()  # Collapse spaces, tabs, and other horizontal whitespace runs
+
+
 def clean_subtitle_line(line: str) -> str:
     """
     Remove conservative SDH/descriptive fragments from one subtitle line.
@@ -577,12 +588,12 @@ def clean_subtitle_line(line: str) -> str:
     if is_music_only_line(cleaned_line):  # Remove music-only descriptor lines
         return ""  # Drop descriptor line
 
-    cleaned_line = re.sub(r"[ \t]{2,}", " ", cleaned_line)  # Collapse horizontal whitespace
+    cleaned_line = normalize_subtitle_whitespace(cleaned_line)  # Collapse repeated horizontal whitespace to one regular space
     cleaned_line = re.sub(r"\s+([,.!?;:])", r"\1", cleaned_line)  # Remove spaces before punctuation
     cleaned_line = re.sub(r"(<[^/][^>]*>)\s+", r"\1", cleaned_line)  # Remove leading whitespace inside opening tags
     cleaned_line = re.sub(r"\s+(</[^>]+>)", r"\1", cleaned_line)  # Remove trailing whitespace inside closing tags
     cleaned_line = remove_empty_html_tags(cleaned_line)  # Remove any newly empty tags
-    return cleaned_line.strip()  # Return normalized cleaned line
+    return normalize_subtitle_whitespace(cleaned_line)  # Normalize whitespace introduced by cleanup and strip outer whitespace
 
 
 def clean_subtitle_lines(lines: list[str]) -> list[str]:
