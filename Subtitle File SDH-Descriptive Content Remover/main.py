@@ -13,7 +13,8 @@ Description :
     Key features include:
         - Recursively discovers .srt files while excluding generated
           .cleaned.srt files.
-        - Decodes UTF-16 BOM, UTF-8, CP1252, and Latin-1 subtitle files and
+        - Decodes UTF-16 BOM, UTF-8, CP1252, and Latin-1 subtitle files, prefers
+          structurally valid UTF-8 over lossy single-byte reinterpretations, and
           conservatively repairs common mojibake/Unicode normalization issues.
         - Repairs safely normalizable SRT timestamps, subtitle entries split by
           one or multiple invalid blank lines anywhere inside their text, and
@@ -118,6 +119,35 @@ OUTPUT_DIR = Path("./Outputs")  # Directory used for per-input-directory JSON re
 INPUT_DIRS = [f"E:/Movies/", f"F:/Documentaries/", f"F:/Movies/", f"F:/Series/", f"G:/Animes/", f"G:/Series/"]  # Directories searched recursively for source SRT files
 SRT_TEXT_ENCODINGS = ("utf-8-sig", "utf-8", "cp1252", "latin-1")  # Common UTF-8 and Western/Portuguese subtitle encodings
 MOJIBAKE_MARKERS = ("Ã", "Â", "â€", "ðŸ", "ï»¿", "�")  # Strong indicators of UTF-8 text decoded through a Western single-byte encoding
+WINDOWS_1252_C1_TRANSLATION = str.maketrans({
+    "\u0080": "€",
+    "\u0082": "‚",
+    "\u0083": "ƒ",
+    "\u0084": "„",
+    "\u0085": "…",
+    "\u0086": "†",
+    "\u0087": "‡",
+    "\u0088": "ˆ",
+    "\u0089": "‰",
+    "\u008A": "Š",
+    "\u008B": "‹",
+    "\u008C": "Œ",
+    "\u008E": "Ž",
+    "\u0091": "‘",
+    "\u0092": "’",
+    "\u0093": "“",
+    "\u0094": "”",
+    "\u0095": "•",
+    "\u0096": "–",
+    "\u0097": "—",
+    "\u0098": "˜",
+    "\u0099": "™",
+    "\u009A": "š",
+    "\u009B": "›",
+    "\u009C": "œ",
+    "\u009E": "ž",
+    "\u009F": "Ÿ",
+})  # Repair common Windows-1252 punctuation bytes that were preserved as Unicode C1 controls in otherwise valid UTF-8 subtitle text
 SRT_TIMESTAMP_PATTERN = re.compile(r"^\d{2}:\d{2}:\d{2},\d{3}\s+-->\s+\d{2}:\d{2}:\d{2},\d{3}(?:\s+.*)?$")  # SRT timestamp validation pattern
 SRT_REPAIRABLE_TIMESTAMP_PATTERN = re.compile(r"^(?P<start_h>\d{1,2}):(?P<start_m>\d{1,2}):(?P<start_s>\d{1,2}),(?P<start_ms>\d+)\s+-->\s+(?P<end_h>\d{1,2}):(?P<end_m>\d{1,2}):(?P<end_s>\d{1,2}),(?P<end_ms>\d+)(?P<suffix>(?:\s+.*)?)$")  # Repair pattern accepting short time fields plus short/overlong fractional fields
 SUBTITLE_FORMATTING_TAG_PATTERN = re.compile(r"</?(?:i|b|u|font)(?:\s+[^<>]*)?>", re.IGNORECASE)  # Recognized SRT formatting tag pattern
@@ -453,6 +483,7 @@ def repair_common_mojibake(value: str) -> str:
     """
 
     repaired_value = unicodedata.normalize("NFC", value)  # Normalize decomposed accents such as a + combining acute
+    repaired_value = repaired_value.translate(WINDOWS_1252_C1_TRANSLATION)  # Convert common C1 quote/dash controls into their intended printable Windows-1252 punctuation
 
     for _ in range(2):  # Repair at most two layers of accidental re-encoding
         current_score = mojibake_score(repaired_value)  # Measure current text corruption indicators
@@ -542,6 +573,48 @@ def build_unicode_repair_issues(original_text: str, repaired_text: str) -> list[
     return issues  # Return specific Unicode repair objects
 
 
+def build_unicode_repair_report(text_repairs: list[dict[str, object]]) -> str:
+    """
+    Build deterministic diff sections for Unicode/mojibake repairs.
+
+    :param text_repairs: Line-level or structural Unicode repair records.
+    :return: Human-readable Unicode repair report text.
+    """
+
+    sections = []
+
+    for repair in text_repairs:
+        issue_type = str(repair.get("issue_type", "unicode_or_mojibake_text_repair"))
+
+        if issue_type == "unicode_or_mojibake_structure_repair":
+            sections.append(
+                "Change: Unicode/mojibake structure repaired\n"
+                f"Original:\n{repair.get('original_text', '')}\n"
+                f"Cleaned:\n{repair.get('fixed_text', '')}"
+            )
+            continue
+
+        context_lines = []
+
+        if repair.get("original_index") is not None:
+            context_lines.append(f"Original index: {repair['original_index']}")
+        if repair.get("timestamp"):
+            context_lines.append(f"Timestamp: {repair['timestamp']}")
+        if repair.get("line_number") is not None:
+            context_lines.append(f"Source line: {repair['line_number']}")
+
+        context_lines.extend(
+            (
+                "Change: Unicode/mojibake text repaired",
+                f"Original:\n{repair.get('original_text', '')}",
+                f"Cleaned:\n{repair.get('fixed_text', '')}",
+            )
+        )
+        sections.append("\n".join(context_lines))
+
+    return "\n\n---\n\n".join(sections) + ("\n" if sections else "")
+
+
 def count_srt_header_candidates(value: str) -> int:
     """
     Count lines that look like an SRT numeric index followed by a timestamp line.
@@ -612,25 +685,29 @@ def is_probably_binary_text(value: str) -> bool:
 
 def decode_srt_bytes(data: bytes, filepath: Path) -> tuple[str, str]:
     """
-    Decode SRT bytes by evaluating all realistic text encodings instead of
-    accepting the first single-byte decoder that happens not to raise.
+    Decode SRT bytes by evaluating realistic text encodings and SRT structure.
 
-    This prevents arbitrary binary bytes from being silently accepted as
-    CP1252/Latin-1 and also recovers common UTF-16 LE/BE subtitles without BOMs.
+    A structurally valid, non-binary UTF-8 decode is preferred over CP1252/Latin-1
+    reinterpretations of the same bytes. This prevents valid Portuguese UTF-8 text
+    from being converted into hundreds of temporary mojibake repairs merely because
+    the file contains a few C1 quote/dash controls. UTF-16 LE/BE without a BOM is
+    still considered when it provides the stronger SRT structure.
 
     :param data: Raw source bytes.
     :param filepath: Source path for error context.
     :return: Best decoded text and selected encoding.
     """
 
-    encoding_candidates = []
+    encoding_candidates = []  # Preserve deterministic preference order
 
     if data.startswith((b"\xff\xfe\x00\x00", b"\x00\x00\xfe\xff")):
-        encoding_candidates.append("utf-32")
+        encoding_candidates.append("utf-32")  # Respect an explicit UTF-32 BOM first
     elif data.startswith((b"\xff\xfe", b"\xfe\xff")):
-        encoding_candidates.append("utf-16")
+        encoding_candidates.append("utf-16")  # Respect an explicit UTF-16 BOM first
+    elif data.startswith(b"\xef\xbb\xbf"):
+        encoding_candidates.append("utf-8-sig")  # Strip an explicit UTF-8 BOM
 
-    for encoding in ("utf-8-sig", "utf-8", "cp1252", "latin-1", "utf-16-le", "utf-16-be"):
+    for encoding in ("utf-8", "cp1252", "latin-1", "utf-16-le", "utf-16-be"):
         if encoding not in encoding_candidates:
             encoding_candidates.append(encoding)
 
@@ -651,6 +728,7 @@ def decode_srt_bytes(data: bytes, filepath: Path) -> tuple[str, str]:
                 "text": decoded_text,
                 "header_count": header_count,
                 "binary_penalty": binary_penalty,
+                "mojibake_penalty": mojibake_score(decoded_text),
                 "preference_index": preference_index,
                 "binary_like": is_probably_binary_text(decoded_text),
             }
@@ -664,14 +742,41 @@ def decode_srt_bytes(data: bytes, filepath: Path) -> tuple[str, str]:
     ]
 
     if candidates_with_headers:
-        selected = sorted(
-            candidates_with_headers,
-            key=lambda candidate: (
-                -candidate["header_count"],
-                candidate["binary_penalty"],
-                candidate["preference_index"],
-            ),
-        )[0]
+        best_header_count = max(candidate["header_count"] for candidate in candidates_with_headers)
+        strongest_structure_candidates = [
+            candidate
+            for candidate in candidates_with_headers
+            if candidate["header_count"] == best_header_count
+        ]
+        nonbinary_structure_candidates = [
+            candidate
+            for candidate in strongest_structure_candidates
+            if not candidate["binary_like"]
+        ]
+
+        if nonbinary_structure_candidates:
+            strongest_structure_candidates = nonbinary_structure_candidates
+
+        utf8_candidates = [
+            candidate
+            for candidate in strongest_structure_candidates
+            if candidate["encoding"] in {"utf-8", "utf-8-sig"}
+        ]
+
+        if utf8_candidates:
+            selected = min(
+                utf8_candidates,
+                key=lambda candidate: candidate["preference_index"],
+            )  # Successful structured UTF-8 is stronger evidence than a CP1252 reinterpretation
+        else:
+            selected = sorted(
+                strongest_structure_candidates,
+                key=lambda candidate: (
+                    candidate["binary_penalty"],
+                    candidate["mojibake_penalty"],
+                    candidate["preference_index"],
+                ),
+            )[0]
     else:
         plausible_text_candidates = [
             candidate for candidate in decoded_candidates if not candidate["binary_like"]
@@ -683,10 +788,23 @@ def decode_srt_bytes(data: bytes, filepath: Path) -> tuple[str, str]:
                 f"{filepath.resolve().as_posix()}"
             )
 
-        selected = sorted(
-            plausible_text_candidates,
-            key=lambda candidate: candidate["preference_index"],
-        )[0]
+        utf8_candidates = [
+            candidate
+            for candidate in plausible_text_candidates
+            if candidate["encoding"] in {"utf-8", "utf-8-sig"}
+        ]
+
+        if utf8_candidates:
+            selected = min(utf8_candidates, key=lambda candidate: candidate["preference_index"])
+        else:
+            selected = sorted(
+                plausible_text_candidates,
+                key=lambda candidate: (
+                    candidate["binary_penalty"],
+                    candidate["mojibake_penalty"],
+                    candidate["preference_index"],
+                ),
+            )[0]
 
     selected_text = str(selected["text"])
 
@@ -697,7 +815,6 @@ def decode_srt_bytes(data: bytes, filepath: Path) -> tuple[str, str]:
         )
 
     return selected_text, str(selected["encoding"])
-
 
 def read_srt_file(filepath: Path) -> tuple[str, str, list[dict[str, object]]]:
     """
@@ -1859,16 +1976,17 @@ def process_srt_file(filepath: Path, input_dir: Path, log_output: bool = True) -
 
         cleaned_content = serialize_srt_entries(cleaned_entries)  # Serialize cleaned SRT with sequential numbering
         validate_cleaned_srt(cleaned_content, cleaned_srt_filepath)  # Validate cleaned SRT before writing
+        unicode_diff_content = build_unicode_repair_report(text_repairs)  # Build exact Unicode/mojibake repair report when needed
         text_diff_content = build_diff_report(changes) if changes else ""  # Build readable subtitle-text diff report when needed
         timestamp_diff_content = build_timestamp_repair_report(timestamp_repairs)  # Build timestamp repair report when needed
         split_block_diff_content = build_split_block_repair_report(split_block_repairs)  # Build invalid blank-line split-block repair report
         empty_block_diff_content = build_empty_block_repair_report(empty_block_repairs)  # Build malformed empty-block repair report when needed
         index_diff_content = build_index_repair_report(index_repairs)  # Build exact source-to-sequential block-index repair report
-        diff_sections = [section.rstrip() for section in (timestamp_diff_content, split_block_diff_content, empty_block_diff_content, index_diff_content, text_diff_content) if section.strip()]  # Keep only populated report sections
+        diff_sections = [section.rstrip() for section in (unicode_diff_content, timestamp_diff_content, split_block_diff_content, empty_block_diff_content, index_diff_content, text_diff_content) if section.strip()]  # Keep only populated report sections for every change type considered by the changed-file gate
         diff_content = "\n\n---\n\n".join(diff_sections) + ("\n" if diff_sections else "")  # Merge structural and text changes into one diff report
 
-        if not diff_content.strip():  # Prevent empty diff output
-            raise ValueError(f"Empty diff report for changed file: {filepath}")  # Report invalid diff state
+        if not diff_content.strip():  # Every change type accepted by the changed-file gate must have a corresponding diff section
+            raise ValueError(f"Internal error: changed file produced no diff sections: {filepath}")  # Preserve invariant instead of silently publishing an unreported change
 
         atomic_write_text(cleaned_srt_filepath, cleaned_content)  # Write cleaned SRT beside source
         atomic_write_text(diff_filepath, diff_content)  # Write diff report beside source
