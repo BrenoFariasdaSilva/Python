@@ -54,6 +54,7 @@ import re  # For matching SRT timestamps and SDH fragments
 import unicodedata  # For normalizing Unicode subtitle text
 from colorama import Style  # For coloring the terminal
 from pathlib import Path  # For handling file paths
+from tqdm import tqdm  # For displaying in-place per-directory progress bars
 
 
 # Macros:
@@ -767,6 +768,17 @@ def atomic_write_text(filepath: Path, content: str) -> None:
             temporary_filepath.unlink()  # Remove incomplete temporary file
 
 
+def display_input_directory(input_dir: Path) -> str:
+    """
+    Format an input directory using forward slashes for progress display.
+
+    :param input_dir: Input root path.
+    :return: Display-friendly input directory path.
+    """
+
+    return input_dir.as_posix().rstrip("/") + "/"  # Keep Unix-like separators and one trailing slash
+
+
 def display_relative_path(filepath: Path, input_dir: Path) -> str:
     """
     Format a path relative to the input directory when possible.
@@ -782,17 +794,20 @@ def display_relative_path(filepath: Path, input_dir: Path) -> str:
         return filepath.as_posix()  # Return absolute display path
 
 
-def process_srt_file(filepath: Path, input_dir: Path) -> tuple[int, int, int, int, int]:
+def process_srt_file(filepath: Path, input_dir: Path, log_output: bool = True) -> tuple[int, int, int, int, int]:
     """
     Process one SRT file and write cleaned output when content changed.
 
     :param filepath: Source SRT path.
     :param input_dir: Input root path.
+    :param log_output: Set to False when an external progress bar owns per-file terminal output.
     :return: Cleaned files, unchanged files, failed files, removed entries, and modified mixed entries.
     """
 
     relative_path = display_relative_path(filepath, input_dir)  # Build concise log path
-    print(f"Processing: {relative_path}")  # Log source being processed
+
+    if log_output:  # Preserve direct-call processing log outside progress-bar mode
+        print(f"Processing: {relative_path}")  # Log source being processed
 
     try:  # Keep one file failure from stopping the batch
         content, _encoding = read_srt_file(filepath)  # Read and decode source SRT
@@ -800,7 +815,8 @@ def process_srt_file(filepath: Path, input_dir: Path) -> tuple[int, int, int, in
         cleaned_entries, changes, removed_count, modified_count = clean_subtitle_entries(entries)  # Remove SDH content
 
         if not changes:  # Avoid output files when nothing changed
-            print(f"No SDH/descriptive content found: {relative_path}")  # Log unchanged source
+            if log_output:  # Preserve direct-call unchanged log outside progress-bar mode
+                print(f"No SDH/descriptive content found: {relative_path}")  # Log unchanged source
             return 0, 1, 0, 0, 0  # Return unchanged count
 
         cleaned_srt_filepath = filepath if IN_PLACE_UPDATE else filepath.with_name(f"{filepath.stem}.cleaned.srt")  # Select original file or separate cleaned output
@@ -821,12 +837,17 @@ def process_srt_file(filepath: Path, input_dir: Path) -> tuple[int, int, int, in
         atomic_write_text(cleaned_srt_filepath, cleaned_content)  # Write cleaned SRT beside source
         atomic_write_text(diff_filepath, diff_content)  # Write diff report beside source
 
-        output_label = "Updated in place" if IN_PLACE_UPDATE else "Cleaned"  # Describe how cleaned subtitle content was published
-        print(f"{output_label}: {display_relative_path(cleaned_srt_filepath, input_dir)}")  # Log cleaned output destination
-        print(f"Diff: {display_relative_path(diff_filepath, input_dir)}")  # Log diff output
+        if log_output:  # Preserve direct-call output logs outside progress-bar mode
+            output_label = "Updated in place" if IN_PLACE_UPDATE else "Cleaned"  # Describe how cleaned subtitle content was published
+            print(f"{output_label}: {display_relative_path(cleaned_srt_filepath, input_dir)}")  # Log cleaned output destination
+            print(f"Diff: {display_relative_path(diff_filepath, input_dir)}")  # Log diff output
         return 1, 0, 0, removed_count, modified_count  # Return cleaned counts
     except Exception as exc:  # Report file-specific failure and continue
-        print(f"{BackgroundColors.RED}Failed: {BackgroundColors.CYAN}{relative_path}{BackgroundColors.RED} - {exc}{Style.RESET_ALL}")  # Log concise failure
+        failure_message = f"{BackgroundColors.RED}Failed: {BackgroundColors.CYAN}{relative_path}{BackgroundColors.RED} - {exc}{Style.RESET_ALL}"  # Build concise failure log
+        if log_output:  # Use normal output outside progress-bar mode
+            print(failure_message)  # Log failure directly
+        else:  # Keep tqdm progress display intact while surfacing the error
+            tqdm.write(failure_message)  # Print above the active progress bar and redraw it
         return 0, 0, 1, 0, 0  # Return failure count
 
 
@@ -861,14 +882,27 @@ def main():
 
         srt_files = discover_srt_files(input_dir)  # Discover source SRT files recursively in current input directory
         discovered_count += len(srt_files)  # Add current directory discovery count
+        directory_display = display_input_directory(input_dir)  # Build Unix-like directory label for progress output
 
-        for srt_file in srt_files:  # Process every source SRT file in current input directory
-            file_cleaned, file_unchanged, file_failed, file_removed, file_modified = process_srt_file(srt_file, input_dir)  # Process one source file
-            cleaned_count += file_cleaned  # Add cleaned file count
-            unchanged_count += file_unchanged  # Add unchanged file count
-            failed_count += file_failed  # Add failed file count
-            removed_entries_count += file_removed  # Add removed entry count
-            modified_entries_count += file_modified  # Add modified entry count
+        with tqdm(
+            srt_files,
+            total=len(srt_files),
+            desc=f"{BackgroundColors.GREEN}Processing {BackgroundColors.CYAN}{directory_display}{Style.RESET_ALL}",
+            unit="file",
+            dynamic_ncols=True,
+            leave=True,
+            colour="green",
+            bar_format="{desc}: {percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}] {postfix}",
+        ) as progress_bar:  # Create exactly one in-place progress bar for the current input directory
+            for srt_file in progress_bar:  # Process every source SRT file while reusing the same progress line
+                relative_path = display_relative_path(srt_file, input_dir)  # Build current file path for progress display
+                progress_bar.set_postfix_str(f"{BackgroundColors.GREEN}File: {BackgroundColors.CYAN}{relative_path}{Style.RESET_ALL}", refresh=True)  # Show current file without creating a new progress bar
+                file_cleaned, file_unchanged, file_failed, file_removed, file_modified = process_srt_file(srt_file, input_dir, log_output=False)  # Process one source file without per-file scrolling logs
+                cleaned_count += file_cleaned  # Add cleaned file count
+                unchanged_count += file_unchanged  # Add unchanged file count
+                failed_count += file_failed  # Add failed file count
+                removed_entries_count += file_removed  # Add removed entry count
+                modified_entries_count += file_modified  # Add modified entry count
 
     print(
         f"{BackgroundColors.GREEN}Summary:{Style.RESET_ALL}\n"
