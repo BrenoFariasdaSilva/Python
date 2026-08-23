@@ -50,7 +50,7 @@ Assumptions & Notes:
     - REQUIRE_FILE_HASH_MATCH=True prevents stale-report removal.
     - If a file changed after detection, that file is skipped rather than guessed.
     - Only exact occurrence objects still present in reviewed detector reports are eligible
-      for removal. Schema/policy v3 reports are required so old false-positive-prone
+      for removal. Schema/policy v4 reports are required so older false-positive-prone
       detections cannot be consumed accidentally. Deleting a finding/occurrence from JSON prevents that block from being removed.
     - Report summary counts/categories are informational and never create removal targets.
     - Non-target subtitle text/timestamps are preserved; the remover does not apply detector logic.
@@ -87,8 +87,8 @@ VERBOSE = False  # Set to True to output verbose messages
 INPUT_DIRS = [f"E:/Movies/", f"F:/Documentaries/", f"F:/Movies/", f"F:/Series/", f"G:/Animes/", f"G:/Series/"]  # Input roots whose detector reports are consumed
 OUTPUT_DIR = Path("./Outputs")  # Directory containing detector reports
 REQUIRE_FILE_HASH_MATCH = True  # Refuse removal if an SRT file changed after detection
-REQUIRED_REPORT_SCHEMA_VERSION = 3  # Refuse reports generated before the false-positive hardening changes
-REQUIRED_DETECTION_POLICY = "high_precision_context_v3"  # Require reports from the matching precision-first detector policy
+REQUIRED_REPORT_SCHEMA_VERSION = 4  # Refuse reports generated before the multiline-credit false-positive hardening changes
+REQUIRED_DETECTION_POLICY = "high_precision_context_v4"  # Require reports from the matching precision-first detector policy
 SRT_TEXT_ENCODINGS = ("utf-8-sig", "utf-8", "cp1252", "latin-1")  # Common subtitle encodings
 
 

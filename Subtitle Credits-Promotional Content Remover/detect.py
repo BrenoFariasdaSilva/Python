@@ -18,7 +18,7 @@ Description :
     Key features include:
         - Recursive SRT discovery across multiple configured input directories
         - Precision-first evidence-gated credit/promotional-content detection
-        - Generic translation/revision labels require validated creator-identity payloads
+        - Generic translation/revision labels require validated creator-identity payloads, including multiline role/payload forms
         - Plain Translation-name credits require cross-title repetition instead of edge position alone
         - Names-only neighboring blocks are never inferred as removable from adjacency alone
         - Strict URL/domain validation that rejects numeric thousands, dotted initials,
@@ -95,8 +95,8 @@ INPUT_DIRS = [f"E:/Movies/", f"F:/Documentaries/", f"F:/Movies/", f"F:/Series/",
 OUTPUT_DIR = Path("./Outputs")  # Directory used for one grouped JSON report per input directory
 EDGE_BLOCK_WINDOW = 20  # Number of first/last blocks eligible for conservative edge-context rules
 CROSS_CONTENT_REPETITION_MIN = 2  # Minimum distinct titles required before an ambiguous endpoint can be trusted as repeated injected content
-REPORT_SCHEMA_VERSION = 3  # Detector report schema version consumed by the exact report-driven remover
-DETECTION_POLICY = "high_precision_context_v3"  # Precision-first policy that rejects uncorroborated workflow-label dialogue and adjacency-only continuations
+REPORT_SCHEMA_VERSION = 4  # Detector report schema version consumed by the exact report-driven remover
+DETECTION_POLICY = "high_precision_context_v4"  # Precision-first policy with multiline credit parsing and no adjacency-only inference
 SRT_TEXT_ENCODINGS = ("utf-8-sig", "utf-8", "cp1252", "latin-1")  # Common subtitle encodings
 
 KNOWN_SUBTITLE_SITES = (
@@ -173,15 +173,19 @@ BARE_DOMAIN_PATTERN = re.compile(
 SOCIAL_HANDLE_PATTERN = re.compile(r"(?<![\w@])@[A-Za-z0-9_][A-Za-z0-9_.-]{1,31}\b")  # Social-network handle pattern
 
 CREDIT_ROLE_LINE_PATTERN = re.compile(
-    r"^[\s\-=:.©*#|_]*(?P<label>"
-    r"(?:equipe\s+de\s+)?(?:legendas?|legendad[oa]s?|tradu(?:ç|c)[aã]o|traduzid[oa]s?|"
+    r"^[\t =:.©*#|_-]*(?P<label>"
+    r"(?:equipe[\t ]+de[\t ]+)?(?:legendas?|legendad[oa]s?|tradu(?:ç|c)[aã]o|traduzid[oa]s?|"
     r"revis(?:ã|a)o|revisad[oa]s?|sincroniza(?:ç|c)[aã]o|sincronizad[oa]s?|"
     r"sincronia|adapta(?:ç|c)[aã]o|subrip|re-?syncs?|ressync|resyncs?|sync|"
-    r"bluray\s+sync|dvdrip\s+sync)"
-    r"(?:\s+(?:inicial|final|portugu[eê]s(?:\s+brasil)?|ingl[eê]s))?"
-    r")\s*(?P<separator>:(?=\s*\S)|\s+(?:por|by|de)\s+)(?P<payload>[^\n]{1,180})$",
+    r"bluray[\t ]+sync|dvdrip[\t ]+sync)"
+    r"(?:[\t ]+(?:inicial|final|portugu[eê]s(?:[\t ]+brasil)?|ingl[eê]s))?"
+    r")"
+    r"(?:(?P<colon_separator>[\t ]*:[\t ]*)(?:\n[\t ]*)?|"
+    r"(?P<word_separator>[\t ]+(?:por|by|de)[\t ]+))"
+    r"(?P<payload>[^\n]{1,180})$",
     re.IGNORECASE | re.MULTILINE,
-)  # Generic role labels are candidates only; payload validation below prevents dialogue such as "Tradução: não."
+)  # Consumes an optional line break after ':' so multiline role/payload credits are validated correctly.
+
 
 REVIEW_STUDIO_LINE_PATTERN = re.compile(
     r"^[\s\-=:.©*#|_]*(?P<label>revis(?:ã|a)o\s+de\s+legendas?)\s+(?P<payload>[^\n]{2,120})$",
@@ -816,17 +820,26 @@ def classify_credit_payload(payload: str) -> str | None:
 def extract_verified_credit_signals(text: str) -> list[tuple[str, str, int]]:
     """Extract role-label credits only after validating their right-hand payload.
 
+    Multiline role/payload forms are handled explicitly. A generic workflow word
+    never becomes a credit merely because it is followed by ':' or 'de'; the
+    payload itself must look like a contributor identity. Two independently
+    validated role lines inside one block are treated as a structured credit
+    cluster.
+
     :param text: Plain subtitle block text.
     :return: (category, matched string, weight) tuples.
     """
 
     verified = []
+    verified_role_matches: list[tuple[re.Match[str], str]] = []
 
     for match in CREDIT_ROLE_LINE_PATTERN.finditer(text):
         payload_kind = classify_credit_payload(match.group("payload"))
 
         if payload_kind is None:
             continue
+
+        verified_role_matches.append((match, payload_kind))
 
         if payload_kind == "structured":
             category = "subtitle_credit_structured"
@@ -838,6 +851,12 @@ def extract_verified_credit_signals(text: str) -> list[tuple[str, str, int]]:
             weight = 65 if is_translation_label else 70
 
         verified.append((category, match.group(0), weight))
+
+    if len(verified_role_matches) >= 2:
+        # Multiple validated production-role lines in the same subtitle block are
+        # independently strong credit structure. Invalid/ordinary payloads never
+        # contribute to this count, so e.g. 'TRADUÇÃO: NAMORADOS' remains excluded.
+        verified.append(("subtitle_credit_structured", normalize_display_text(text), 95))
 
     for match in REVIEW_STUDIO_LINE_PATTERN.finditer(text):
         payload = normalize_credit_payload(match.group("payload"))
@@ -1556,6 +1575,10 @@ def main():
 
         directory_occurrences = finalize_detection_candidates(directory_candidates)  # Apply directory-wide trust/repetition gates only after scanning every file
         affected_files = {occurrence["file_path"] for occurrence in directory_occurrences}  # Count only accepted report findings
+        print(
+            f"{BackgroundColors.GREEN}Candidates extracted: {BackgroundColors.CYAN}{len(directory_candidates)}"
+            f"{BackgroundColors.GREEN} | Accepted findings: {BackgroundColors.CYAN}{len(directory_occurrences)}{Style.RESET_ALL}"
+        )
         report_path = write_detection_report(
             str(configured_input_dir),
             input_dir,
