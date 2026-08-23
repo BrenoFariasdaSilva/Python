@@ -79,7 +79,7 @@ INPUT_DIRS = [f"E:/Movies/", f"F:/Movies/", f"F:/Series/", f"G:/Series/"]  # Dir
 SRT_TEXT_ENCODINGS = ("utf-8-sig", "utf-8", "cp1252", "latin-1")  # Common UTF-8 and Western/Portuguese subtitle encodings
 MOJIBAKE_MARKERS = ("Ã", "Â", "â€", "ðŸ", "ï»¿", "�")  # Strong indicators of UTF-8 text decoded through a Western single-byte encoding
 SRT_TIMESTAMP_PATTERN = re.compile(r"^\d{2}:\d{2}:\d{2},\d{3}\s+-->\s+\d{2}:\d{2}:\d{2},\d{3}(?:\s+.*)?$")  # SRT timestamp validation pattern
-SRT_REPAIRABLE_TIMESTAMP_PATTERN = re.compile(r"^(?P<start_h>\d{2}):(?P<start_m>\d{2}):(?P<start_s>\d{2}),(?P<start_ms>\d{3,})\s+-->\s+(?P<end_h>\d{2}):(?P<end_m>\d{2}):(?P<end_s>\d{2}),(?P<end_ms>\d{3,})(?P<suffix>(?:\s+.*)?)$")  # Timestamp pattern that also accepts overlong millisecond fields for repair
+SRT_REPAIRABLE_TIMESTAMP_PATTERN = re.compile(r"^(?P<start_h>\d{1,2}):(?P<start_m>\d{1,2}):(?P<start_s>\d{1,2}),(?P<start_ms>\d+)\s+-->\s+(?P<end_h>\d{1,2}):(?P<end_m>\d{1,2}):(?P<end_s>\d{1,2}),(?P<end_ms>\d+)(?P<suffix>(?:\s+.*)?)$")  # Repair pattern accepting short time fields plus short/overlong fractional fields
 SUBTITLE_FORMATTING_TAG_PATTERN = re.compile(r"</?(?:i|b|u|font)(?:\s+[^<>]*)?>", re.IGNORECASE)  # Recognized SRT formatting tag pattern
 EMPTY_SUBTITLE_FORMATTING_TAG_PATTERN = re.compile(r"<(i|b|u|font)(?:\s+[^<>]*)?>\s*</\1>", re.IGNORECASE)  # Recognized empty SRT formatting tag pattern
 DESCRIPTIVE_PHRASES = frozenset(("music", "door closes", "applause", "speaking indistinctly", "laughing", "laughs", "sighs", "sigh", "whispers", "whispering", "inaudible", "indistinct chatter", "chuckles", "gasps", "coughs", "sobs", "crying", "screaming", "phone ringing", "knocking", "footsteps", "thunder", "alarm", "silence"))  # Conservative complete SDH fragments
@@ -542,19 +542,24 @@ def discover_srt_files(input_dir: Path) -> list[Path]:
 
 def normalize_srt_time_component(hours: str, minutes: str, seconds: str, milliseconds: str) -> str:
     """
-    Normalize one SRT time component whose millisecond field may overflow three digits.
+    Normalize one repairable SRT time component into strict HH:MM:SS,mmm form.
 
-    Values such as 00:20:08,1000 are interpreted as 1000 milliseconds and
-    normalized to 00:20:09,000 instead of being truncated to 00:20:08,100.
+    Short fractional fields are treated as decimal fractions of a second:
+    `,5` -> `,500` and `,00` -> `,000`. Overlong fields are interpreted as
+    millisecond values, so `,1000` carries one second and becomes `,000`.
 
-    :param hours: Two-digit hour component.
-    :param minutes: Two-digit minute component.
-    :param seconds: Two-digit second component.
-    :param milliseconds: Millisecond component containing at least three digits.
+    :param hours: One- or two-digit hour component.
+    :param minutes: One- or two-digit minute component.
+    :param seconds: One- or two-digit second component.
+    :param milliseconds: Fractional/millisecond component containing one or more digits.
     :return: Strict HH:MM:SS,mmm SRT time component.
     """
 
-    millisecond_value = int(milliseconds)  # Parse the full millisecond value without discarding overflow digits
+    if len(milliseconds) < 3:  # Interpret short fields using decimal-fraction semantics
+        millisecond_value = int(milliseconds.ljust(3, "0"))  # `5` -> 500 ms and `00` -> 000 ms
+    else:
+        millisecond_value = int(milliseconds)  # Preserve existing 3+ digit millisecond semantics
+
     carry_seconds, normalized_milliseconds = divmod(millisecond_value, 1000)  # Carry every complete 1000 ms into seconds
     total_seconds = (int(hours) * 3600) + (int(minutes) * 60) + int(seconds) + carry_seconds  # Build normalized whole-second value
     normalized_hours, remaining_seconds = divmod(total_seconds, 3600)  # Carry second/minute overflow into hours
@@ -564,7 +569,10 @@ def normalize_srt_time_component(hours: str, minutes: str, seconds: str, millise
 
 def repair_srt_timestamp_line(timestamp: str) -> tuple[str, bool]:
     """
-    Repair overlong SRT millisecond fields while preserving valid timestamps.
+    Repair safely normalizable SRT timestamp-width/fraction issues.
+
+    Handles short components such as `00:00:0,500` / `00:00:2,00` as well as
+    overlong millisecond values such as `00:20:08,1000`.
 
     :param timestamp: Original SRT timestamp line.
     :return: Repaired timestamp and whether a repair was applied.
@@ -578,11 +586,20 @@ def repair_srt_timestamp_line(timestamp: str) -> tuple[str, bool]:
     if match is None:  # Leave unrelated malformed timestamp formats for normal validation to reject
         return timestamp, False  # Not safely repairable by this rule
 
-    start_ms = match.group("start_ms")  # Capture starting millisecond field
-    end_ms = match.group("end_ms")  # Capture ending millisecond field
+    start_ms = match.group("start_ms")  # Capture starting fractional/millisecond field
+    end_ms = match.group("end_ms")  # Capture ending fractional/millisecond field
 
-    if len(start_ms) == 3 and len(end_ms) == 3:  # Require at least one actual overlong millisecond field
-        return timestamp, False  # Nothing to repair
+    start_has_nonstandard_width = any(
+        len(match.group(group_name)) != 2
+        for group_name in ("start_h", "start_m", "start_s")
+    ) or len(start_ms) != 3  # Detect any short/overlong start component
+    end_has_nonstandard_width = any(
+        len(match.group(group_name)) != 2
+        for group_name in ("end_h", "end_m", "end_s")
+    ) or len(end_ms) != 3  # Detect any short/overlong end component
+
+    if not start_has_nonstandard_width and not end_has_nonstandard_width:
+        return timestamp, False  # Structurally valid widths require no repair
 
     repaired_start = normalize_srt_time_component(
         match.group("start_h"),
@@ -602,7 +619,7 @@ def repair_srt_timestamp_line(timestamp: str) -> tuple[str, bool]:
 
 def repair_srt_timestamps(content: str) -> tuple[str, list[tuple[int, str, str]]]:
     """
-    Repair overlong millisecond fields in SRT timestamp lines before strict parsing.
+    Repair safely normalizable SRT timestamp-width/fraction issues before strict parsing.
 
     :param content: Decoded SRT text.
     :return: Repaired SRT text and timestamp repair records.
@@ -1179,7 +1196,7 @@ def describe_fixed_issues(
     for index, original_timestamp, repaired_timestamp in timestamp_repairs:  # Report every repaired malformed timestamp
         fixed_issues.append(
             {
-                "issue_type": "overlong_millisecond_timestamp",
+                "issue_type": "malformed_srt_timestamp_repaired",
                 "original_index": index,
                 "original_timestamp": original_timestamp,
                 "fixed_timestamp": repaired_timestamp,
