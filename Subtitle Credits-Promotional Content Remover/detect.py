@@ -80,7 +80,7 @@ class BackgroundColors:  # Colors for the terminal
 
 # Execution Constants:
 VERBOSE = False  # Set to True to output verbose messages
-INPUT_DIRS = [f"E:/Movies/", f"F:/Movies/", f"F:/Series/", f"G:/Series/"]  # Directories searched recursively for source SRT files
+INPUT_DIRS = [f"E:/Movies/", f"F:/Movies/", f"F:/Series/", f"G:/Series/", f"G:/Animes/"]  # Directories searched recursively for source SRT files
 OUTPUT_DIR = Path("./Outputs")  # Directory used for one grouped JSON report per input directory
 DETECTION_SCORE_THRESHOLD = 7  # Minimum conservative score required for a block to be reported
 EDGE_BLOCK_WINDOW = 20  # Number of first/last blocks considered likely credit/promo positions
