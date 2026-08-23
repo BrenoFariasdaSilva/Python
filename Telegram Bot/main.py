@@ -1,49 +1,76 @@
 """
 ================================================================================
-<PROJECT OR SCRIPT TITLE>
+Telegram Bot - Telegram-Enabled Program Template
 ================================================================================
 Author      : Breno Farias da Silva
-Created     : <YYYY-MM-DD>
+Created     : Not documented
 Description :
-    <Provide a concise and complete overview of what this script does.>
-    <Mention its purpose, scope, and relevance to the larger project.>
+    Provides the main execution template for a Python program that integrates
+    Telegram progress notifications, terminal/file logging, execution-time
+    reporting, optional verbose diagnostics, filesystem path verification, and
+    an optional completion sound.
+
+    The current main execution flow sends program start and finish messages
+    through send_telegram_message(), prints timing information, and registers
+    the completion sound handler. A separate setup_telegram_bot() helper can
+    initialize TelegramBot, populate device/platform metadata, and verify the
+    presence of a local .env file, but that setup helper is not currently
+    invoked by main().
 
     Key features include:
-        - <Feature 1 — e.g., automatic data loading and preprocessing>
-        - <Feature 2 — e.g., model training and evaluation>
-        - <Feature 3 — e.g., visualization or report generation>
-        - <Feature 4 — e.g., logging or notification system>
-        - <Feature 5 — e.g., integration with other modules or datasets>
+        - Sends start and finish progress notifications through telegram_bot.
+        - Provides TelegramBot initialization and device/run metadata setup.
+        - Warns when the project-local .env file is missing.
+        - Redirects stdout and stderr through Logger to ./Logs/main.log.
+        - Reports start time, finish time, and human-readable execution time.
+        - Resolves and optionally renames path components containing trailing
+          spaces while performing defensive file/directory existence checks.
+        - Supports optional verbose terminal diagnostics.
+        - Registers an exit notification sound on supported non-Windows
+          platforms when enabled.
 
 Usage:
-    1. <Explain any configuration steps before running, such as editing variables or paths.>
-    2. <Describe how to execute the script — typically via Makefile or Python.>
-            $ make <target>   or   $ python <script_name>.py
-    3. <List what outputs are expected or where results are saved.>
+    1. Ensure the local Logger and telegram_bot modules and the colorama
+       dependency are available.
+    2. If setup_telegram_bot() is used, provide the .env configuration expected
+       by the telegram_bot module in the same directory as this script.
+    3. Run the entry point:
+           $ python main.py
+    4. The current main() flow emits Telegram start/finish notifications,
+       execution timing, and normal terminal/log output.
 
 Outputs:
-    - <Output file or directory 1 — e.g., results.csv>
-    - <Output file or directory 2 — e.g., Feature_Analysis/plots/>
-    - <Output file or directory 3 — e.g., logs/output.txt>
+    - ./Logs/main.log containing stdout/stderr captured by Logger.
+    - Telegram start/finish notification attempts through send_telegram_message().
+    - Console timing/status output mirrored through the configured logger.
+    - Optional completion sound using ./.assets/Sounds/NotificationSound.wav
+      on supported non-Windows platforms.
 
 TODOs:
-    - <Add a task or improvement — e.g., implement CLI argument parsing.>
-    - <Add another improvement — e.g., extend support to Parquet files.>
-    - <Add optimization — e.g., parallelize evaluation loop.>
-    - <Add robustness — e.g., error handling or data validation.>
+    - Call setup_telegram_bot() from the execution flow when an initialized
+      TelegramBot instance is required by send_telegram_message().
+    - Replace the remaining "Main Template Python" user-facing strings with the
+      final program/project name if this file is no longer intended as a
+      reusable template.
 
 Dependencies:
-    - Python >= <version>
-    - <Library 1 — e.g., pandas>
-    - <Library 2 — e.g., numpy>
-    - <Library 3 — e.g., scikit-learn>
-    - <Library 4 — e.g., matplotlib, seaborn, tqdm, colorama>
+    - Python 3.x
+    - colorama
+    - Logger.py (project-local module)
+    - telegram_bot.py (project-local module)
+    - Optional .env configuration consumed by the Telegram integration
+    - Optional ./.assets/Sounds/NotificationSound.wav completion-sound asset
 
 Assumptions & Notes:
-    - <List any key assumptions — e.g., last column is the target variable.>
-    - <Mention data format — e.g., CSV files only.>
-    - <Mention platform or OS-specific notes — e.g., sound disabled on Windows.>
-    - <Note on output structure or reusability.>
+    - This file does not implement Telegram polling, command handlers, or an
+      interactive bot conversation loop.
+    - TELEGRAM_BOT defaults to None; setup_telegram_bot() is the helper that
+      assigns a TelegramBot instance, but main() does not currently call it.
+    - Telegram credential names and transport behavior are defined by the
+      project-local telegram_bot module, not by this file.
+    - play_sound() intentionally returns without playing audio on Windows.
+    - Path-repair helpers may rename filesystem entries whose names differ only
+      by surrounding/trailing spaces when a matching entry is found.
 """
 
 import atexit  # For playing a sound when the program finishes
