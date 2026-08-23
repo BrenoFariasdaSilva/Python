@@ -74,7 +74,7 @@ class BackgroundColors:  # Colors for the terminal
 
 # Execution Constants:
 VERBOSE = False  # Set to True to output verbose messages
-INPUT_DIRS = [Path("./Input"), Path("./Inputs"), Path(f"F:/Series/"), Path(f"G:/Series/"), Path("G:/Animes")]  # The input directory or list of input directories
+INPUT_DIRS = [Path("./Input"), Path("./Inputs"), Path(f"E:/Movies/"), Path(f"F:/Documentaries/"), Path(f"F:/Movies/"), Path(f"F:/Series/"), Path(f"G:/Animes/"), Path(f"G:/Series/")]  # The input directory or list of input directories
 LANGUAGE_OPTIONS = ["Dual", "Dublado", "English", "Legendado", "Nacional"]  # User-defined suffixes for renaming
 TMDB_BASE_URL = "https://api.themoviedb.org/3"  # Base URL for TMDb API
 IGNORE_DIR_REGEX = re.compile(r'^(featurettes|extras|making[-_\s]?of|behind[ _-]?the[ _-]?scenes|specials)$', re.IGNORECASE)  # Regex for ignore dirs
