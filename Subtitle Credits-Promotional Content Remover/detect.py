@@ -17,10 +17,14 @@ Description :
 
     Key features include:
         - Recursive SRT discovery across multiple configured input directories
-            - Precision-first evidence-gated credit/promotional-content detection
+        - Precision-first evidence-gated credit/promotional-content detection
+        - Generic translation/revision labels require validated creator-identity payloads
+        - Plain Translation-name credits require cross-title repetition instead of edge position alone
+        - Names-only neighboring blocks are never inferred as removable from adjacency alone
         - Strict URL/domain validation that rejects numeric thousands, dotted initials,
           sentence typos, and other text that only resembles a domain syntactically
         - Context-aware handling of websites, emails, social handles, and creator identities
+        - Endpoint-only creator hints require edge or cross-content corroboration
         - Standalone social-platform names/follow-me dialogue never qualify by themselves
         - Grouped report strings with occurrence counters
         - Exact file/block metadata for report-driven removal
@@ -51,7 +55,8 @@ Dependencies:
 
 Assumptions & Notes:
     - Detection is precision-first: ambiguous dialogue is deliberately excluded even when
-      that means a low-confidence creator string may require manual review elsewhere.
+      that means genuine but uncorroborated creator credits may be omitted from the report.
+    - Adjacency alone never creates a removal target; every reported block needs its own evidence.
     - The detector never edits SRT files.
     - The remover consumes only the exact occurrences still present in reviewed detector
       reports instead of re-detecting, inferring, or expanding targets.
@@ -90,9 +95,8 @@ INPUT_DIRS = [f"E:/Movies/", f"F:/Documentaries/", f"F:/Movies/", f"F:/Series/",
 OUTPUT_DIR = Path("./Outputs")  # Directory used for one grouped JSON report per input directory
 EDGE_BLOCK_WINDOW = 20  # Number of first/last blocks eligible for conservative edge-context rules
 CROSS_CONTENT_REPETITION_MIN = 2  # Minimum distinct titles required before an ambiguous endpoint can be trusted as repeated injected content
-MAX_CREATOR_CREDIT_CHARACTERS = 260  # Maximum compact text length accepted by creator-credit continuation heuristics
-REPORT_SCHEMA_VERSION = 2  # Detector report schema version consumed by the exact report-driven remover
-DETECTION_POLICY = "high_precision_context_v2"  # Human-readable detector policy identifier stored in generated reports
+REPORT_SCHEMA_VERSION = 3  # Detector report schema version consumed by the exact report-driven remover
+DETECTION_POLICY = "high_precision_context_v3"  # Precision-first policy that rejects uncorroborated workflow-label dialogue and adjacency-only continuations
 SRT_TEXT_ENCODINGS = ("utf-8-sig", "utf-8", "cp1252", "latin-1")  # Common subtitle encodings
 
 KNOWN_SUBTITLE_SITES = (
@@ -139,6 +143,12 @@ CREATOR_IDENTITY_HINT_PATTERN = re.compile(
     re.IGNORECASE,
 )  # Narrow creator/distributor identity tokens; avoids generic words such as "legend" or "substitute"
 
+CREDIT_PAYLOAD_CREATOR_TOKEN_PATTERN = re.compile(
+    r"(?:legendei|legseries|opensub|addic7ed|insubs?|wtfsubs?|creepysubs?|powersubs?|acesubs?|piratebay|"
+    r"[a-z0-9]{3,}subs(?:$|[._/@-]))",
+    re.IGNORECASE,
+)  # Creator-like payload token without generic prose words such as legenda/legendas/subtitles
+
 EXPLICIT_URL_PATTERN = re.compile(
     r"(?<![\w@])(?:https?://|www\.)"
     r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,62}[A-Za-z0-9])?"
@@ -162,27 +172,33 @@ BARE_DOMAIN_PATTERN = re.compile(
 
 SOCIAL_HANDLE_PATTERN = re.compile(r"(?<![\w@])@[A-Za-z0-9_][A-Za-z0-9_.-]{1,31}\b")  # Social-network handle pattern
 
-CREDIT_PATTERNS = (
-    re.compile(
-        r"^[\s\-=:.©*#|_]*(?:equipe\s+de\s+)?"
-        r"(?:legendas?|legendad[oa]s?|tradu(?:ç|c)[aã]o|traduzid[oa]s?|"
-        r"revis(?:ã|a)o|revisad[oa]s?|sincroniza(?:ç|c)[aã]o|sincronizad[oa]s?|"
-        r"sincronia|adapta(?:ç|c)[aã]o)"
-        r"(?:\s+(?:inicial|final|de\s+legendas?|portugu[eê]s(?:\s+brasil)?|ingl[eê]s))?"
-        r"\s*(?:por|by|de|:)(?=\s*\S)",
-        re.IGNORECASE | re.MULTILINE,
-    ),
-    re.compile(
-        r"^[\s\-=:.©*#|_]*(?:subrip|re-?syncs?|ressync|resyncs?|sync|bluray\s+sync|dvdrip\s+sync)"
-        r"\b[^\n]{0,55}?(?:por|by|:)(?=\s*\S)",
-        re.IGNORECASE | re.MULTILINE,
-    ),
-    re.compile(
-        r"\b(?:equipe|team|[\w.-]*subs?\b|subrip)\b.{0,60}\b"
-        r"(?:legendas?|tradu(?:ç|c)[aã]o|revis(?:ã|a)o|sincronia|sync|resync)\b"
-        r".{0,35}(?:por|by|:)(?=\s*\S)",
-        re.IGNORECASE,
-    ),
+CREDIT_ROLE_LINE_PATTERN = re.compile(
+    r"^[\s\-=:.©*#|_]*(?P<label>"
+    r"(?:equipe\s+de\s+)?(?:legendas?|legendad[oa]s?|tradu(?:ç|c)[aã]o|traduzid[oa]s?|"
+    r"revis(?:ã|a)o|revisad[oa]s?|sincroniza(?:ç|c)[aã]o|sincronizad[oa]s?|"
+    r"sincronia|adapta(?:ç|c)[aã]o|subrip|re-?syncs?|ressync|resyncs?|sync|"
+    r"bluray\s+sync|dvdrip\s+sync)"
+    r"(?:\s+(?:inicial|final|portugu[eê]s(?:\s+brasil)?|ingl[eê]s))?"
+    r")\s*(?P<separator>:(?=\s*\S)|\s+(?:por|by|de)\s+)(?P<payload>[^\n]{1,180})$",
+    re.IGNORECASE | re.MULTILINE,
+)  # Generic role labels are candidates only; payload validation below prevents dialogue such as "Tradução: não."
+
+REVIEW_STUDIO_LINE_PATTERN = re.compile(
+    r"^[\s\-=:.©*#|_]*(?P<label>revis(?:ã|a)o\s+de\s+legendas?)\s+(?P<payload>[^\n]{2,120})$",
+    re.IGNORECASE | re.MULTILINE,
+)  # Common studio-credit form without colon, e.g. "Revisão de Legendas BRAVO STUDIOS"
+
+MULTI_ROLE_CREDIT_PATTERN = re.compile(
+    r"^[\s\-=:.©*#|_]*(?:"
+    r"(?:adapta(?:ç|c)[aã]o|revis(?:ã|a)o|sincronia|sincroniza(?:ç|c)[aã]o|"
+    r"tradu(?:ç|c)[aã]o|legendas?)\s*[|/&+\-]\s*"
+    r"){1,4}"
+    r"(?:adapta(?:ç|c)[aã]o|revis(?:ã|a)o|sincronia|sincroniza(?:ç|c)[aã]o|"
+    r"tradu(?:ç|c)[aã]o|legendas?)\s*:(?=\s*\S)",
+    re.IGNORECASE | re.MULTILINE,
+)  # Explicit multi-role production header such as "ADAPTAÇÃO | REVISÃO | SINCRONIA:"
+
+UNAMBIGUOUS_CREDIT_PATTERNS = (
     re.compile(r"\b(?:sync|resync|timing|translation|translated)\s+(?:and\s+corrected\s+)?by(?=\s+\S)", re.IGNORECASE),
     re.compile(r"\bsincronizad[oa]\s+e\s+corrigid[oa]\s+por(?=\s+\S)", re.IGNORECASE),
     re.compile(r"\bripad[oa]s?\s+e\s+sincronizad[oa]s?\s+por\s*:(?=\s*\S)", re.IGNORECASE),
@@ -190,13 +206,15 @@ CREDIT_PATTERNS = (
     re.compile(r"\btraduzid[oa]\s+e\s+revisad[oa]\s+por(?=\s+\S)", re.IGNORECASE),
     re.compile(r"\bre-?sync\b.{0,30}\brevis(?:ã|a)o\b\s*:(?=\s*\S)", re.IGNORECASE),
     re.compile(r"\bressync\b.{0,30}\brevis(?:ã|a)o\b\s*:(?=\s*\S)", re.IGNORECASE),
-)  # Specific subtitle-production credit syntax; deliberately excludes ordinary sentence uses of "tradução"/"revisão"
+)  # Syntax that is intrinsically subtitle-production-specific and does not depend on a generic label payload
 
-SUBTITLE_WORKFLOW_PATTERN = re.compile(
-    r"\b(?:adapta(?:ç|c)[aã]o|revis(?:ã|a)o|sincronia|sincroniza(?:ç|c)[aã]o|"
-    r"tradu(?:ç|c)[aã]o|legendas?)\b",
-    re.IGNORECASE,
-)  # Production-workflow words used only as corroborating evidence
+CREDIT_PAYLOAD_CONNECTORS = frozenset(("a", "as", "da", "das", "de", "do", "dos", "e", "o", "os"))
+CREDIT_PAYLOAD_SUFFIXES = frozenset(("dds", "deluxe", "studios", "studio", "team"))
+CREDIT_PAYLOAD_DIALOGUE_STARTERS = frozenset((
+    "adeus", "agora", "ainda", "amanhã", "assim", "como", "diga", "doida", "ela", "ele",
+    "eu", "há", "isso", "isto", "minha", "meu", "não", "nos", "nós", "pênis", "por",
+    "porque", "quando", "que", "se", "sim", "sua", "seu", "todo", "tudo", "você", "vocês",
+))  # High-value dialogue/content starters observed in real subtitles; these make a generic role payload unsafe
 
 SUBTITLE_PROMOTIONAL_PATTERNS = (
     re.compile(r"\blegende\s+conosco\b", re.IGNORECASE),
@@ -663,6 +681,181 @@ def build_content_scope_key(filepath: Path, input_dir: Path) -> str:
     return first_part.casefold()
 
 
+def normalize_credit_payload(value: str) -> str:
+    """Normalize a role-label payload for conservative creator-identity checks.
+
+    :param value: Text following a subtitle-production role label.
+    :return: Compact payload with surrounding decorative punctuation removed.
+    """
+
+    compact = normalize_display_text(strip_formatting_tags(value)).strip()
+    return compact.strip(" \t-=:;|_*#©[]{}()<>.")
+
+
+def credit_payload_identity_tokens(value: str) -> list[str]:
+    """Return whitespace-delimited identity-like payload tokens.
+
+    :param value: Normalized credit payload.
+    :return: Tokens after harmless list punctuation is removed.
+    """
+
+    cleaned = re.sub(r"[|,&+/]+", " ", value)
+    cleaned = re.sub(r"[\[\]{}()=*:;]", " ", cleaned)
+    return [token.strip(".\"'!?-") for token in cleaned.split() if token.strip(".\"'!?-")]
+
+
+def is_identity_like_credit_token(token: str) -> bool:
+    """Return whether one token plausibly identifies a contributor rather than prose.
+
+    :param token: Candidate contributor token.
+    :return: True only for conservative name/alias shapes.
+    """
+
+    stripped = token.strip(".\"'!?-")
+
+    if not stripped:
+        return False
+
+    folded = stripped.casefold()
+
+    if folded in CREDIT_PAYLOAD_CONNECTORS or folded in CREDIT_PAYLOAD_SUFFIXES:
+        return True
+
+    if "@" in stripped or "_" in stripped or any(character.isdigit() for character in stripped):
+        return True
+
+    letters = "".join(character for character in stripped if character.isalpha())
+
+    if not letters:
+        return False
+
+    if letters.isupper() and len(letters) >= 2:
+        return True
+
+    if stripped[0].isupper():
+        return True
+
+    # Mixed-case aliases such as guiLOG/brunoivens are accepted only when their
+    # casing itself carries identity evidence. Plain lowercase words remain prose.
+    return any(character.isupper() for character in stripped[1:])
+
+
+def classify_credit_payload(payload: str) -> str | None:
+    """Classify a generic workflow-label payload without guessing from prose.
+
+    Returns ``structured`` for independently creator-specific payloads, ``name``
+    for plausible contributor names that still require edge/repetition context,
+    or ``None`` for ambiguous/ordinary subtitle content.
+
+    :param payload: Text following a generic translation/revision/etc. label.
+    :return: structured, name, or None.
+    """
+
+    compact = normalize_credit_payload(payload)
+
+    if not compact or len(compact) > 140:
+        return None
+
+    if compact[0] in '"“”‘’' or "?" in compact or "!" in compact:
+        return None
+
+    first_word_match = re.match(r"[A-Za-zÀ-ÖØ-öø-ÿ]+", compact)
+    first_word = first_word_match.group(0).casefold() if first_word_match else ""
+
+    if first_word in CREDIT_PAYLOAD_DIALOGUE_STARTERS:
+        return None
+
+    lowered = compact.casefold()
+
+    if any(site.casefold() in lowered for site in KNOWN_SUBTITLE_SITES):
+        return "structured"
+
+    if CREDIT_PAYLOAD_CREATOR_TOKEN_PATTERN.search(compact):
+        return "structured"
+
+    if EMAIL_ADDRESS_PATTERN.search(compact) or EXPLICIT_URL_PATTERN.search(compact):
+        return "structured"
+
+    if SOCIAL_HANDLE_PATTERN.search(compact) or re.search(r"\b[^\s@]+@[^\s@]+\b", compact):
+        return "structured"
+
+    if re.search(r"(?:==|::)", payload):
+        tokens = credit_payload_identity_tokens(compact)
+        if tokens and all(is_identity_like_credit_token(token) for token in tokens):
+            return "structured"
+
+    if re.search(
+        r"\b(?:revis(?:ã|a)o|sincronia|sincroniza(?:ç|c)[aã]o|resync|sync|adapta(?:ç|c)[aã]o)\s*:",
+        compact,
+        re.IGNORECASE,
+    ):
+        return "structured"
+
+    tokens = credit_payload_identity_tokens(compact)
+
+    if not tokens:
+        return None
+
+    significant_tokens = [
+        token for token in tokens
+        if token.casefold() not in CREDIT_PAYLOAD_CONNECTORS and token.casefold() not in CREDIT_PAYLOAD_SUFFIXES
+    ]
+
+    if len(significant_tokens) < 2 or len(significant_tokens) > 8:
+        return None  # One-word payloads are too ambiguous: "Tradução: NAMORADOS", "Tradução: não", etc.
+
+    if not all(is_identity_like_credit_token(token) for token in tokens):
+        return None
+
+    # Contributor lists are still names-only evidence. Even conspicuous separators
+    # do not make them removable without edge/repetition corroboration because
+    # translated on-screen content can itself contain lists.
+    return "name"
+
+
+def extract_verified_credit_signals(text: str) -> list[tuple[str, str, int]]:
+    """Extract role-label credits only after validating their right-hand payload.
+
+    :param text: Plain subtitle block text.
+    :return: (category, matched string, weight) tuples.
+    """
+
+    verified = []
+
+    for match in CREDIT_ROLE_LINE_PATTERN.finditer(text):
+        payload_kind = classify_credit_payload(match.group("payload"))
+
+        if payload_kind is None:
+            continue
+
+        if payload_kind == "structured":
+            category = "subtitle_credit_structured"
+            weight = 95
+        else:
+            label = match.group("label").casefold()
+            is_translation_label = re.search(r"tradu(?:ç|c)[aã]o|traduzid[oa]", label, re.IGNORECASE) is not None
+            category = "subtitle_translation_credit_name" if is_translation_label else "subtitle_credit_name"
+            weight = 65 if is_translation_label else 70
+
+        verified.append((category, match.group(0), weight))
+
+    for match in REVIEW_STUDIO_LINE_PATTERN.finditer(text):
+        payload = normalize_credit_payload(match.group("payload"))
+        payload_tokens = credit_payload_identity_tokens(payload)
+
+        if len(payload_tokens) >= 2 and all(is_identity_like_credit_token(token) for token in payload_tokens):
+            verified.append(("subtitle_credit_structured", match.group(0), 95))
+
+    for match in MULTI_ROLE_CREDIT_PATTERN.finditer(text):
+        verified.append(("subtitle_credit_structured", match.group(0), 95))
+
+    for pattern in UNAMBIGUOUS_CREDIT_PATTERNS:
+        for match in pattern.finditer(text):
+            verified.append(("subtitle_credit_structured", match.group(0), 95))
+
+    return verified
+
+
 def extract_detection_signals(text: str) -> list[dict[str, object]]:
     """
     Extract exact high-precision creator/distributor evidence from subtitle text.
@@ -723,23 +916,9 @@ def extract_detection_signals(text: str) -> list[dict[str, object]]:
     for match in SOCIAL_HANDLE_PATTERN.finditer(text):
         add_signal("social_handle", match.group(0), 20)
 
-    for pattern in CREDIT_PATTERNS:
-        for match in pattern.finditer(text):
-            add_signal("subtitle_credit_phrase", match.group(0), 90)
+    for category, matched_string, weight in extract_verified_credit_signals(text):
+        add_signal(category, matched_string, weight)
 
-    workflow_matches = list(SUBTITLE_WORKFLOW_PATTERN.finditer(text))
-    unique_workflow_terms = {match.group(0).casefold() for match in workflow_matches}
-
-    if (
-        len(unique_workflow_terms) >= 2
-        and len(normalize_display_text(text)) <= MAX_CREATOR_CREDIT_CHARACTERS
-        and re.search(r"[:|]", text)
-    ):
-        add_signal(
-            "subtitle_workflow_credit",
-            " | ".join(match.group(0) for match in workflow_matches[:4]),
-            85,
-        )  # Multiple production labels in a compact credit-style block are strong evidence
 
     for pattern in SUBTITLE_PROMOTIONAL_PATTERNS:
         for match in pattern.finditer(text):
@@ -777,15 +956,14 @@ def candidate_has_intrinsic_strong_evidence(candidate: dict[str, object]) -> boo
     """
 
     categories = signal_categories(candidate["matched_strings"])
-    return bool(
-        categories
-        & {
-            "known_subtitle_site",
-            "subtitle_credit_phrase",
-            "subtitle_workflow_credit",
-            "subtitle_promotion_phrase",
-        }
-    )
+
+    if categories & {"subtitle_credit_structured", "subtitle_promotion_phrase"}:
+        return True
+
+    if "known_subtitle_site" in categories and bool(candidate.get("_edge_block")):
+        return True  # A known subtitle-distribution domain is direct only at an SRT edge
+
+    return False
 
 
 def creator_identity_hint(value: str) -> bool:
@@ -879,42 +1057,6 @@ def candidate_has_creator_identity_hint(candidate: dict[str, object]) -> bool:
     return False
 
 
-def looks_like_credit_continuation(text: str) -> bool:
-    """
-    Conservatively identify a likely names/handles continuation line.
-
-    This helper is only used next to an already strong creator-credit block and
-    only when both blocks are at the beginning/end edge of the subtitle.
-
-    :param text: Neighbor block plain text.
-    :return: True when the block looks like a contributor list rather than dialogue.
-    """
-
-    compact = normalize_display_text(strip_formatting_tags(text))
-
-    if not compact or len(compact) > 100 or "?" in compact or "!" in compact:
-        return False
-
-    if len(SOCIAL_HANDLE_PATTERN.findall(compact)) >= 2:
-        return True
-
-    if "|" in compact and len(compact.split()) <= 12:
-        return True
-
-    if compact.count(",") >= 1 and len(compact.split()) <= 12:
-        return True
-
-    return (
-        re.fullmatch(
-            r"[A-Za-zÀ-ÖØ-öø-ÿ0-9_.-]{2,30}\s+e\s+"
-            r"[A-Za-zÀ-ÖØ-öø-ÿ0-9_.-]{2,30}\.?",
-            compact,
-            re.IGNORECASE,
-        )
-        is not None
-    )
-
-
 def calculate_candidate_score(candidate: dict[str, object], decision_reasons: list[str]) -> int:
     """
     Calculate an audit score after the candidate has passed precision gates.
@@ -932,7 +1074,9 @@ def calculate_candidate_score(candidate: dict[str, object], decision_reasons: li
         base_score += 20
     if "cross_content_repetition" in decision_reasons:
         base_score += 15
-    if "adjacent_credit_continuation" in decision_reasons:
+    if "edge_credit_identity" in decision_reasons:
+        base_score += 15
+    if "repeated_credit_identity" in decision_reasons:
         base_score += 20
 
     return min(100, base_score)
@@ -950,7 +1094,8 @@ def classify_confidence(decision_reasons: list[str]) -> str:
         "direct_creator_evidence",
         "creator_identity_hint",
         "trusted_creator_identity",
-        "adjacent_credit_continuation",
+        "edge_credit_identity",
+        "repeated_credit_identity",
     }
 
     return "high" if high_reasons.intersection(decision_reasons) else "medium"
@@ -1021,7 +1166,6 @@ def detect_file_candidates(filepath: Path, input_dir: Path) -> list[dict[str, ob
     current_file_sha256 = file_sha256(filepath)
     total_blocks = len(blocks)
     candidates = []
-    candidate_by_block_number = {}
 
     for block in blocks:
         candidate = build_detection_candidate(
@@ -1034,66 +1178,9 @@ def detect_file_candidates(filepath: Path, input_dir: Path) -> list[dict[str, ob
 
         if candidate is not None:
             candidates.append(candidate)
-            candidate_by_block_number[int(block["block_number"])] = candidate
 
-    # Conservatively recover a names-only continuation immediately beside an
-    # intrinsically strong edge credit. This covers split creator lists without
-    # allowing ordinary mid-dialogue neighbors to become report targets.
-    strong_edge_blocks = {
-        int(candidate["block_number"])
-        for candidate in candidates
-        if candidate_has_intrinsic_strong_evidence(candidate) and bool(candidate["_edge_block"])
-    }
-
-    if strong_edge_blocks:
-        for block in blocks:
-            block_number = int(block["block_number"])
-
-            if block_number in candidate_by_block_number:
-                continue
-
-            edge_block = (
-                block_number <= EDGE_BLOCK_WINDOW
-                or block_number > max(0, total_blocks - EDGE_BLOCK_WINDOW)
-            )
-
-            if not edge_block:
-                continue
-
-            if not ({block_number - 1, block_number + 1} & strong_edge_blocks):
-                continue
-
-            if not looks_like_credit_continuation(str(block["text"])):
-                continue
-
-            text = str(block["text"])
-            plain_text = strip_formatting_tags(text)
-            display_string = normalize_display_text(plain_text)
-
-            if not display_string:
-                continue
-
-            continuation_candidate = {
-                "file_path": filepath.resolve().as_posix(),
-                "file_sha256": current_file_sha256,
-                "block_sha256": block_sha256(int(block["original_index"]), str(block["timestamp"]), text),
-                "block_number": block_number,
-                "original_index": int(block["original_index"]),
-                "timestamp": str(block["timestamp"]),
-                "text": text,
-                "plain_text": display_string,
-                "matched_strings": [
-                    {
-                        "category": "credit_continuation",
-                        "string": display_string,
-                        "weight": 75,
-                    }
-                ],
-                "_edge_block": True,
-                "_content_scope": build_content_scope_key(filepath, input_dir),
-                "_adjacent_credit_continuation": True,
-            }
-            candidates.append(continuation_candidate)
+    # No adjacency-only inference is permitted. A neighboring block must carry
+    # its own independently extracted evidence to ever become a report target.
 
     return candidates
 
@@ -1148,12 +1235,25 @@ def classify_detection_candidate(
 
     reasons = []
 
-    if bool(candidate.get("_adjacent_credit_continuation")):
-        return True, ["adjacent_credit_continuation"]
-
     if candidate_has_intrinsic_strong_evidence(candidate):
         reasons.append("direct_creator_evidence")
         return True, reasons
+
+    categories = signal_categories(candidate["matched_strings"])
+
+    name_credit_categories = {"subtitle_credit_name", "subtitle_translation_credit_name"}
+
+    if categories.intersection(name_credit_categories):
+        # Plain "Tradução: <name>" is not accepted from edge position alone because
+        # subtitles also use Tradução: to label legitimate translated on-screen text.
+        if "subtitle_credit_name" in categories and bool(candidate["_edge_block"]):
+            return True, ["edge_credit_identity"]
+
+        display_key = normalize_group_key(str(candidate["plain_text"]))
+        display_scopes = context["display_scopes"]
+
+        if len(display_scopes.get(display_key, set())) >= CROSS_CONTENT_REPETITION_MIN:
+            return True, ["repeated_credit_identity"]
 
     endpoint_categories = candidate_endpoint_categories(candidate)
 
@@ -1163,7 +1263,16 @@ def classify_detection_candidate(
     identities = signal_identity_keys(candidate["matched_strings"])
 
     if candidate_has_creator_identity_hint(candidate):
-        return True, ["creator_identity_hint"]
+        if bool(candidate["_edge_block"]):
+            return True, ["creator_identity_hint"]
+
+        identity_scopes = context["identity_scopes"]
+        if any(
+            len(identity_scopes.get(identity, set())) >= CROSS_CONTENT_REPETITION_MIN
+            for identity in identities
+            if identity[0] in {"endpoint", "email", "handle", "domain"}
+        ):
+            return True, ["creator_identity_hint"]
 
     trusted_identities = context["trusted_identities"]
 
@@ -1181,7 +1290,6 @@ def classify_detection_candidate(
     if candidate_contact_tokens.intersection(trusted_identities):
         return True, ["trusted_creator_identity"]
 
-    categories = signal_categories(candidate["matched_strings"])
     handle_count = sum(
         1 for signal in candidate["matched_strings"] if signal["category"] == "social_handle"
     )
