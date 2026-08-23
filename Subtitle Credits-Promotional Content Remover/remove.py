@@ -78,7 +78,7 @@ class BackgroundColors:  # Colors for the terminal
 
 # Execution Constants:
 VERBOSE = False  # Set to True to output verbose messages
-INPUT_DIRS = [f"E:/Movies/", f"F:/Movies/", f"F:/Series/", f"G:/Series/", f"G:/Animes/"]  # Input roots whose detector reports are consumed
+INPUT_DIRS = [f"E:/Movies/", f"F:/Documentaries/", f"F:/Movies/", f"F:/Series/", f"G:/Animes/", f"G:/Series/"]  # Input roots whose detector reports are consumed
 OUTPUT_DIR = Path("./Outputs")  # Directory containing detector reports
 REQUIRE_FILE_HASH_MATCH = True  # Refuse removal if an SRT file changed after detection
 SRT_TEXT_ENCODINGS = ("utf-8-sig", "utf-8", "cp1252", "latin-1")  # Common subtitle encodings

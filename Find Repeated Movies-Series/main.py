@@ -82,7 +82,7 @@ class BackgroundColors:  # Colors for the terminal
 
 # Execution Constants:
 VERBOSE = False  # Set to True to output verbose messages
-INPUT_DIRS = [f"E:/Movies/", f"F:/Movies/", f"F:/Series/", f"G:/Series/", f"G:/Animes/"]  # Root directories recursively scanned for movie directories
+INPUT_DIRS = [f"E:/Movies/", f"F:/Documentaries/", f"F:/Movies/", f"F:/Series/", f"G:/Animes/", f"G:/Series/"]  # Root directories recursively scanned for movie directories
 OUTPUT_DIR = "./Reports/"  # Directory where the JSON reports are written
 SUPPORTED_LANGUAGES = ("Dual", "Legendado", "Dublado", "Nacional", "English")  # Supported terminal language labels in movie-directory names
 MOVIE_DIRECTORY_PATTERN = re.compile(  # Compile the anchored movie-directory parsing expression once
