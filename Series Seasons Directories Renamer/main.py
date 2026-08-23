@@ -79,6 +79,8 @@ INPUT_DIRS = [Path("./Input"), Path("./Inputs"), Path(f"F:/Series/"), Path(f"G:/
 LANGUAGE_OPTIONS = ["Dual", "Dublado", "English", "Legendado", "Nacional"]  # User-defined suffixes for renaming
 TMDB_BASE_URL = "https://api.themoviedb.org/3"  # Base URL for TMDb API
 IGNORE_DIR_REGEX = re.compile(r'^(featurettes|extras|making[-_\s]?of|behind[ _-]?the[ _-]?scenes|specials)$', re.IGNORECASE)  # Regex for ignore dirs
+FPS_PATTERN = re.compile(r"(?<!\d)60\s*fps(?![A-Za-z0-9])", re.IGNORECASE)  # Detect 60FPS/60 fps variants anywhere in a season directory name
+CANONICAL_FPS_TOKEN = "60FPS"  # Canonical frame-rate token preserved immediately after the resolution
 
 # Sound Constants:
 SOUND_COMMANDS = {
@@ -616,6 +618,31 @@ def get_season_year(api_key, series_id, season_number):
     return air_date.split("-")[0]  # Return only the year portion of the date string
 
 
+def detect_60fps_token(name: str) -> str | None:
+    """
+    Detect a 60 FPS marker anywhere in a season directory name.
+
+    Accepted forms are case-insensitive and may contain whitespace between the
+    numeric value and FPS, including "60FPS", "60fps", "60 FPS", and "60 fps".
+
+    :param name: Directory name to inspect.
+    :return: Canonical "60FPS" token when detected, otherwise None.
+    """
+
+    return CANONICAL_FPS_TOKEN if FPS_PATTERN.search(name) else None  # Normalize every accepted variant to one canonical token
+
+
+def remove_60fps_token(name: str) -> str:
+    """
+    Remove recognized 60 FPS markers from a name before canonical reconstruction.
+
+    :param name: Directory name that may contain a 60 FPS marker.
+    :return: Name without the detected marker and with normalized whitespace.
+    """
+
+    return " ".join(FPS_PATTERN.sub(" ", name).split())  # Remove only the recognized marker so it can be reinserted in canonical position
+
+
 def standardize_final_name(name):
     """
     Standardize non-numeric words in the final folder name according to project rules.
@@ -637,6 +664,10 @@ def standardize_final_name(name):
 
         if re.fullmatch(r"(\d{3,4}p|4k)", tok, re.IGNORECASE):  # Resolution detection
             out_tokens.append(tok)  # Append resolution exactly as present
+            continue  # Proceed to next token
+
+        if tok.casefold() == CANONICAL_FPS_TOKEN.casefold():  # Preserve canonical frame-rate marker
+            out_tokens.append(CANONICAL_FPS_TOKEN)  # Force exact "60FPS" casing
             continue  # Proceed to next token
 
         matched_suffix = None  # Default no match
@@ -788,6 +819,14 @@ def detect_changes(old_name, new_name):
     elif new_res and old_res and new_res.group(0).lower() != old_res.group(0).lower():  # Resolution changed
         tags.append("Correct Resolution")  # Tag for changed resolution
 
+    old_fps = detect_60fps_token(old_name)  # Detect 60 FPS marker in original name
+    new_fps = detect_60fps_token(new_name)  # Detect 60 FPS marker in generated name
+    old_fps_exact = re.search(r"(?<!\d)60FPS(?![A-Za-z0-9])", old_name)  # Detect already-canonical exact token
+    if new_fps and not old_fps:  # Frame-rate metadata was newly restored/preserved from another source
+        tags.append("Add 60FPS")  # Tag explicit frame-rate addition
+    elif old_fps and new_fps and old_fps_exact is None:  # Original marker existed but used non-canonical spacing/casing
+        tags.append("Normalize 60FPS")  # Tag canonicalization such as "60 fps" -> "60FPS"
+
     part_re = re.compile(r"\b(part|pt|volume|vol|cour|arc)\b\.?\s*([A-Za-z0-9]+)\b", re.IGNORECASE)  # Part token regex
     old_part = part_re.search(old_name)  # Find part in old name
     new_part = part_re.search(new_name)  # Find part in new name
@@ -918,6 +957,8 @@ def build_change_labels(change_desc: str) -> list[str]:
         ("Correct Year", "Year Corrected"),
         ("Add Resolution", "Resolution Added"),
         ("Correct Resolution", "Resolution Corrected"),
+        ("Add 60FPS", "60FPS Preserved"),
+        ("Normalize 60FPS", "60FPS Normalized"),
         ("Remove Duplicate Tokens", "Duplicate Tokens Removed"),
         ("Reorder Tokens", "Format Reordered"),
         ("Normalize Format", "Whitespace Normalized"),
@@ -1028,7 +1069,7 @@ def rename_dirs():
     }  # End report_data initialization
     
     suffix_group = "|".join([re.escape(s) for s in LANGUAGE_OPTIONS])  # Build alternation group from LANGUAGE_OPTIONS
-    formatted_pattern = rf"^Season\s(?P<season>\d{{2}})\s(?P<year>\d{{4}})(?:\s(?P<resolution>\d{{3,4}}p|4k))?(?:\s(?P<suffix>{suffix_group}))?$"  # Strict formatted folder regex
+    formatted_pattern = rf"^Season\s(?P<season>\d{{2}})\s(?P<year>\d{{4}})(?:\s(?P<resolution>\d{{3,4}}p|4k))?(?:\s(?P<fps>60\s*fps))?(?:\s(?P<suffix>{suffix_group}))?$"  # Strict formatted folder regex including optional 60 FPS marker after resolution
 
     roots = INPUT_DIRS if isinstance(INPUT_DIRS, (list, tuple)) else [INPUT_DIRS]  # Normalize INPUT_DIRS to a list of paths
     
@@ -1086,6 +1127,7 @@ def rename_dirs():
                 existing_season = format_season_num(existing_season)  # Normalize to two digits
                 existing_year = formatted_match.group("year")  # Extract existing year string
                 existing_resolution = formatted_match.group("resolution")  # Extract existing optional resolution string
+                existing_fps = CANONICAL_FPS_TOKEN if formatted_match.group("fps") else None  # Preserve optional 60 FPS marker canonically
                 existing_suffix = formatted_match.group("suffix")  # Extract existing optional suffix string
 
                 try:  # Try to convert existing year to int for validation
@@ -1123,8 +1165,10 @@ def rename_dirs():
                             corrected_name = f"{corrected_name} {existing_part_token}"  # Append part token after year
                         if existing_resolution:  # Preserve existing resolution when present
                             corrected_name = f"{corrected_name} {existing_resolution}"  # Append resolution after year/part
+                        if existing_fps:  # Preserve 60 FPS metadata after resolution
+                            corrected_name = f"{corrected_name} {existing_fps}"  # Keep canonical 60FPS immediately after resolution
                         if existing_suffix:  # If an allowed suffix was present, preserve it
-                            corrected_name = f"{corrected_name} {existing_suffix}"  # Append the existing suffix
+                            corrected_name = f"{corrected_name} {existing_suffix}"  # Append the existing suffix after frame-rate metadata
                         corrected_name = " ".join(corrected_name.split())  # Normalize whitespace
                         corrected_path = entry.parent / corrected_name  # Compute corrected path
                         change_desc = detect_changes(entry.name, corrected_name) or "Correct Year"  # Describe the exact rename before changing the filesystem
@@ -1205,6 +1249,7 @@ def rename_dirs():
                 valid_year = existing_year_int  # Use the existing year instead of aborting
 
             res_token = determine_resolution(entry, entry.name)  # Determine resolution for this season folder
+            fps_token = detect_60fps_token(entry.name)  # Detect 60 FPS metadata anywhere in the original directory name
 
             part_match = re.search(r"\b(?P<label>part|pt|volume|vol|cour|arc)\b\.?\s*(?P<num>[A-Za-z0-9]+)\b", entry.name, re.IGNORECASE)  # Detect part/segment tokens
             if part_match:  # If a part token was found
@@ -1227,8 +1272,10 @@ def rename_dirs():
                 name_parts.append(part_token)  # Preserve standardized part token
             if res_token:  # Insert resolution if present in original
                 name_parts.append(res_token)  # Preserve original casing for resolution
+            if fps_token:  # Preserve detected 60 FPS metadata
+                name_parts.append(fps_token)  # Canonically place 60FPS immediately after resolution
             if append_str:  # Append suffix only when present
-                name_parts.append(append_str)  # Append selected suffix
+                name_parts.append(append_str)  # Append selected suffix after frame-rate metadata
 
             new_name = " ".join(name_parts).strip()  # Join parts and trim edges
             new_name = " ".join(new_name.split())  # Collapse multiple internal spaces
@@ -1405,6 +1452,7 @@ def rename_dirs():
                         valid_year = existing_year_int
 
                 res_token_sub = determine_resolution(subentry, normalized_season_name)
+                fps_token_sub = detect_60fps_token(normalized_season_name)  # Preserve 60 FPS metadata from any accepted format/location
 
                 part_match_sub = re.search(
                     r"\b(?P<label>part|pt|volume|vol|cour|arc)\b\.?\s*(?P<num>[A-Za-z0-9]+)\b",
@@ -1432,8 +1480,10 @@ def rename_dirs():
                     name_parts.append(part_token_sub)
                 if res_token_sub:
                     name_parts.append(res_token_sub)
+                if fps_token_sub:
+                    name_parts.append(fps_token_sub)  # Canonically place 60FPS immediately after resolution
                 if append_str:
-                    name_parts.append(append_str)
+                    name_parts.append(append_str)  # Keep language suffix after frame-rate metadata
 
                 canonical_season_name = standardize_final_name(" ".join(name_parts))
                 canonical_season_name = " ".join(canonical_season_name.split())
