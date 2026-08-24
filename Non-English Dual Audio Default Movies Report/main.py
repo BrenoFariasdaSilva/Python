@@ -37,7 +37,7 @@ Dependencies:
     - colorama
 
 Assumptions & Notes:
-    - Each direct subdirectory of every INPUT_DIRS entry represents one movie.
+    - Movie directories and media files may appear at any nested level under each INPUT_DIRS entry.
     - Movie directory names follow MovieName Year Resolution Language.
     - Unknown default-audio language metadata is recorded separately from the
       primary non-English report list.
@@ -408,15 +408,15 @@ def parse_movie_directory_name(directory_name: str) -> dict[str, str]:
 
 def find_movie_file(movie_directory: Path) -> Path | None:
     """
-    Find the single direct video file in one movie directory.
+    Find the single video file in one movie directory recursively.
 
     :param movie_directory: Directory containing one movie and sidecar files.
-    :return: Movie file path when exactly one safe candidate exists.
+    :return: Movie file path when exactly one safe candidate exists across any nested sublevel.
     """
 
-    video_files = sorted(  # Collect direct video file candidates deterministically.
-        (candidate for candidate in movie_directory.iterdir() if candidate.is_file() and candidate.suffix.casefold() in SUPPORTED_VIDEO_EXTENSIONS),  # Keep only supported video extensions.
-        key=lambda candidate: candidate.name.casefold(),  # Sort candidates by case-insensitive filename.
+    video_files = sorted(  # Collect video file candidates recursively and deterministically.
+        (candidate for candidate in movie_directory.rglob("*") if candidate.is_file() and candidate.suffix.casefold() in SUPPORTED_VIDEO_EXTENSIONS),  # Keep only supported video extensions found anywhere below the movie directory.
+        key=lambda candidate: (len(candidate.relative_to(movie_directory).parts), str(candidate.relative_to(movie_directory)).casefold()),  # Sort candidates by shallowest relative path first and then case-insensitive path text.
     )  # Close the deterministic candidate collection.
 
     if len(video_files) == 1:  # Detect the unambiguous movie file case.
@@ -428,6 +428,20 @@ def find_movie_file(movie_directory: Path) -> Path | None:
 
     print(f"{BackgroundColors.YELLOW}[WARNING] No video file found in {movie_directory}. Skipping directory.{Style.RESET_ALL}")  # Report the missing video file.
     return None  # Skip directories without video files.
+
+
+def discover_movie_directories(input_directory: Path) -> list[Path]:
+    """
+    Discover candidate movie directories recursively under one input directory.
+
+    :param input_directory: Configured movie-library root directory.
+    :return: Ordered candidate movie directory list.
+    """
+
+    return sorted(  # Collect candidate directories recursively and deterministically.
+        (candidate for candidate in input_directory.rglob("*") if candidate.is_dir()),  # Keep every nested directory so movie folders located below the root are discoverable.
+        key=lambda candidate: str(candidate.relative_to(input_directory)).casefold(),  # Sort candidates by case-insensitive relative path.
+    )  # Close the recursive movie-directory collection.
 
 
 def run_ffprobe_metadata(movie_file: Path) -> dict[str, Any]:
@@ -685,10 +699,7 @@ def generate_report(input_dir: str) -> Path:
     if not input_directory.exists():  # Detect a missing input directory.
         raise FileNotFoundError(f"Input directory not found: {input_directory}")  # Stop execution when the movie root is absent.
 
-    movie_directories = sorted(  # Collect movie directories deterministically.
-        (candidate for candidate in input_directory.iterdir() if candidate.is_dir()),  # Keep direct child directories only.
-        key=lambda candidate: candidate.name.casefold(),  # Sort directories case-insensitively.
-    )  # Close the movie directory collection.
+    movie_directories = discover_movie_directories(input_directory)  # Collect movie directories recursively so nested movie folders are included.
     reported_movies = []  # Store movies with non-English default audio.
     unknown_default_audio_language = []  # Store movies with unresolved default audio language.
 
