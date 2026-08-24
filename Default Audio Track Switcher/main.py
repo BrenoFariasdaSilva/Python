@@ -89,7 +89,7 @@ IGNORE_FILE_PATTERNS = [
 
 # These will be set by command-line arguments in main()
 REMOVE_OTHER_AUDIO_TRACKS = True  # Set to True to remove other audio tracks after setting the default
-AUDIO_TRACK_INDEX = 2  # Set to a 1-based audio track number to force the default track, or None to auto-detect
+AUDIO_TRACK_INDEX = None  # Set to a 1-based audio track number to force the default track, or None to auto-detect
 REMOVE_OTHER_SUBTITLE_TRACKS = True  # Set to True to remove other subtitle tracks
 REMOVE_DESCRIPTIVE_STREAMS = True  # If True, remove descriptive/SDH streams (audio and subtitles) before selection
 REMOVE_FORCED_STREAMS = True  # If True, remove forced streams before selection
