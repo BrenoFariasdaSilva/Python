@@ -86,6 +86,7 @@ INPUT_DIRS = [f"E:/Movies/", f"F:/Documentaries/", f"F:/Movies/", f"F:/Series/",
 OUTPUT_DIR = "./Reports/"  # Directory where the JSON reports are written
 SUPPORTED_LANGUAGES = ("Dual", "Legendado", "Dublado", "Nacional", "English")  # Supported terminal language labels in movie-directory names
 SEASON_INDEX_LABELS = ("Season", "Temporada")  # Trailing numeric tokens after these labels are season identifiers and must not be discarded during duplicate matching
+NORMALIZED_SEASON_INDEX_LABELS = tuple()  # Store normalized season labels after normalize_movie_name becomes available
 MOVIE_DIRECTORY_PATTERN = re.compile(  # Compile the anchored movie-directory parsing expression once
     rf"^(?P<movie_name>.+?)\s+(?P<year>\d{{4}})\s+(?P<resolution>\d{{3,4}}p)\s+(?P<language>{'|'.join(SUPPORTED_LANGUAGES)})$",  # Capture title, year, resolution, and language from the directory-name suffix
     re.IGNORECASE,  # Match configured language labels and resolution suffixes case-insensitively
@@ -310,6 +311,12 @@ def normalize_movie_name(movie_name: str) -> str:
     return normalized  # Return the normalized movie-title comparison key
 
 
+NORMALIZED_SEASON_INDEX_LABELS = tuple(  # Normalize configured season labels once so season-index protection uses the same comparison rules as duplicate matching
+    normalize_movie_name(season_label)  # Normalize each configured season label for case/accent/punctuation-insensitive matching
+    for season_label in SEASON_INDEX_LABELS  # Iterate every configured season label
+)  # Finish the normalized season-label cache
+
+
 def remove_optional_trailing_movie_index(movie_name: str) -> str:
     """
     Remove an optional short numeric index placed immediately before the release year.
@@ -336,8 +343,8 @@ def remove_optional_trailing_movie_index(movie_name: str) -> str:
     base_contains_letters = any(character.isalpha() for character in base_title)  # Require alphabetic title content before treating the final number as an optional index
     normalized_base_title = normalize_movie_name(base_title)  # Normalize the base title so season-label checks ignore punctuation, accents, and casing
     ends_with_season_label = any(  # Detect season labels whose trailing numeric token must be preserved
-        normalized_base_title == season_label or normalized_base_title.endswith(f" {season_label}")  # Match labels such as "Season" or "... Season"
-        for season_label in SEASON_INDEX_LABELS  # Inspect every configured season label
+        normalized_base_title == season_label or normalized_base_title.endswith(f" {season_label}")  # Match labels such as "season" or "... season" under normalized comparison rules
+        for season_label in NORMALIZED_SEASON_INDEX_LABELS  # Inspect every normalized configured season label
     )  # Finish detecting protected season labels
     if is_short_numeric_index and base_contains_letters and not ends_with_season_label:  # Ignore the trailing token only when it satisfies the guarded optional-index rules and is not a season number
         return base_title.rstrip()  # Return the title without the optional trailing numeric index
