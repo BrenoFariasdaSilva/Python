@@ -89,6 +89,7 @@ IGNORE_FILE_PATTERNS = [
 
 # These will be set by command-line arguments in main()
 REMOVE_OTHER_AUDIO_TRACKS = True  # Set to True to remove other audio tracks after setting the default
+AUDIO_TRACK_INDEX = 2  # Set to a 1-based audio track number to force the default track, or None to auto-detect
 REMOVE_OTHER_SUBTITLE_TRACKS = True  # Set to True to remove other subtitle tracks
 REMOVE_DESCRIPTIVE_STREAMS = True  # If True, remove descriptive/SDH streams (audio and subtitles) before selection
 REMOVE_FORCED_STREAMS = True  # If True, remove forced streams before selection
@@ -1853,6 +1854,37 @@ def determine_default_track(audio_tracks, video_path):
     return 1 if num_tracks == 2 else 0  # For 1 or 2 tracks, swap only if there are 2 tracks
 
 
+def resolve_manual_audio_track_position(total_tracks, video_path):
+    """
+    Resolve the configured 1-based AUDIO_TRACK_INDEX to a zero-based audio track position.
+
+    :param total_tracks: Total number of available audio tracks
+    :param video_path: Path to the video file
+    :return: Zero-based audio track position or None when auto-detect should be used
+    """
+
+    if AUDIO_TRACK_INDEX is None:  # Preserve auto-detection when no manual index is configured
+        return None  # Return None so existing selection logic can continue
+
+    if not isinstance(AUDIO_TRACK_INDEX, int):  # Guard against invalid config values
+        print(
+            f"{BackgroundColors.RED}Invalid AUDIO_TRACK_INDEX value for: {BackgroundColors.CYAN}{video_path}{BackgroundColors.RED}. Expected an integer or None.{Style.RESET_ALL}"
+        )
+        return None  # Fall back to auto-detect when configuration is invalid
+
+    manual_track_position = AUDIO_TRACK_INDEX - 1  # Convert configured 1-based track number to zero-based position
+    if manual_track_position < 0 or manual_track_position >= total_tracks:  # Verify the configured track exists in this file
+        print(
+            f"{BackgroundColors.RED}AUDIO_TRACK_INDEX {AUDIO_TRACK_INDEX} is out of range for: {BackgroundColors.CYAN}{video_path}{BackgroundColors.RED}. Found {total_tracks} audio track(s).{Style.RESET_ALL}"
+        )
+        return None  # Fall back to auto-detect when the configured track is unavailable
+
+    print(
+        f"{BackgroundColors.GREEN}Using configured audio track #{AUDIO_TRACK_INDEX} for: {BackgroundColors.CYAN}{video_path}{Style.RESET_ALL}"
+    )
+    return manual_track_position  # Return the validated zero-based audio track position
+
+
 def apply_audio_track_default(video_path, audio_tracks, default_track_index, kept_indices):
     """
     Apply the default audio track disposition to the video file using ffmpeg, keeping only desired tracks.
@@ -1955,9 +1987,14 @@ def swap_audio_tracks(video_path):
             )
             return  # Skip this file
 
-        if should_skip_processing_for_correct_defaults(video_path, audio_streams, subtitle_streams):  # Verify whether both current defaults already match highest-priority desired languages.
+        manual_audio_pos = resolve_manual_audio_track_position(len(audio_streams), video_path)  # Resolve optional configured audio track position
+        if AUDIO_TRACK_INDEX is None and should_skip_processing_for_correct_defaults(video_path, audio_streams, subtitle_streams):  # Verify whether both current defaults already match highest-priority desired languages.
             verbose_output(f"{BackgroundColors.GREEN}Default streams already match desired priority. Skipping remux for: {BackgroundColors.CYAN}{video_path}{Style.RESET_ALL}")
             return  # Skip remuxing when default streams already match configured priority.
+
+        if manual_audio_pos is not None:  # Force the configured audio track and prune all other audio tracks in strict mode
+            for stream in audio_streams:  # Rewrite classifications so only the selected stream remains
+                stream["classification"] = "desired" if stream.get("audio_pos") == manual_audio_pos else "undesired"  # Keep only the selected audio stream in prune mode
 
         apply_prune_and_set_defaults(video_path, audio_streams, subtitle_streams)  # Prune non-desired and set defaults
         return  # Return after pruning operation
@@ -1975,25 +2012,29 @@ def swap_audio_tracks(video_path):
 
     kept_indices = list(range(len(audio_tracks)))  # Keep all track indices by default
 
-    english_langs = DESIRED_LANGUAGES.get("English", [])  # Get English language codes
-    english_index = None  # Index of English track if found
-    for i in kept_indices:  # For each kept track
-        parts = audio_tracks[i].split(",")  # Split the track info
-        lang = parts[2].lower().strip()  # Get language
-        if lang in english_langs:  # If language is English
-            english_index = i  # Set English track index
-            break  # Stop searching
+    manual_track_index = resolve_manual_audio_track_position(len(audio_tracks), video_path)  # Resolve optional configured audio track position for preserve mode
+    if manual_track_index is not None:  # Prefer configured track over automatic language detection
+        default_track_index = manual_track_index  # Force the configured track as the default output audio
+    else:  # Preserve original automatic selection behavior when no manual track is configured
+        english_langs = DESIRED_LANGUAGES.get("English", [])  # Get English language codes
+        english_index = None  # Index of English track if found
+        for i in kept_indices:  # For each kept track
+            parts = audio_tracks[i].split(",")  # Split the track info
+            lang = parts[2].lower().strip()  # Get language
+            if lang in english_langs:  # If language is English
+                english_index = i  # Set English track index
+                break  # Stop searching
 
-    if english_index is not None:  # If English track found
-        default_track_index = english_index  # Set English as default
-        print(
-            f"{BackgroundColors.GREEN}Automatically selected English audio track for: {BackgroundColors.CYAN}{video_path}{Style.RESET_ALL}"
-        )
-    else:  # No English, use first track from kept set
-        default_track_index = kept_indices[0]  # Set first track as default
-        print(
-            f"{BackgroundColors.GREEN}Selected first audio track as default for: {BackgroundColors.CYAN}{video_path}{Style.RESET_ALL}"
-        )
+        if english_index is not None:  # If English track found
+            default_track_index = english_index  # Set English as default
+            print(
+                f"{BackgroundColors.GREEN}Automatically selected English audio track for: {BackgroundColors.CYAN}{video_path}{Style.RESET_ALL}"
+            )
+        else:  # No English, use first track from kept set
+            default_track_index = kept_indices[0]  # Set first track as default
+            print(
+                f"{BackgroundColors.GREEN}Selected first audio track as default for: {BackgroundColors.CYAN}{video_path}{Style.RESET_ALL}"
+            )
 
     apply_audio_track_default(video_path, audio_tracks, default_track_index, kept_indices)  # Apply the changes
 
