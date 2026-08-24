@@ -85,6 +85,7 @@ VERBOSE = False  # Set to True to output verbose messages
 INPUT_DIRS = [f"E:/Movies/", f"F:/Documentaries/", f"F:/Movies/", f"F:/Series/", f"G:/Animes/", f"G:/Series/"]  # Root directories recursively scanned for movie directories
 OUTPUT_DIR = "./Reports/"  # Directory where the JSON reports are written
 SUPPORTED_LANGUAGES = ("Dual", "Legendado", "Dublado", "Nacional", "English")  # Supported terminal language labels in movie-directory names
+SEASON_INDEX_LABELS = ("Season", "Temporada")  # Trailing numeric tokens after these labels are season identifiers and must not be discarded during duplicate matching
 MOVIE_DIRECTORY_PATTERN = re.compile(  # Compile the anchored movie-directory parsing expression once
     rf"^(?P<movie_name>.+?)\s+(?P<year>\d{{4}})\s+(?P<resolution>\d{{3,4}}p)\s+(?P<language>{'|'.join(SUPPORTED_LANGUAGES)})$",  # Capture title, year, resolution, and language from the directory-name suffix
     re.IGNORECASE,  # Match configured language labels and resolution suffixes case-insensitively
@@ -316,9 +317,11 @@ def remove_optional_trailing_movie_index(movie_name: str) -> str:
     Because parsing already removes the final YYYY/resolution/language suffix, this
     function inspects only the extracted movie-title portion. A trailing 1-3 digit
     token is treated as a removable index only when the preceding title contains at
-    least one alphabetic character. This keeps standalone/numeric titles safer while
-    allowing forms such as "Planeta dos Macacos 1 2011 ..." to match the same movie
-    stored as "Planeta dos Macacos 2011 ...".
+    least one alphabetic character and the number is not part of a season label such
+    as "Season 01". This keeps standalone/numeric titles safer while allowing forms
+    such as "Planeta dos Macacos 1 2011 ..." to match the same movie stored as
+    "Planeta dos Macacos 2011 ...", without collapsing different series seasons into
+    the same duplicate identity.
 
     :param movie_name: Parsed movie title before year/resolution/language metadata.
     :return: Movie title with the optional trailing numeric index removed when present.
@@ -331,7 +334,12 @@ def remove_optional_trailing_movie_index(movie_name: str) -> str:
     base_title, trailing_token = title_parts  # Separate the possible base title from the possible numeric index token
     is_short_numeric_index = trailing_token.isdigit() and 1 <= len(trailing_token) <= 3  # Restrict optional indexes to short integer tokens instead of four-digit year-like values
     base_contains_letters = any(character.isalpha() for character in base_title)  # Require alphabetic title content before treating the final number as an optional index
-    if is_short_numeric_index and base_contains_letters:  # Ignore the trailing token only when it satisfies the guarded optional-index rules
+    normalized_base_title = normalize_movie_name(base_title)  # Normalize the base title so season-label checks ignore punctuation, accents, and casing
+    ends_with_season_label = any(  # Detect season labels whose trailing numeric token must be preserved
+        normalized_base_title == season_label or normalized_base_title.endswith(f" {season_label}")  # Match labels such as "Season" or "... Season"
+        for season_label in SEASON_INDEX_LABELS  # Inspect every configured season label
+    )  # Finish detecting protected season labels
+    if is_short_numeric_index and base_contains_letters and not ends_with_season_label:  # Ignore the trailing token only when it satisfies the guarded optional-index rules and is not a season number
         return base_title.rstrip()  # Return the title without the optional trailing numeric index
 
     return movie_name  # Preserve the complete parsed title when the final token is meaningful or ambiguous
@@ -713,6 +721,7 @@ def build_comparison_metadata():
         "based_on": "normalized_movie_name_and_year",  # Document that both normalized title and release year are required for duplicate identity
         "requires_same_year": True,  # Explicitly document that equal titles from different release years are never duplicates
         "optional_trailing_numeric_index_before_year_ignored": True,  # Document the guarded optional 1-3 digit index normalization immediately before the year
+        "season_numeric_index_before_year_preserved": True,  # Document that season identifiers such as "Season 01" remain part of the duplicate identity
         "ignores": [  # List metadata and formatting differences ignored during matching
             "resolution",  # Document that resolution differences do not affect title-and-year matching
             "language",  # Document that language-label differences do not affect title-and-year matching
@@ -722,6 +731,7 @@ def build_comparison_metadata():
             "punctuation",  # Document that punctuation differences do not affect title matching
             "extra_whitespace",  # Document that repeated or surrounding whitespace does not affect title matching
             "optional_trailing_1_to_3_digit_title_index",  # Document the guarded numeric index ignored immediately before the parsed release year
+            "season_labels_are_not_treated_as_optional_title_indexes",  # Document that season labels keep their trailing numeric identifier during matching
         ],  # Finish the ignored-comparison attribute list
     }  # Return the common comparison metadata dictionary
 
