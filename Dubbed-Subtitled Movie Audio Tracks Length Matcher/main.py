@@ -70,7 +70,7 @@ class BackgroundColors:  # Colors for the terminal
 
 # Execution Constants:
 VERBOSE = False  # Set to True to output verbose messages
-INPUT_DIRECTORY = "E:/Movies"  # Input directory containing movie category folders
+INPUT_DIRECTORY = "F:/Movies"  # Input directory containing movie category folders
 DUBLADO_DIRECTORY = f"{INPUT_DIRECTORY}/Dublado"  # Dublado movie directory
 LEGENDADO_DIRECTORY = f"{INPUT_DIRECTORY}/Legendado"  # Legendado movie directory
 DUAL_DIRECTORY = f"{INPUT_DIRECTORY}/Dual"  # Dual movie directory
