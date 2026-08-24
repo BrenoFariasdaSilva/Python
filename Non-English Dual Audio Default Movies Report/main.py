@@ -3,15 +3,16 @@
 Non-English Dual Audio Default Movies Report
 ================================================================================
 Author      : Breno Farias da Silva
-Created     : <YYYY-MM-DD>
+Created     : 2026-08-10
 Description :
-    This script analyzes movie directories under E:/Movies/Dual/ and reports
+    This script analyzes movie directories under one or more configured library
+    roots and reports
     movies whose actual default audio track is not identified as English.
     It reads media metadata through FFprobe, resolves language values through
     LANGUAGES_MAPPING, and preserves uncertain default-audio language cases.
 
     Key features include:
-        - Movie directory discovery under E:/Movies/Dual/
+        - Movie directory discovery under multiple configured input directories
         - Deterministic video file selection without treating .srt files as movies
         - Default audio stream detection from media container metadata
         - Language identification using media metadata and LANGUAGES_MAPPING
@@ -19,13 +20,13 @@ Description :
         - Structured JSON report generation in the script Reports directory
 
 Usage:
-    1. Set INPUT_DIRECTORY to the movie library root.
+    1. Set INPUT_DIRS to the movie-library root directories.
     2. Ensure FFprobe is installed and available through the system PATH.
     3. Run the script via terminal:
         $ make run   or   $ python main.py
 
 Outputs:
-    - Non-English Dual Audio Default Movies Report/Reports/non_english_default_audio_movies.json
+    - Non-English Dual Audio Default Movies Report/Reports/<input-dir-prefix>-non_english_default_audio_movies.json
 
 TODOs:
     - Add CLI arguments for input and report paths if needed.
@@ -36,7 +37,7 @@ Dependencies:
     - colorama
 
 Assumptions & Notes:
-    - Each direct subdirectory of INPUT_DIRECTORY represents one movie.
+    - Each direct subdirectory of every INPUT_DIRS entry represents one movie.
     - Movie directory names follow MovieName Year Resolution Language.
     - Unknown default-audio language metadata is recorded separately from the
       primary non-English report list.
@@ -69,10 +70,9 @@ class BackgroundColors:  # Colors for the terminal
 
 # Execution Constants:
 VERBOSE = False  # Set to True to output verbose messages
-INPUT_DIRECTORY = "E:/Movies/Dual/"  # Set the movie library root directory
+INPUT_DIRS = [f"E:/Movies/", f"F:/Documentaries/", f"F:/Movies/", f"F:/Series/", f"G:/Animes/", f"G:/Series/"]  # Set the movie library root directories
 SCRIPT_DIRECTORY = Path(__file__).resolve().parent  # Resolve the executing file directory
 REPORTS_DIRECTORY = SCRIPT_DIRECTORY / "Reports"  # Set the script report directory
-REPORT_FILE = REPORTS_DIRECTORY / "non_english_default_audio_movies.json"  # Set the JSON report output path
 SUPPORTED_VIDEO_EXTENSIONS = (".mkv", ".mp4", ".avi", ".mov")  # Define supported video file extensions
 LANGUAGES_MAPPING = {  # Map display languages to known metadata aliases
     "English": ["english", "eng", "en", "Inglês"],  # Map English aliases
@@ -360,6 +360,32 @@ def validate_ffprobe_available() -> None:
         raise RuntimeError("Required executable not found in PATH: ffprobe.")  # Stop execution with a clear dependency error.
 
 
+def build_report_prefix(input_dir: str) -> str:
+    """
+    Build a filesystem-safe report prefix from one configured input directory.
+
+    :param input_dir: Configured input directory path.
+    :return: Report filename prefix derived from the input directory.
+    """
+
+    cleaned_input_dir = input_dir.strip()  # Remove accidental surrounding whitespace from the configured input directory
+    sanitized_prefix = re.sub(r"[\\/]+", "-", cleaned_input_dir)  # Replace any slash direction with the required dash separator
+    sanitized_prefix = sanitized_prefix.replace(":", "")  # Remove Windows drive separators so the prefix remains a valid filename
+    sanitized_prefix = re.sub(r"-+", "-", sanitized_prefix).strip("-")  # Collapse repeated dashes and trim any leading or trailing separator
+    return sanitized_prefix or "report"  # Return the safe prefix or a deterministic fallback when the input directory is unexpectedly empty
+
+
+def build_report_path(input_dir: str) -> Path:
+    """
+    Build the JSON report path for one configured input directory.
+
+    :param input_dir: Configured input directory path.
+    :return: Report path using the sanitized input-directory prefix.
+    """
+
+    return REPORTS_DIRECTORY / f"{build_report_prefix(input_dir)}-non_english_default_audio_movies.json"  # Return the per-input report path
+
+
 def parse_movie_directory_name(directory_name: str) -> dict[str, str]:
     """
     Parse movie name, year, and resolution from one directory name.
@@ -645,15 +671,16 @@ def build_movie_report_entry(movie_directory: Path, metadata: dict[str, Any]) ->
     }  # Close the movie report entry.
 
 
-def generate_report() -> Path:
+def generate_report(input_dir: str) -> Path:
     """
-    Generate the non-English default audio movie JSON report.
+    Generate the non-English default audio movie JSON report for one input directory.
 
+    :param input_dir: Configured movie-library root directory.
     :return: Written report path.
     """
 
     validate_ffprobe_available()  # Validate FFprobe availability.
-    input_directory = Path(INPUT_DIRECTORY)  # Build the input directory path.
+    input_directory = Path(input_dir)  # Build the input directory path.
 
     if not input_directory.exists():  # Detect a missing input directory.
         raise FileNotFoundError(f"Input directory not found: {input_directory}")  # Stop execution when the movie root is absent.
@@ -692,11 +719,16 @@ def generate_report() -> Path:
 
     reported_movies.sort(key=lambda movie: str(movie["MovieName"]).casefold())  # Sort reported movies by name.
     unknown_default_audio_language.sort(key=lambda movie: str(movie["MovieName"]).casefold())  # Sort unknown-language movies by name.
-    report_data = {"Movies": reported_movies, "UnknownDefaultAudioLanguage": unknown_default_audio_language}  # Build the structured report payload.
+    report_data = {  # Build the structured report payload for the current input directory
+        "InputDir": str(input_directory),  # Record the processed input directory represented by this report
+        "Movies": reported_movies,  # Store movies whose default audio is confidently non-English
+        "UnknownDefaultAudioLanguage": unknown_default_audio_language,  # Store movies whose default audio language could not be resolved
+    }  # Close the structured report payload
     REPORTS_DIRECTORY.mkdir(parents=True, exist_ok=True)  # Create the script Reports directory when needed.
-    REPORT_FILE.write_text(json.dumps(report_data, indent=4, ensure_ascii=False) + "\n", encoding="utf-8")  # Write human-readable JSON.
+    report_file = build_report_path(str(input_directory))  # Build the current input directory report path
+    report_file.write_text(json.dumps(report_data, indent=4, ensure_ascii=False) + "\n", encoding="utf-8")  # Write human-readable JSON.
 
-    return REPORT_FILE  # Return the written report path.
+    return report_file  # Return the written report path.
 
 
 def play_sound():
@@ -739,8 +771,13 @@ def main():
     
     start_time = datetime.datetime.now()  # Get the start time of the program
     
-    report_file = generate_report()  # Generate the non-English default audio report
-    print(f"{BackgroundColors.GREEN}Report saved to: {BackgroundColors.CYAN}{report_file}{Style.RESET_ALL}")  # Output the report path
+    validate_ffprobe_available()  # Validate FFprobe once before processing all configured input directories
+
+    report_files = []  # Store the written report path for each configured input directory
+    for input_dir in INPUT_DIRS:  # Process every configured movie-library root independently
+        report_file = generate_report(input_dir)  # Generate the non-English default audio report for the current input directory
+        report_files.append(report_file)  # Store the generated report path for summary output
+        print(f"{BackgroundColors.GREEN}Report saved for {BackgroundColors.CYAN}{input_dir}{BackgroundColors.GREEN}: {BackgroundColors.CYAN}{report_file}{Style.RESET_ALL}")  # Output the current report path
 
     finish_time = datetime.datetime.now()  # Get the finish time of the program
     
