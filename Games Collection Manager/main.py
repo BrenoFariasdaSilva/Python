@@ -99,6 +99,7 @@ ICON_NEEDS_CLEANING = "🧹"  # Icon representing an owned game with box that ne
 ICON_DAMAGED = "📀"  # Icon representing an owned game with damaged/needs fixing box
 ICON_BOX_DAMAGED = "📦"  # Icon representing an owned game with damaged box
 VALID_ICONS = (ICON_OWNED, ICON_MAYBE, ICON_DAMAGED, ICON_NEEDS_CLEANING, ICON_BOX_DAMAGED)  # Tuple of all recognized ownership icons
+ICON_SEQUENCE_REGEX = re.compile(r"(?:\s*(?:✅|❓|📀|🧹|📦))+$")  # Matches one or more trailing icons with or without spaces between them
 
 # Fixed Metadata Constants:
 FIXED_METADATA_BLOCK = [
@@ -451,23 +452,12 @@ def normalize_game_line(raw_line: str, filepath: str, console_name: str) -> str:
             body = body[1:].strip()  # Remove "-" prefix and trim
 
 
-        reversed_icons = []  # Collect detected trailing icons from right to left
-        while True:  # Keep peeling recognized trailing icons until none remain
-            matched_icon = None  # Track whether the current pass found a trailing icon
-
-            for icon in VALID_ICONS:  # Try each supported icon as a trailing suffix
-                if body.endswith(icon):  # Verify icon appears at the current line tail
-                    prefix = body[: -len(icon)]  # Extract content before the candidate icon
-                    if prefix == "" or prefix.endswith(" "):  # Verify icon token is separated from previous text
-                        matched_icon = icon  # Record matched trailing icon token
-                        body = prefix.strip()  # Remove matched icon token and trim remaining body
-                        reversed_icons.append(icon)  # Store icon in reverse order as extracted
-                        break  # Stop current icon scan after first valid match
-
-            if matched_icon is None:  # Stop when no additional trailing icon is found
-                break  # Exit peel loop
-
-        icons = list(reversed(reversed_icons))  # Restore left-to-right icon order
+        icons = []  # Initialize parsed icon list
+        trailing_icons_match = ICON_SEQUENCE_REGEX.search(body)  # Match all trailing icons whether spaced or adjacent
+        if trailing_icons_match:  # Parse and remove the trailing icon suffix when present
+            icon_suffix = trailing_icons_match.group(0)  # Capture the full trailing icon sequence
+            body = body[: trailing_icons_match.start()].rstrip()  # Remove icon sequence from the body text
+            icons = [character for character in icon_suffix if character in VALID_ICONS]  # Preserve icon order exactly as written
 
         if body.endswith("."):  # Strip trailing period to isolate name+year region
             body = body[:-1].strip()  # Remove period and trim
@@ -508,13 +498,12 @@ def parse_game_icons(normalized_line: str) -> list:
         if "." not in normalized_line:  # Verify canonical delimiter exists before parsing tail tokens
             return []  # Return empty when no canonical suffix can exist
 
-        suffix = normalized_line.split(".", 1)[1].strip()  # Extract suffix region after canonical year delimiter
+        suffix = normalized_line.rsplit(".", 1)[1].strip()  # Extract suffix region after the final canonical delimiter
 
         if suffix == "":  # Verify suffix contains at least one token
             return []  # Return empty when no icon suffix is present
 
-        tokens = suffix.split()  # Split suffix into whitespace-separated tokens
-        return [token for token in tokens if token in VALID_ICONS]  # Return all valid icon tokens preserving order
+        return [character for character in suffix if character in VALID_ICONS]  # Return all valid icon tokens preserving order, including adjacent icons
 
     except Exception:  # Catch unexpected parsing errors
         return []  # Return empty list on failure
