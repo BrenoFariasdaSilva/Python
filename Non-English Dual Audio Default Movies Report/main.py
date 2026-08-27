@@ -74,6 +74,7 @@ INPUT_DIRS = [f"E:/Movies/", f"F:/Documentaries/", f"F:/Movies/", f"F:/Series/",
 SCRIPT_DIRECTORY = Path(__file__).resolve().parent  # Resolve the executing file directory
 REPORTS_DIRECTORY = SCRIPT_DIRECTORY / "Reports"  # Set the script report directory
 SUPPORTED_VIDEO_EXTENSIONS = (".mkv", ".mp4", ".avi", ".mov")  # Define supported video file extensions
+IGNORED_FILENAME_KEYWORDS = ("nacional", "dublado")  # Ignore video filenames containing any of these case-insensitive keywords.
 LANGUAGES_MAPPING = {  # Map display languages to known metadata aliases
     "English": ["english", "eng", "en", "Inglês"],  # Map English aliases
     "Brazilian Portuguese": ["PT-BR FULL", "brazilian", "portuguese", "COMPLETA PT-BR", "PT-BR COMPLETA", "Português (Brasil)", "pt-br", "pt"],  # Map Brazilian Portuguese aliases
@@ -415,7 +416,13 @@ def discover_movie_files(input_directory: Path) -> list[Path]:
     """
 
     return sorted(  # Return every supported video file discovered below the configured input directory.
-        (candidate for candidate in input_directory.rglob("*") if candidate.is_file() and candidate.suffix.casefold() in SUPPORTED_VIDEO_EXTENSIONS),  # Keep only supported video files discovered recursively.
+        (
+            candidate
+            for candidate in input_directory.rglob("*")
+            if candidate.is_file()
+            and candidate.suffix.casefold() in SUPPORTED_VIDEO_EXTENSIONS
+            and not any(keyword in candidate.name.casefold() for keyword in IGNORED_FILENAME_KEYWORDS)
+        ),  # Keep only supported video files discovered recursively whose filenames do not contain ignored keywords.
         key=lambda candidate: str(candidate.relative_to(input_directory)).casefold(),  # Sort files by case-insensitive relative path for deterministic report generation.
     )  # Close the recursive video-file collection.
 
