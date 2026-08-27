@@ -408,15 +408,15 @@ def parse_movie_directory_name(directory_name: str) -> dict[str, str]:
 
 def find_movie_file(movie_directory: Path) -> Path | None:
     """
-    Find the single video file in one movie directory recursively.
+    Find the single video file stored directly inside one movie directory.
 
     :param movie_directory: Directory containing one movie and sidecar files.
-    :return: Movie file path when exactly one safe candidate exists across any nested sublevel.
+    :return: Movie file path when exactly one safe direct candidate exists.
     """
 
-    video_files = sorted(  # Collect video file candidates recursively and deterministically.
-        (candidate for candidate in movie_directory.rglob("*") if candidate.is_file() and candidate.suffix.casefold() in SUPPORTED_VIDEO_EXTENSIONS),  # Keep only supported video extensions found anywhere below the movie directory.
-        key=lambda candidate: (len(candidate.relative_to(movie_directory).parts), str(candidate.relative_to(movie_directory)).casefold()),  # Sort candidates by shallowest relative path first and then case-insensitive path text.
+    video_files = sorted(  # Collect direct video file candidates deterministically.
+        (candidate for candidate in movie_directory.iterdir() if candidate.is_file() and candidate.suffix.casefold() in SUPPORTED_VIDEO_EXTENSIONS),  # Keep only supported video extensions located directly in the movie directory.
+        key=lambda candidate: candidate.name.casefold(),  # Sort video filenames case-insensitively for deterministic selection and warnings.
     )  # Close the deterministic candidate collection.
 
     if len(video_files) == 1:  # Detect the unambiguous movie file case.
@@ -432,15 +432,21 @@ def find_movie_file(movie_directory: Path) -> Path | None:
 
 def discover_movie_directories(input_directory: Path) -> list[Path]:
     """
-    Discover candidate movie directories recursively under one input directory.
+    Discover movie directories by recursively scanning for video files under one input directory.
 
     :param input_directory: Configured movie-library root directory.
-    :return: Ordered candidate movie directory list.
+    :return: Ordered unique parent directories of discovered video files.
     """
 
-    return sorted(  # Collect candidate directories recursively and deterministically.
-        (candidate for candidate in input_directory.rglob("*") if candidate.is_dir()),  # Keep every nested directory so movie folders located below the root are discoverable.
-        key=lambda candidate: str(candidate.relative_to(input_directory)).casefold(),  # Sort candidates by case-insensitive relative path.
+    movie_directories = {  # Collect each directory that directly contains a discovered video file.
+        video_file.parent  # Keep the parent directory of each supported video file.
+        for video_file in input_directory.rglob("*")  # Recursively scan the configured input directory once.
+        if video_file.is_file() and video_file.suffix.casefold() in SUPPORTED_VIDEO_EXTENSIONS  # Keep only supported video files.
+    }  # Close the recursive parent-directory collection.
+
+    return sorted(  # Return directories deterministically for stable report generation.
+        movie_directories,  # Sort every discovered movie directory.
+        key=lambda candidate: str(candidate.relative_to(input_directory)).casefold() if candidate != input_directory else "",  # Sort by case-insensitive relative path while keeping the root stable when it directly contains a movie file.
     )  # Close the recursive movie-directory collection.
 
 
