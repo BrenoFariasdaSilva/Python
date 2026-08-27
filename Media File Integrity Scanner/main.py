@@ -602,13 +602,38 @@ def finalize_report(report_data: dict, report_start_time: datetime.datetime) -> 
     report_data["scan_execution_time"] = calculate_execution_time(report_start_time, finish_time)  # Store the complete input-root scan duration
 
 
-def scan_input_directory(ffmpeg_executable: str, input_dir_string: str) -> Path:
+def update_reports_with_global_corruption_summary(report_summaries: list[dict[str, int | str | Path]]) -> None:
+    """
+    Update every generated JSON report with cross-input corruption totals.
+
+    :param report_summaries: Successful per-input report metadata collected during the run.
+    :return: None
+    """
+
+    corrupted_files_by_input_dir = {  # Build the per-input corruption summary using normalized path strings as keys.
+        unix_path(str(report_summary["input_dir"])): int(report_summary["corrupted_files"])  # Preserve one corruption count for each successfully scanned input root.
+        for report_summary in report_summaries
+    }  # Close the per-input corruption summary mapping.
+    total_corrupted_files = sum(corrupted_files_by_input_dir.values())  # Sum every successful input-root corruption count into one global total.
+
+    for report_summary in report_summaries:  # Rewrite every generated report so each one contains the same global corruption summary.
+        report_path = Path(report_summary["report_path"])  # Resolve the current report path from the stored run summary.
+
+        with report_path.open("r", encoding="utf-8") as report_file:  # Read the already-generated JSON report.
+            report_data = json.load(report_file)  # Load the current report document before appending the cross-input summary.
+
+        report_data["corrupted_files_by_input_dir"] = corrupted_files_by_input_dir  # Store the corruption count for each successfully scanned input root.
+        report_data["total_corrupted_files_all_input_dirs"] = total_corrupted_files  # Store the total corrupted-file count across all successful input roots in this run.
+        write_json_report(report_path, report_data)  # Rewrite the report atomically with the appended global totals.
+
+
+def scan_input_directory(ffmpeg_executable: str, input_dir_string: str) -> dict[str, int | str | Path]:
     """
     Recursively scan one configured input root and maintain its JSON corruption report.
 
     :param ffmpeg_executable: Resolved FFmpeg executable path.
     :param input_dir_string: Configured input directory string to scan recursively.
-    :return: Generated JSON report path.
+    :return: Generated JSON report metadata for final cross-input summaries.
     """
 
     report_start_time = datetime.datetime.now()  # Capture the input-root processing start time
@@ -672,7 +697,11 @@ def scan_input_directory(ffmpeg_executable: str, input_dir_string: str) -> Path:
     )  # Display final counts for the current input root
     logger.write("")  # Keep one blank line before the next input directory
 
-    return report_path  # Return the completed JSON report path
+    return {  # Return the completed report metadata for cross-input aggregation after every root finishes.
+        "input_dir": unix_path(input_dir),  # Preserve the scanned input-root path using Unix-style separators.
+        "report_path": report_path,  # Preserve the generated report path for later JSON updates.
+        "corrupted_files": report_data["corrupted_files"],  # Preserve the final corruption count for this input root.
+    }
 
 def to_seconds(obj):
     """
@@ -794,6 +823,7 @@ def main():
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)  # Ensure the report output directory exists before processing input roots
     ffmpeg_executable = resolve_ffmpeg_executable()  # Resolve FFmpeg once before starting potentially long media scans
     generated_reports: list[Path] = []  # Store report paths generated successfully during the current program execution
+    report_summaries: list[dict[str, int | str | Path]] = []  # Store per-input corruption counts so every report can receive the global summary at the end
     input_failures: list[tuple[str, Exception]] = []  # Store configured input roots that could not be processed
 
     logger.write(f"{BackgroundColors.GREEN}FFmpeg: {BackgroundColors.CYAN}{unix_path(ffmpeg_executable)}{Style.RESET_ALL}")  # Display the resolved FFmpeg executable used for every integrity scan
@@ -801,13 +831,16 @@ def main():
 
     for input_dir in INPUT_DIRS:  # Process each configured movie root independently
         try:  # Prevent one unavailable input root from blocking integrity scans for the remaining configured roots
-            generated_reports.append(scan_input_directory(ffmpeg_executable, input_dir))  # Scan the complete input root and preserve its generated report path
+            report_summary = scan_input_directory(ffmpeg_executable, input_dir)  # Scan the complete input root and preserve its generated report metadata
+            report_summaries.append(report_summary)  # Store the successful input-root corruption totals for the final cross-input report update
+            generated_reports.append(Path(report_summary["report_path"]))  # Preserve the generated JSON report path for terminal summary output
         except Exception as exception:  # Capture input-root configuration or discovery failures
             input_failures.append((input_dir, exception))  # Preserve the failed root and exception for the final program summary
             logger.write(f"{BackgroundColors.RED}Failed input directory: {BackgroundColors.CYAN}{unix_path(input_dir)}{Style.RESET_ALL}")  # Report the input root that could not be processed
             logger.write(f"{BackgroundColors.RED}{type(exception).__name__}: {BackgroundColors.CYAN}{unix_path(str(exception))}{Style.RESET_ALL}")  # Report the concrete input-root failure reason
             logger.write("")  # Keep one blank line after the failed input directory
 
+    update_reports_with_global_corruption_summary(report_summaries)  # Append per-input and global corruption totals to every successfully generated report.
     finish_time = datetime.datetime.now()  # Get the finish time of the program
 
     print(
