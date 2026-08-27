@@ -75,6 +75,7 @@ SCRIPT_DIRECTORY = Path(__file__).resolve().parent  # Resolve the executing file
 REPORTS_DIRECTORY = SCRIPT_DIRECTORY / "Reports"  # Set the script report directory
 SUPPORTED_VIDEO_EXTENSIONS = (".mkv", ".mp4", ".avi", ".mov")  # Define supported video file extensions
 IGNORED_FILENAME_KEYWORDS = ("nacional", "dublado")  # Ignore video filenames containing any of these case-insensitive keywords.
+IGNORE_SINGLE_NON_ENGLISH_AUDIO_TRACK = True  # Ignore report entries when a file has exactly one audio track and that track is confidently non-English.
 LANGUAGES_MAPPING = {  # Map display languages to known metadata aliases
     "English": ["english", "eng", "en", "Inglês"],  # Map English aliases
     "Brazilian Portuguese": ["PT-BR FULL", "brazilian", "portuguese", "COMPLETA PT-BR", "PT-BR COMPLETA", "Português (Brasil)", "pt-br", "pt"],  # Map Brazilian Portuguese aliases
@@ -711,6 +712,9 @@ def generate_report(input_dir: str) -> Path:
             continue  # Continue with the next movie directory.
 
         if default_language == "English":  # Exclude confident English default audio.
+            continue  # Continue with the next movie directory.
+
+        if IGNORE_SINGLE_NON_ENGLISH_AUDIO_TRACK and len(audio_streams) == 1 and default_language not in {"English", "Unknown"}:  # Skip files that only provide one confidently non-English audio option when configured.
             continue  # Continue with the next movie directory.
 
         if default_language == "Unknown":  # Preserve unresolved language metadata separately.
