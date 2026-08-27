@@ -406,48 +406,18 @@ def parse_movie_directory_name(directory_name: str) -> dict[str, str]:
     }  # Close the parsed metadata mapping.
 
 
-def find_movie_file(movie_directory: Path) -> Path | None:
+def discover_movie_files(input_directory: Path) -> list[Path]:
     """
-    Find the single video file stored directly inside one movie directory.
-
-    :param movie_directory: Directory containing one movie and sidecar files.
-    :return: Movie file path when exactly one safe direct candidate exists.
-    """
-
-    video_files = sorted(  # Collect direct video file candidates deterministically.
-        (candidate for candidate in movie_directory.iterdir() if candidate.is_file() and candidate.suffix.casefold() in SUPPORTED_VIDEO_EXTENSIONS),  # Keep only supported video extensions located directly in the movie directory.
-        key=lambda candidate: candidate.name.casefold(),  # Sort video filenames case-insensitively for deterministic selection and warnings.
-    )  # Close the deterministic candidate collection.
-
-    if len(video_files) == 1:  # Detect the unambiguous movie file case.
-        return video_files[0]  # Return the only movie file candidate.
-
-    if len(video_files) > 1:  # Detect ambiguous movie file candidates.
-        print(f"{BackgroundColors.YELLOW}[WARNING] Multiple video files found in {movie_directory}. Skipping directory.{Style.RESET_ALL}")  # Report the deterministic skip.
-        return None  # Skip ambiguous movie directories.
-
-    print(f"{BackgroundColors.YELLOW}[WARNING] No video file found in {movie_directory}. Skipping directory.{Style.RESET_ALL}")  # Report the missing video file.
-    return None  # Skip directories without video files.
-
-
-def discover_movie_directories(input_directory: Path) -> list[Path]:
-    """
-    Discover movie directories by recursively scanning for video files under one input directory.
+    Discover supported video files recursively under one input directory.
 
     :param input_directory: Configured movie-library root directory.
-    :return: Ordered unique parent directories of discovered video files.
+    :return: Ordered video file list.
     """
 
-    movie_directories = {  # Collect each directory that directly contains a discovered video file.
-        video_file.parent  # Keep the parent directory of each supported video file.
-        for video_file in input_directory.rglob("*")  # Recursively scan the configured input directory once.
-        if video_file.is_file() and video_file.suffix.casefold() in SUPPORTED_VIDEO_EXTENSIONS  # Keep only supported video files.
-    }  # Close the recursive parent-directory collection.
-
-    return sorted(  # Return directories deterministically for stable report generation.
-        movie_directories,  # Sort every discovered movie directory.
-        key=lambda candidate: str(candidate.relative_to(input_directory)).casefold() if candidate != input_directory else "",  # Sort by case-insensitive relative path while keeping the root stable when it directly contains a movie file.
-    )  # Close the recursive movie-directory collection.
+    return sorted(  # Return every supported video file discovered below the configured input directory.
+        (candidate for candidate in input_directory.rglob("*") if candidate.is_file() and candidate.suffix.casefold() in SUPPORTED_VIDEO_EXTENSIONS),  # Keep only supported video files discovered recursively.
+        key=lambda candidate: str(candidate.relative_to(input_directory)).casefold(),  # Sort files by case-insensitive relative path for deterministic report generation.
+    )  # Close the recursive video-file collection.
 
 
 def run_ffprobe_metadata(movie_file: Path) -> dict[str, Any]:
@@ -647,31 +617,43 @@ def format_subtitle_track(stream: dict[str, Any]) -> str:
     return " ".join(parts).strip()  # Return formatted internal subtitle text.
 
 
-def find_external_subtitles(movie_directory: Path) -> list[str]:
+def find_external_subtitles(movie_file: Path) -> list[str]:
     """
-    Find external SRT subtitle files in one movie directory.
+    Find external SRT subtitle files associated with one video file.
 
-    :param movie_directory: Directory containing movie sidecar files.
+    :param movie_file: Video file inspected for matching sidecar subtitles.
     :return: Ordered external subtitle track text list.
     """
 
-    subtitle_files = sorted(  # Collect direct external SRT files deterministically.
-        (candidate for candidate in movie_directory.iterdir() if candidate.is_file() and candidate.suffix.casefold() == ".srt"),  # Keep only SRT sidecar files.
+    base_stem = movie_file.stem.casefold()  # Normalize the current video filename stem for sidecar matching.
+    subtitle_files = sorted(  # Collect matching external SRT files deterministically.
+        (
+            candidate
+            for candidate in movie_file.parent.iterdir()
+            if candidate.is_file()
+            and candidate.suffix.casefold() == ".srt"
+            and (
+                candidate.stem.casefold() == base_stem
+                or candidate.stem.casefold().startswith(f"{base_stem}.")
+                or candidate.stem.casefold().startswith(f"{base_stem} ")
+            )
+        ),  # Keep only SRT sidecar files that belong to this specific video file.
         key=lambda candidate: candidate.name.casefold(),  # Sort subtitle filenames case-insensitively.
     )  # Close the external subtitle collection.
 
     return [f"External: {subtitle_file.name}" for subtitle_file in subtitle_files]  # Return formatted external subtitle entries.
 
 
-def build_movie_report_entry(movie_directory: Path, metadata: dict[str, Any]) -> dict[str, Any]:
+def build_movie_report_entry(movie_file: Path, metadata: dict[str, Any]) -> dict[str, Any]:
     """
-    Build one movie report entry from directory and media metadata.
+    Build one movie report entry from one video file and media metadata.
 
-    :param movie_directory: Movie directory path.
+    :param movie_file: Video file path.
     :param metadata: Parsed FFprobe metadata.
     :return: Structured movie report entry.
     """
 
+    movie_directory = movie_file.parent  # Resolve the parent directory used for path-derived metadata.
     parsed_name = parse_movie_directory_name(movie_directory.name)  # Parse movie naming metadata.
     format_metadata = metadata.get("format", {})  # Read container format metadata.
     duration_value = format_metadata.get("duration") if isinstance(format_metadata, dict) else None  # Read duration metadata when available.
@@ -679,12 +661,13 @@ def build_movie_report_entry(movie_directory: Path, metadata: dict[str, Any]) ->
     subtitle_streams = get_streams_by_type(metadata, "subtitle")  # Read internal subtitle stream metadata.
     default_audio_stream = find_default_audio_stream(audio_streams)  # Resolve the default audio stream.
     internal_subtitles = [format_subtitle_track(stream) for stream in subtitle_streams]  # Format internal subtitle streams.
-    external_subtitles = find_external_subtitles(movie_directory)  # Format external SRT subtitles.
+    external_subtitles = find_external_subtitles(movie_file)  # Format external SRT subtitles associated with this video file.
 
     return {  # Return the structured movie entry.
         "MovieName": parsed_name["MovieName"],  # Include parsed movie name.
         "Year": parsed_name["Year"],  # Include parsed movie year.
         "Resolution": parsed_name["Resolution"],  # Include parsed movie resolution.
+        "VideoFile": movie_file.name,  # Include the processed video filename so multi-file directories remain distinguishable.
         "Length": format_duration(duration_value),  # Include HH:MM:SS duration.
         "AudioTracks": [format_audio_track(stream, default_audio_stream) for stream in audio_streams],  # Include every audio track.
         "SubtitleTracks": internal_subtitles + external_subtitles,  # Include internal and external subtitles.
@@ -705,24 +688,19 @@ def generate_report(input_dir: str) -> Path:
     if not input_directory.exists():  # Detect a missing input directory.
         raise FileNotFoundError(f"Input directory not found: {input_directory}")  # Stop execution when the movie root is absent.
 
-    movie_directories = discover_movie_directories(input_directory)  # Collect movie directories recursively so nested movie folders are included.
+    movie_files = discover_movie_files(input_directory)  # Collect video files recursively so every nested media file is processed individually.
     reported_movies = []  # Store movies with non-English default audio.
     unknown_default_audio_language = []  # Store movies with unresolved default audio language.
 
-    for movie_directory in movie_directories:  # Process each movie directory.
-        movie_file = find_movie_file(movie_directory)  # Resolve the movie file path.
-
-        if movie_file is None:  # Detect skipped directories.
-            continue  # Continue with the next movie directory.
-
+    for movie_file in movie_files:  # Process each discovered video file independently.
         try:  # Read metadata for this movie.
             metadata = run_ffprobe_metadata(movie_file)  # Extract FFprobe metadata.
             audio_streams = get_streams_by_type(metadata, "audio")  # Read audio stream metadata.
             default_audio_stream = find_default_audio_stream(audio_streams)  # Resolve default audio stream metadata.
             default_language = identify_language(default_audio_stream) if default_audio_stream is not None else "Unknown"  # Identify default audio language.
-            movie_entry = build_movie_report_entry(movie_directory, metadata)  # Build the movie report entry.
+            movie_entry = build_movie_report_entry(movie_file, metadata)  # Build the movie report entry.
         except Exception as error:  # Preserve processing failures without aborting the full report.
-            print(f"{BackgroundColors.RED}[WARNING] Failed to process {movie_directory}: {error}{Style.RESET_ALL}")  # Report the failed movie directory.
+            print(f"{BackgroundColors.RED}[WARNING] Failed to process {movie_file}: {error}{Style.RESET_ALL}")  # Report the failed video file.
             continue  # Continue with the next movie directory.
 
         if default_language == "English":  # Exclude confident English default audio.
