@@ -723,7 +723,7 @@ def generate_report(input_dir: str) -> Path:
     unknown_default_audio_language.sort(key=lambda movie: str(movie["MovieName"]).casefold())  # Sort unknown-language movies by name.
     report_data = {  # Build the structured report payload for the current input directory
         "InputDir": str(input_directory),  # Record the processed input directory represented by this report
-        "Movies": reported_movies,  # Store movies whose default audio is confidently non-English
+        f"Movies ({len(reported_movies)})": reported_movies,  # Store movies whose default audio is confidently non-English and expose the count in the JSON section name
         "UnknownDefaultAudioLanguage": unknown_default_audio_language,  # Store movies whose default audio language could not be resolved
     }  # Close the structured report payload
     REPORTS_DIRECTORY.mkdir(parents=True, exist_ok=True)  # Create the script Reports directory when needed.
