@@ -50,6 +50,16 @@ run: dependencies
 	$(CLEAR_CMD)
 	$(call RUN_AND_LOG, ./main.py)
 
+correct_metadata: dependencies
+	$(ENSURE_LOG_DIR)
+	$(CLEAR_CMD)
+	$(call RUN_AND_LOG, ./correct_report_track_metadata.py $(REPORTS))
+
+correct_metadata_apply: dependencies
+	$(ENSURE_LOG_DIR)
+	$(CLEAR_CMD)
+	$(call RUN_AND_LOG, ./correct_report_track_metadata.py --apply $(REPORTS))
+
 # Create virtual environment if missing
 $(VENV):
 	@echo "Creating virtual environment..."
@@ -70,4 +80,4 @@ clean:
 	find . -type f -name '*.pyc' -delete || del /S /Q *.pyc 2>nul
 	find . -type d -name '__pycache__' -delete || rmdir /S /Q __pycache__ 2>nul
 
-.PHONY: all run clean dependencies generate_requirements
+.PHONY: all run correct_metadata correct_metadata_apply clean dependencies generate_requirements
