@@ -388,6 +388,17 @@ def build_report_path(input_dir: str) -> Path:
     return REPORTS_DIRECTORY / f"{build_report_prefix(input_dir)}-non_english_default_audio_movies.json"  # Return the per-input report path
 
 
+def to_unix_path(path_value: str | Path) -> str:
+    """
+    Convert one filesystem path to a forward-slash string.
+
+    :param path_value: Path-like value converted for JSON output.
+    :return: Path string using only forward slashes.
+    """
+
+    return str(path_value).replace("\\", "/")  # Normalize Windows separators for report output.
+
+
 def parse_movie_directory_name(directory_name: str) -> dict[str, str]:
     """
     Parse movie name, year, and resolution from one directory name.
@@ -676,6 +687,7 @@ def build_movie_report_entry(movie_file: Path, metadata: dict[str, Any]) -> dict
         "Year": parsed_name["Year"],  # Include parsed movie year.
         "Resolution": parsed_name["Resolution"],  # Include parsed movie resolution.
         "VideoFile": movie_file.name,  # Include the processed video filename so multi-file directories remain distinguishable.
+        "FullPath": to_unix_path(movie_file),  # Include the full normalized video path immediately after the filename.
         "Length": format_duration(duration_value),  # Include HH:MM:SS duration.
         "AudioTracks": [format_audio_track(stream, default_audio_stream) for stream in audio_streams],  # Include every audio track.
         "SubtitleTracks": internal_subtitles + external_subtitles,  # Include internal and external subtitles.
@@ -726,12 +738,12 @@ def generate_report(input_dir: str) -> Path:
     reported_movies.sort(key=lambda movie: str(movie["MovieName"]).casefold())  # Sort reported movies by name.
     unknown_default_audio_language.sort(key=lambda movie: str(movie["MovieName"]).casefold())  # Sort unknown-language movies by name.
     report_data = {  # Build the structured report payload for the current input directory
-        "InputDir": str(input_directory),  # Record the processed input directory represented by this report
+        "InputDir": to_unix_path(input_directory),  # Record the processed input directory represented by this report using normalized separators
         f"Movies ({len(reported_movies)})": reported_movies,  # Store movies whose default audio is confidently non-English and expose the count in the JSON section name
         "UnknownDefaultAudioLanguage": unknown_default_audio_language,  # Store movies whose default audio language could not be resolved
     }  # Close the structured report payload
     REPORTS_DIRECTORY.mkdir(parents=True, exist_ok=True)  # Create the script Reports directory when needed.
-    report_file = build_report_path(str(input_directory))  # Build the current input directory report path
+    report_file = build_report_path(to_unix_path(input_directory))  # Build the current input directory report path
     report_file.write_text(json.dumps(report_data, indent=4, ensure_ascii=False) + "\n", encoding="utf-8")  # Write human-readable JSON.
 
     return report_file  # Return the written report path.
