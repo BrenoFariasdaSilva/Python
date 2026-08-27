@@ -30,6 +30,7 @@ import unicodedata  # Normalize accents for language matching.
 from typing import Any, TextIO  # Type dynamic JSON and lock streams.
 
 from colorama import Style  # Reuse target project terminal reset behavior.
+from tqdm import tqdm  # Render colored progress bars for file processing.
 
 
 class BackgroundColors:  # Store terminal color escape constants.
@@ -184,6 +185,7 @@ class ReportSubtitleTrack:  # Store intended report subtitle metadata.
 @dataclass(frozen=True)  # Generate immutable movie report record methods.
 class MovieReportEntry:  # Store one movie entry from one report.
     report_path: Path  # Store source report path.
+    input_dir: Path  # Store report input root for relative progress text.
     full_path: Path  # Store media path from report.
     audio_tracks: list[ReportAudioTrack]  # Store intended audio rows.
     subtitle_tracks: list[ReportSubtitleTrack]  # Store intended subtitle rows.
@@ -885,6 +887,8 @@ def collect_report_entries(report_paths: list[Path], summary: WorkflowSummary) -
     entries: list[MovieReportEntry] = []  # Store parsed entries.
     for report_path in report_paths:  # Iterate requested reports.
         report_data = load_report(report_path)  # Load report JSON.
+        input_dir_value = report_data.get("InputDir")  # Read report input root.
+        input_dir = Path(input_dir_value) if isinstance(input_dir_value, str) and input_dir_value.strip() != "" else report_path.parent  # Resolve progress-relative root.
         summary.reports += 1  # Count loaded report.
         for movie_list in collect_movie_lists(report_data):  # Iterate movie sections.
             for raw_entry in movie_list:  # Iterate raw movie entries.
@@ -897,8 +901,31 @@ def collect_report_entries(report_paths: list[Path], summary: WorkflowSummary) -
                 subtitle_values = raw_entry.get("SubtitleTracks") if isinstance(raw_entry.get("SubtitleTracks"), list) else []  # Read subtitle rows.
                 audio_tracks = [parse_audio_report_track(value, index) for index, value in enumerate(audio_values)]  # Parse audio rows by report order.
                 subtitle_tracks = [parse_subtitle_report_track(value, index) for index, value in enumerate(subtitle_values)]  # Parse subtitle rows by report order.
-                entries.append(MovieReportEntry(report_path, Path(full_path_value), audio_tracks, subtitle_tracks))  # Store parsed movie entry.
+                entries.append(MovieReportEntry(report_path, input_dir, Path(full_path_value), audio_tracks, subtitle_tracks))  # Store parsed movie entry.
     return entries  # Return parsed entries.
+
+
+def build_progress_media_path(movie: MovieReportEntry) -> str:
+    """
+    Build a compact progress label for one media file.
+
+    :param movie: Parsed movie report entry.
+    :return: Relative media path text.
+    """
+
+    try:  # Resolve path relative to the report input root.
+        relative_path = movie.full_path.relative_to(movie.input_dir)  # Build report-root relative path.
+        return str(relative_path)  # Return compact report-relative path.
+    except ValueError:  # Handle files outside the report input root.
+        pass  # Continue to current-directory fallback.
+
+    try:  # Resolve path relative to the current working directory.
+        relative_path = movie.full_path.relative_to(Path.cwd())  # Build cwd-relative path.
+        return str(relative_path)  # Return compact cwd-relative path.
+    except ValueError:  # Handle files outside the current working directory.
+        pass  # Continue to absolute fallback.
+
+    return str(movie.full_path)  # Return absolute path when no relative base applies.
 
 
 def build_track_selector(track_type: str, position: int, track_uid: int | None) -> str:
@@ -1535,7 +1562,9 @@ def run_corrector_cli(arguments: list[str] | None = None) -> int:
         print(f"{BackgroundColors.RED}{error}{Style.RESET_ALL}")  # Print report error.
         return 1  # Return failure status.
 
-    for movie in movies:  # Iterate parsed movie entries.
+    progress_bar = tqdm(movies, desc=f"{BackgroundColors.CYAN}Processing media{Style.RESET_ALL}", unit="file", colour="cyan", dynamic_ncols=True)  # Create colored media progress bar.
+    for movie in progress_bar:  # Iterate parsed movie entries with progress.
+        progress_bar.set_postfix_str(build_progress_media_path(movie), refresh=True)  # Show current relative media path inline.
         summary.files += 1  # Count processed report entry.
         if parsed_args.apply:  # Use locked apply workflow for mutations.
             process_movie_with_lock(movie, summary)  # Process one movie under media lock.
