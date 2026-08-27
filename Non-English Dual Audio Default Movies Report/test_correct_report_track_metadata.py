@@ -1,7 +1,7 @@
 import unittest  # Load standard-library regression framework.
 from pathlib import Path  # Build inert media paths for planning tests.
 
-from correct_report_track_metadata import MovieReportEntry, StreamSnapshot, parse_audio_report_track, parse_subtitle_report_track, plan_audio_metadata_edits, plan_subtitle_metadata_edits, normalize_language_value, select_default_audio_track, WorkflowSummary  # Import tested workflow pieces.
+from correct_report_track_metadata import MovieReportEntry, StreamSnapshot, build_progress_media_path, parse_audio_report_track, parse_subtitle_report_track, plan_audio_metadata_edits, plan_subtitle_metadata_edits, normalize_language_value, select_default_audio_track, WorkflowSummary  # Import tested workflow pieces.
 
 
 class CorrectReportTrackMetadataTests(unittest.TestCase):  # Group report metadata correction regressions.
@@ -51,7 +51,7 @@ class CorrectReportTrackMetadataTests(unittest.TestCase):  # Group report metada
         self.assertIsNone(select_default_audio_track(tracks)[0])  # Assert no default target selected.
 
     def test_unresolved_existing_default_is_cleared_when_target_is_known(self) -> None:  # Cover two-default prevention.
-        movie = MovieReportEntry(Path("report.json"), Path("movie.mkv"), [parse_audio_report_track("English (eng)", 0), parse_audio_report_track("Unknown (Default)", 1)], [])  # Build report entry.
+        movie = MovieReportEntry(Path("report.json"), Path("."), Path("movie.mkv"), [parse_audio_report_track("English (eng)", 0), parse_audio_report_track("Unknown (Default)", 1)], [])  # Build report entry.
         streams = [StreamSnapshot(0, 0, 10, "aac", "audio", "eng", "en", "", False, False), StreamSnapshot(1, 1, 11, "aac", "audio", "", "", "", True, False)]  # Build current streams.
         summary = WorkflowSummary()  # Build summary.
         edits, default_position = plan_audio_metadata_edits(movie, streams, summary)  # Plan audio edits.
@@ -82,7 +82,7 @@ class CorrectReportTrackMetadataTests(unittest.TestCase):  # Group report metada
         self.assertEqual(track.target_name, "Full French")  # Assert canonical Full French title.
 
     def test_forced_subtitle_flag_sets_forced_name_when_report_type_missing(self) -> None:  # Cover actual forced metadata fallback.
-        movie = MovieReportEntry(Path("report.json"), Path("movie.mkv"), [], [parse_subtitle_report_track("Internal: eng (subrip)", 0)])  # Build subtitle-only report entry.
+        movie = MovieReportEntry(Path("report.json"), Path("."), Path("movie.mkv"), [], [parse_subtitle_report_track("Internal: eng (subrip)", 0)])  # Build subtitle-only report entry.
         streams = [StreamSnapshot(0, 2, 12, "subrip", "subtitle", "eng", "en", "English", False, True)]  # Build forced current subtitle.
         summary = WorkflowSummary()  # Build summary.
         edits = plan_subtitle_metadata_edits(movie, streams, summary)  # Plan subtitle metadata edits.
@@ -91,6 +91,10 @@ class CorrectReportTrackMetadataTests(unittest.TestCase):  # Group report metada
     def test_external_subtitle_is_not_internal(self) -> None:  # Cover external subtitle skip.
         track = parse_subtitle_report_track("External: Movie Name.srt", 0)  # Parse external subtitle row.
         self.assertFalse(track.internal)  # Assert row is not container target.
+
+    def test_progress_path_uses_report_input_root(self) -> None:  # Cover relative progress label.
+        movie = MovieReportEntry(Path("report.json"), Path("F:/Movies"), Path("F:/Movies/Dual/Movie/Movie.mkv"), [], [])  # Build report-rooted movie entry.
+        self.assertEqual(build_progress_media_path(movie), "Dual\\Movie\\Movie.mkv")  # Assert progress label is report-relative.
 
 
 if __name__ == "__main__":  # Run tests when executed directly.
