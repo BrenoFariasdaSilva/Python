@@ -1,9 +1,11 @@
 import atexit  # For playing a sound when the program finishes
 import os  # For running a command in the terminal
 import platform  # For getting the operating system name
-import pyheif  # For reading HEIC files
 from colorama import Style  # For coloring the terminal
 from PIL import Image  # For reading and writing images
+from pillow_heif import register_heif_opener  # For adding HEIC/HEIF support to Pillow
+
+register_heif_opener()  # Register HEIC/HEIF support with Pillow
 
 
 # Macros:
@@ -269,19 +271,8 @@ def convert_photos_to_specified_format(
                 input_path = os.path.join(root, filename)  # Get the full path of the input file
 
                 try:  # Try to open and process the image
-                    if filename.lower().endswith(".heic"):  # Only HEIC needs pyheif
-                        heif_file = pyheif.read(input_path)  # Read the HEIC file
-                        image = Image.frombytes(  # Create an image from the HEIC file
-                            heif_file.mode,
-                            heif_file.size,
-                            heif_file.data,
-                            "raw",
-                            heif_file.mode,
-                            heif_file.stride,
-                        )
-                    else:
-                        image = Image.open(input_path)  # For other formats, use PIL directly
-                        image = image.convert("RGB")  # Ensure consistent mode
+                    image = Image.open(input_path)  # Open supported image formats, including HEIC via pillow-heif
+                    image = image.convert("RGB")  # Ensure consistent mode
 
                     if SAME_PLACE_CONVERSION:  # If the conversion should happen in the same place
                         output_name = f"{os.path.splitext(input_path)[0]}{OUTPUT_FILE_SUFFIX}{output_extension.lower()}"  # Save in the same folder with suffix
