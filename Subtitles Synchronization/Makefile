@@ -6,12 +6,14 @@ OS := $(shell uname 2>/dev/null || echo Windows)
 ifeq ($(OS), Windows)
 	PYTHON := $(VENV)/Scripts/python.exe
 	PIP := $(VENV)/Scripts/pip.exe
+	ACTIVATE := call $(VENV)\Scripts\activate
 	PYTHON_CMD := python
 	CLEAR_CMD := cls
 	TIME_CMD :=
 else
 	PYTHON := $(VENV)/bin/python3
 	PIP := $(VENV)/bin/pip
+	ACTIVATE := . $(VENV)/bin/activate
 	PYTHON_CMD := python3
 	CLEAR_CMD := clear
 	TIME_CMD := time
@@ -28,6 +30,7 @@ run: $(VENV)
 # Setup Virtual Environment and Install Dependencies
 $(VENV):
 	$(PYTHON_CMD) -m venv $(VENV)
+	$(ACTIVATE) && python -m pip install ffsubsync
 	$(PIP) install -r requirements.txt
 
 # Install the project dependencies
