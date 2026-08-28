@@ -414,7 +414,7 @@ def delete_foto_directories(path: str) -> None:
     :return: None.
     """
 
-    target_names = {"foto", "fotos"}  # Define target directory names for deletion
+    target_names = {"foto", "fotos", "screen", "screens"}  # Define target directory names for deletion
 
     try:  # Protect first-level entry listing
         entries = os.listdir(path)  # Read first-level entries from current directory
