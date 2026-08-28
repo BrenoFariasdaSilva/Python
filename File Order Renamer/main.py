@@ -18,7 +18,7 @@ class BackgroundColors:  # Colors for the terminal
 
 # Execution Constants:
 VERBOSE = False  # Set to True to output verbose messages
-INPUT_DIRECTORIES = ["G:/Series/Breaking Bad/"]  # The input directories to process files from
+INPUT_DIRECTORIES = ["./Input/"]  # The input directories to process files from
 
 # Ignored Files and Directories:
 IGNORED_FILES = {"Makefile", "main.py", "requirements.txt"}  # Files to be ignored
