@@ -28,11 +28,11 @@ $(VENV)/bin/activate:
 	$(PYTHON) -m pip install --upgrade pip
 	touch $(VENV)/bin/activate
 
-run:
+run: dependencies
 	$(CLEAR_CMD)
 	$(TIME_CMD) $(PYTHON_CMD) ./accountGames.py
 
-filter:
+filter: dependencies
 	$(CLEAR_CMD)
 	$(TIME_CMD) $(PYTHON_CMD) ./gamesPlaytimeFilter.py
 
