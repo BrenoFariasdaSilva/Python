@@ -1,9 +1,8 @@
 # Variables
 VENV := venv
-OS := $(shell uname 2>/dev/null || echo Windows)
 
 # Detect correct Python and Pip commands based on OS
-ifeq ($(OS), Windows)
+ifeq ($(OS),Windows_NT)
 	PYTHON := $(VENV)/Scripts/python.exe
 	PIP := $(VENV)/Scripts/pip.exe
 	PYTHON_CMD := python
@@ -21,17 +20,17 @@ endif
 all: run
 
 # Main Scripts:
-run: $(VENV)
+run: $(VENV) dependencies
 	$(CLEAR_CMD)
 	$(TIME_CMD) $(PYTHON) ./main.py
 
 # Setup Virtual Environment and Install Dependencies
 $(VENV):
 	$(PYTHON_CMD) -m venv $(VENV)
-	$(PIP) install -r requirements.txt
 
 # Install the project dependencies
 dependencies: $(VENV)
+	$(PIP) install -r requirements.txt
 
 # Generate requirements.txt from the current venv
 generate_requirements: $(VENV)
