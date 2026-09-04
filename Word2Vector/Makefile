@@ -26,7 +26,7 @@ $(VENV)/bin/activate:
 	$(PYTHON) -m pip install --upgrade pip
 	touch $(VENV)/bin/activate
 
-run:
+run: dependencies
 	$(CLEAR_CMD)
 	$(PYTHON_CMD) ./word2vec.py
 
