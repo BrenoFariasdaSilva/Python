@@ -21,7 +21,7 @@ endif
 all: run
 
 # Main Scripts:
-run: $(VENV)
+run: dependencies
 	$(TIME_CMD) $(PYTHON) ./spotify_songs.py
 	$(TIME_CMD) $(PYTHON) ./local_songs.py
 	# $(TIME_CMD) $(PYTHON) ./main.py
@@ -33,7 +33,7 @@ $(VENV):
 
 # Install the project dependencies
 dependencies: $(VENV)
-
+	$(PIP) install -r requirements.txt
 # Generate requirements.txt from the current venv
 generate_requirements: $(VENV)
 	$(PIP) freeze > requirements.txt
