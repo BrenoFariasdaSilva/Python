@@ -20,7 +20,7 @@ endif
 all: run
 
 # Main Scripts:
-run: $(VENV) dependencies
+run: dependencies
 	$(CLEAR_CMD)
 	$(TIME_CMD) $(PYTHON) ./main.py
 
