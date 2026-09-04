@@ -38,7 +38,7 @@ $(VENV):
 
 # Install the project dependencies
 dependencies: $(VENV)
-
+	$(PIP) install -r requirements.txt
 # Generate requirements.txt from the current venv
 generate_requirements: $(VENV)
 	$(PIP) freeze > requirements.txt
