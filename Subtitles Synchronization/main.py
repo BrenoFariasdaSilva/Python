@@ -143,37 +143,72 @@ def install_ffsubsync():
         sys.exit(1)  # Exit the program with an error code
 
 
+def get_python_scripts_directory():
+    """
+    Gets the Scripts/bin directory for the Python executable currently running this program.
+
+    :param: None
+    :return: Path to the current Python executable scripts directory.
+    """
+
+    executable_directory = os.path.dirname(os.path.abspath(sys.executable))  # Resolve the current Python executable directory
+
+    return executable_directory  # Return the active environment scripts directory
+
+
+def get_ffsubsync_command():
+    """
+    Resolves a command that can run ffsubsync from PATH, the active Python environment, or python -m.
+
+    :param: None
+    :return: Command list that runs ffsubsync, or None when unavailable.
+    """
+
+    path = shutil.which("ffsubsync")  # Verify if ffsubsync is in PATH
+    if path:  # If found in PATH
+        return [path]  # Return executable command
+
+    scripts_directory = get_python_scripts_directory()  # Resolve the current Python environment scripts directory
+    executable_names = ["ffsubsync.exe", "ffsubsync"] if platform.system() == "Windows" else ["ffsubsync"]  # Candidate executable names
+
+    for executable_name in executable_names:  # Check every platform-specific executable filename
+        candidate_path = os.path.join(scripts_directory, executable_name)  # Build candidate path inside active environment
+        if os.path.exists(candidate_path):  # If the active environment executable exists
+            return [candidate_path]  # Return executable command
+
+    try:  # Verify that ffsubsync can run as a Python module in the active environment
+        subprocess.run([sys.executable, "-m", "ffsubsync", "--version"], check=True, capture_output=True, text=True)  # Probe module execution
+        return [sys.executable, "-m", "ffsubsync"]  # Return module command
+    except subprocess.CalledProcessError:  # Module exists but version command failed
+        return [sys.executable, "-m", "ffsubsync"]  # Return module command because import resolution succeeded far enough to execute
+    except Exception:  # Module execution is unavailable
+        return None  # Signal missing ffsubsync
+
+
 def verify_ffsubsync_installed():
     """
     Verifies that 'ffsubsync' is installed and accessible.
     If missing, installs ffmpeg and ffsubsync.
 
-    Uses shutil.which to detect the executable.
+    Uses PATH, the active Python environment, and python -m to detect ffsubsync.
     """
 
     verbose_output(f"{BackgroundColors.GREEN}Verifying ffsubsync installation...{Style.RESET_ALL}")
 
-    ffsubsync_path = shutil.which("ffsubsync")  # Verify if ffsubsync is in PATH
-    if ffsubsync_path is None:  # If ffsubsync is not found
+    ffsubsync_command = get_ffsubsync_command()  # Verify if ffsubsync is accessible
+    if ffsubsync_command is None:  # If ffsubsync is not found
         install_ffmpeg()  # Ensure ffmpeg is installed
         install_ffsubsync()  # Install ffsubsync
 
-        ffsubsync_path = shutil.which("ffsubsync")  # Verify again if ffsubsync is in PATH
-        if ffsubsync_path is None:  # If still not found
-            possible_path = os.path.expanduser(
-                r"~\AppData\Roaming\Python\Python312\Scripts\ffsubsync.exe"
-            )  # Possible path on Windows
-            if os.path.exists(possible_path):  # If the possible path exists
-                ffsubsync_path = possible_path  # Set ffsubsync_path to the possible path
-
-        if ffsubsync_path is None:  # If ffsubsync is still not found
+        ffsubsync_command = get_ffsubsync_command()  # Verify again if ffsubsync is accessible
+        if ffsubsync_command is None:  # If ffsubsync is still not found
             print(f"{BackgroundColors.RED}ffsubsync is still not accessible. Exiting.{Style.RESET_ALL}")
             sys.exit(1)  # Exit the program with an error code
 
-        verbose_output(
-            f"{BackgroundColors.GREEN}ffsubsync is installed and accessible at: {BackgroundColors.CYAN}{ffsubsync_path}{Style.RESET_ALL}"
-        )
-        return ffsubsync_path  # Return the path to ffsubsync
+    verbose_output(
+        f"{BackgroundColors.GREEN}ffsubsync is installed and accessible with: {BackgroundColors.CYAN}{' '.join(ffsubsync_command)}{Style.RESET_ALL}"
+    )
+    return ffsubsync_command  # Return the command to run ffsubsync
 
 
 def resolve_entry_with_trailing_space(current_path: str, entry: str, stripped_part: str) -> str:
@@ -413,26 +448,18 @@ def get_srt_file(base_name):
 def find_ffsubsync():
     """
     Finds the ffsubsync executable.
-    Returns the absolute path if found, otherwise None.
+    Returns the command if found, otherwise None.
     """
 
-    path = shutil.which("ffsubsync")  # Verify if ffsubsync is in PATH
-    if path:  # If found in PATH
-        return path  # Return the path
-
-    possible_path = os.path.expanduser(
-        r"~\AppData\Roaming\Python\Python312\Scripts\ffsubsync.exe"
-    )  # Possible path on Windows
-    if os.path.exists(possible_path):  # If the possible path exists
-        return possible_path  # Return the possible path
+    command = get_ffsubsync_command()  # Resolve ffsubsync command from PATH or the active Python environment
+    if command:  # If found
+        return command  # Return the command
 
     print(
         f"{BackgroundColors.RED}⚠️ Could not find ffsubsync executable.{Style.RESET_ALL}\n"
         f"Please install it via pip if not installed:\n"
         f"    python -m pip install ffsubsync\n\n"
-        f"Or add it to your PATH so it can be found by this program. On Windows, you can run:\n"
-        f'    setx PATH "%PATH%;{possible_path}"\n\n'
-        f"After that, restart your terminal or IDE and run the program again."
+        f"Or run the program with the Python executable from the virtual environment."
     )
 
     return None
@@ -457,13 +484,12 @@ def sync_subtitle(video_file, srt_file):
         os.path.splitext(srt_file_abs)[0] + "-synced.srt"
     )  # Get the absolute path of the synced subtitle file
 
-    ffsubsync_path = find_ffsubsync()  # Find the ffsubsync executable
-    if not ffsubsync_path:  # If ffsubsync is not found
+    ffsubsync_command = find_ffsubsync()  # Find the ffsubsync command
+    if not ffsubsync_command:  # If ffsubsync is not found
         print(f"{BackgroundColors.RED}Skipping subtitle synchronization for {srt_file}{Style.RESET_ALL}")
         return
 
-    command = [
-        ffsubsync_path,
+    command = ffsubsync_command + [
         video_file_abs,
         "-i",
         srt_file_abs,
