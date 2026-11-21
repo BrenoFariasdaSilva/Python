@@ -545,7 +545,7 @@ def parse_console_sections(lines: list, filepath: str) -> list:
             "-- Owned:",
             "-- Total:",
             "-- Icons:",
-            "-- Icons Distributions:",
+            "-- Icon Distributions:",
             "-- DVD Cover Dimensions:",
         ]
 
@@ -557,18 +557,18 @@ def parse_console_sections(lines: list, filepath: str) -> list:
             if any(stripped.startswith(title) for title in header_titles):
                 continue  # Skip header block lines
 
-            # Skip the special case where the section is exactly '-- Icons Distributions:'
-            if stripped == "-- Icons Distributions:":
+            # Skip the special case where the section is exactly '-- Icon Distributions:'
+            if stripped == "-- Icon Distributions:":
                 continue
 
             if stripped in FIXED_METADATA_BLOCK_STRIPPED:  # Skip fixed metadata lines that must not be parsed as consoles or games
                 continue  # Skip fixed metadata block line
 
             if stripped.startswith("-- ") and ":" in stripped:  # Detect console section header line
-                # Prevent adding a section for '-- Icons Distributions:'
+                # Prevent adding a section for '-- Icon Distributions:'
                 header_body = stripped[3:].strip()
                 console_name = header_body.split(":")[0].strip()
-                if console_name in ("Icons Distributions", "DVD Cover Dimensions"):
+                if console_name in ("Icon Distributions", "DVD Cover Dimensions"):
                     continue
                 if current_console is not None:  # Flush previous console section before starting new one
                     sections.append({"name": current_console, "games": current_games})  # Append completed section
@@ -697,7 +697,7 @@ def format_txt_output(sections: list) -> str:
         output_lines.append(f"- Owned: {total_owned} ({owned_breakdown}).")
         output_lines.append(f"- Total: {total_games} ({total_breakdown}).")
         output_lines.append("")  # Insert blank line between total counters and icon distribution block
-        output_lines.append(f"-- Icons Distributions:")
+        output_lines.append(f"-- Icon Distributions:")
         output_lines.append(f"- Owned - {ICON_OWNED}: {total_owned_icon}.")
         cleaning_breakdown = build_icon_platform_breakdown(sorted_sections, ICON_NEEDS_CLEANING)  # Build platform breakdown for cleaning icon
         damaged_breakdown = build_icon_platform_breakdown(sorted_sections, ICON_DAMAGED)  # Build platform breakdown for damaged cover icon
